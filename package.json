@@ -1,16 +1,40 @@
 {
   "name": "limitcast",
-  "version": "0.9.2",
+  "version": "0.10.0",
   "description": "Stretch your Claude Code plan: measure what every session loads before you type, cut what you never use, and stop runaway subagents before they burn your window.",
   "type": "module",
-  "bin": { "limitcast": "bin/limitcast.mjs" },
-  "files": ["bin", "src"],
-  "engines": { "node": ">=20" },
-  "os": ["darwin", "linux"],
-  "scripts": { "test": "node --test" },
-  "keywords": ["claude-code", "codex", "rate-limit", "usage-limit", "tokens", "hooks", "status-line", "ai-agents"],
+  "bin": {
+    "limitcast": "bin/limitcast.mjs"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [
+    "claude-code",
+    "codex",
+    "rate-limit",
+    "usage-limit",
+    "tokens",
+    "hooks",
+    "status-line",
+    "ai-agents"
+  ],
   "homepage": "https://limitcast.dev",
-  "repository": { "type": "git", "url": "git+https://github.com/SamStull9007/limitcast.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SamStull9007/limitcast.git"
+  },
   "author": "Sam Stull",
   "license": "Elastic-2.0"
 }

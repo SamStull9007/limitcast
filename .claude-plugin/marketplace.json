@@ -1,0 +1,12 @@
+{
+  "name": "limitcast",
+  "owner": { "name": "Sam Stull", "url": "https://limitcast.dev" },
+  "description": "limitcast: usage-limit forecasts, trim and subagent guard for Claude Code",
+  "plugins": [
+    {
+      "name": "limitcast",
+      "source": "./plugin",
+      "description": "Usage-limit status, results and trim for Claude Code"
+    }
+  ]
+}

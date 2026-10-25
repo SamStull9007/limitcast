@@ -43,8 +43,9 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
   limitcast install [--guard]        wire limitcast into Claude Code (and, with --guard, Codex); backs up settings
                                      (without Pro the guard is a preview: it records what it would block, never blocks)
   limitcast uninstall                remove it and restore your original status line
-  limitcast doctor                   check the setup
-  limitcast status [--json]          used, burn rate, runout time, reset, and today's share of each weekly window
+  limitcast doctor [--fix]           check the setup (--fix: re-install with this Node, e.g. after a Node upgrade)
+  limitcast trial                    Pro free for 7 days on this computer, no card
+  limitcast status [--json]         used, burn rate, runout time, reset, and today's share of each weekly window
   limitcast trim [--share]           tokens every session loads before you type, and how much you never use
   limitcast trim --codex             the same for Codex: AGENTS.md size and MCP servers you haven't used
   limitcast results [--days N]       limits you reached, how far ahead limitcast warned, what the guard blocked

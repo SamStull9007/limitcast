@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.0
+
+Robustness:
+- Hooks go through a small launcher in the state dir (`limitcast-hook.sh`) that survives Node upgrades: if the Node or limitcast it points at moved, it runs `limitcast` from PATH, and if that's gone too, your status line still shows and every hook allows. `limitcast doctor --fix` re-installs with the current Node. (Codex asks you to approve the guard again after a re-install.)
+- Daily background health check (the doctor checks): a problem shows `⚠ run limitcast doctor` in the status line, and a notification if they're on.
+- `trim --apply` cuts that a running Claude Code session wrote over (all at once) are put back at the next session start. Ones you turn back on yourself are left alone.
+- Parsed transcripts are cached: `trim`, `report` and the dashboard read only new or changed ones (41 s → 1 s on a heavy setup).
+
+Value and conversion:
+- `results` shows what a smaller starting context was worth against your 5-hour limit, calibrated from your own readings: how many new tokens and how many cached tokens move your meter by 1%.
+- `limitcast trial`: Pro for 7 days on this computer, no card.
+- Free installs see one line a week in the status line with what Pro would have done (subagents stopped, moved to Sonnet), when there's something to show.
+- `install` shows your starting context right away and what `results` will show in a week.
+- Team plan: $69 per seat per year (3 seats minimum), each person gets their own key.
+- Claude Code plugin marketplace in this repo (`/limitcast:status`, `/limitcast:results`, `/limitcast:trim`) and a Homebrew tap.
+
 ## 0.9.2
 
 - macOS notifications come from limitcast's own notifier app (`dev.limitcast.notifier`, no Dock icon, built and ad-hoc signed by `limitcast notify on` with the tools macOS ships), so "limitcast" is listed in System Settings → Notifications and can be allowed there. Before, they came from osascript, attributed to Script Editor, which may not be listed at all. `notify on` also sends a first test notification.

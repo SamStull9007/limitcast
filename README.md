@@ -32,12 +32,14 @@ Requires Node 20+ on macOS or Linux.
 ## Install
 
 ```sh
-npm install -g limitcast
+npm install -g limitcast     # or: brew install samstull9007/limitcast/limitcast
 limitcast install            # free: status-line recorder
-limitcast activate <key>     # Pro
+limitcast trial              # Pro free for 7 days, no card (or: limitcast activate <key>)
 limitcast install --guard    # also the subagent guard (free: preview only)
 limitcast doctor
 ```
+
+In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast:results` and `/limitcast:trim`: `/plugin marketplace add SamStull9007/limitcast`, then `/plugin install limitcast@limitcast`. The status-line recorder still comes from `limitcast install`.
 
 `install` backs up `~/.claude/settings.json` and wraps your existing status line (it looks exactly the same). `--guard` adds the subagent guard (without Pro it only records what it would block). Restart Claude Code to load it. `limitcast uninstall` puts everything back.
 
@@ -55,7 +57,8 @@ limitcast doctor
 | `limitcast after-reset [--src claude/codex] [--window 5h/7d] [--detach] -- <cmd>` | **Pro.** Wait for the window to reset, then run the command |
 | `limitcast results --html [--out FILE]` | **Pro.** Results, current windows and the burn report on one page, opened in your browser |
 | `limitcast install [--guard] [--alerts]` / `uninstall` | Wire into Claude Code / restore your settings |
-| `limitcast doctor` | Check the setup, data freshness, license, and that Claude Code, Codex and Grok logs are still in a format limitcast reads |
+| `limitcast doctor [--fix]` | Check the setup, data freshness, license, and that Claude Code, Codex and Grok logs are still in a format limitcast reads. Also runs daily in the background and flags problems in the status line. `--fix` re-installs with the current Node (after a Node upgrade) |
+| `limitcast trial` | Pro free for 7 days on this computer, no card, once |
 | `limitcast report [--days N] [--out FILE]` | **Pro.** Tokens by tool, day, project, model and session; subagent share |
 | `limitcast trim [--days N] [--share]` | Measured starting context of your latest session and how much you haven't used in N days (default 7). **Pro** names each item. `--share`: totals only, no names, safe to post |
 | `limitcast saved` | **Pro.** How much the part of your starting context you control has dropped since limitcast first measured it, times your sessions since |
@@ -76,7 +79,7 @@ Each limit reading is saved to `~/.local/state/limitcast/samples.jsonl` when it 
 
 ## Pricing
 
-Free: runout forecast with NEAR warnings and the daily allowance, status-line readout, your starting-context total with how much you never use (Claude Code and Codex), `results`, and a preview of the guard. Pro ($79/year or $9/month, 14 days free): names what to cut and cuts it (`trim --apply`, also for Codex), a subagent guard that blocks and switches to Sonnet, burn report, alerts, a weekly summary, notifications, after-reset jobs, account headroom, the `/compact` nudge and the HTML dashboard. Cancel anytime; 14-day refund on any charge: email support@limitcast.dev. See https://limitcast.dev.
+Free: runout forecast with NEAR warnings and the daily allowance, status-line readout, your starting-context total with how much you never use (Claude Code and Codex), `results`, and a preview of the guard. Pro ($79/year or $9/month, 14 days free; or `limitcast trial` for 7 days, no card; Team $69/seat/year, 3 seats minimum): names what to cut and cuts it (`trim --apply`, also for Codex), a subagent guard that blocks and switches to Sonnet, burn report, alerts, a weekly summary, notifications, after-reset jobs, account headroom, the `/compact` nudge and the HTML dashboard. Cancel anytime; 14-day refund on any charge: email support@limitcast.dev. See https://limitcast.dev.
 
 ## License
 
