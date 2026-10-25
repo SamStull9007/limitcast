@@ -2,6 +2,7 @@
 import { createReadStream, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { windowPct } from './calibrate.mjs';
 import { blockOutcomes, limitHits } from './results.mjs';
 import { startupBreakdown } from './startup.mjs';
 import { stateDir } from './store.mjs';
@@ -15,7 +16,7 @@ import { claudeUsage } from './usage.mjs';
 /** @typedef {{at:number, turns:number, savedPerTurn:number}} SessionValue  savedPerTurn: tokens below the first measured start */
 /** @typedef {{src:string, win:string, at:number, lead:number|null, unseen:boolean}} HitValue  lead: minutes of warning */
 /** @typedef {{t:number, src:string, win:string, shadow:boolean, outcome:string}} BlockValue */
-/** @typedef {{since:number, scanned:number, sessions:Record<string, SessionValue>, hits:Record<string, HitValue>, blocks:Record<string, BlockValue>, switches?:Record<string, {shadow:boolean}>}} Value */
+/** @typedef {{since:number, scanned:number, sessions:Record<string, SessionValue>, hits:Record<string, HitValue>, blocks:Record<string, BlockValue>, switches?:Record<string, {shadow:boolean}>, calib?:{fresh:number, read:number, n:number, at:number}}} Value */
 
 const file = () => join(stateDir(), 'value.json');
 const tok = (/** @type {number} */ chars) => Math.round(chars / 4);
@@ -154,6 +155,14 @@ export function valueTotals(v) {
     confirmed: blocks.filter((b) => b.outcome === 'hit').length,
     switched: Object.values(v.switches ?? {}).filter((s) => !s.shadow).length,
     switchPreviewed: Object.values(v.switches ?? {}).filter((s) => s.shadow).length,
+    calib: v.calib ?? null,
+    // Against the 5-hour limit: each session wrote its smaller start once and re-read it on every call.
+    windowPct: v.calib
+      ? windowPct(v.calib, {
+          writes: sessions.reduce((a, s) => a + s.savedPerTurn, 0),
+          reads: sessions.reduce((a, s) => a + s.turns * s.savedPerTurn, 0),
+        })
+      : null,
   };
 }
 
@@ -170,6 +179,10 @@ export function valueSection(t, { now, pro }) {
     out.push(
       `- **${fmtBig(t.tokens)} tokens not re-sent.** Your sessions now start smaller than the first one limitcast measured, and Claude Code re-sends the starting context on every model call: ${t.turns.toLocaleString()} calls across ${t.sessions} sessions. (Most of it would have been cached input.)`,
     );
+    if (t.windowPct !== null && t.calib)
+      out.push(
+        `  Against your limit: **≈ ${t.windowPct < 1 ? t.windowPct.toFixed(2) : t.windowPct.toFixed(1)}% of a 5-hour window.** From your own readings, 1% of it is about ${fmtBig(Math.round(1e6 / t.calib.fresh))} new tokens or ${fmtBig(Math.round(1e6 / t.calib.read))} cached ones, so cached context is cheap and new tokens (long sessions, subagents) are what run you out.`,
+      );
   } else if (t.sessions) {
     out.push(`- Starting context: no smaller than when limitcast first measured it. \`limitcast trim\` shows what to cut.`);
   }

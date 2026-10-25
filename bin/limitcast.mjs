@@ -16,6 +16,7 @@ import {
   transcriptCwd,
   undoTrim,
 } from '../src/apply.mjs';
+import { calibrate } from '../src/calibrate.mjs';
 import { applyCodexTrim, codexConfigPath, codexServers, codexStartup, codexTrimReport, codexUsedServers, undoCodexTrim } from '../src/codex.mjs';
 import { forecastAll, oneClaudeAccount, resetTarget } from '../src/forecast.mjs';
 import { formatChecks } from '../src/formats.mjs';
@@ -606,6 +607,9 @@ async function refreshValue() {
   const start = Math.min(now, o?.first.at ?? now, ...claude.map((s) => s.t));
   const v = foldEvents(loadValue(), { now, samples: [...claude, ...(await readCodex(since))], blocks: loadBlocks(since), start });
   await scanSessions(v, { root: claudeRoot(), baseline: o ? { at: o.first.at, chars: o.first.chars } : null, now });
+  // Recalibrate from the last 8 days when there is enough data; keep the last good calibration otherwise.
+  const c = calibrate(claude, await readUsage(since, {}));
+  if (c) v.calib = { ...c, at: now };
   saveValue(v);
   return v;
 }
