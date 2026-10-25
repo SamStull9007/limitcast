@@ -2,6 +2,8 @@
 
 Stretch your Claude Code plan. Every session starts with ~100k tokens of context before you type, re-sent on every turn and to every subagent. limitcast measures what's in it, names what you never use, and stops runaway subagents before they burn the rest of your window.
 
+![limitcast status, trim and results running in a terminal](https://limitcast.dev/demo.gif)
+
 ```
 $ limitcast trim
 Every Claude Code session starts at 102.7k tokens before your first message.
