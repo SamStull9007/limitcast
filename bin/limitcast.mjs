@@ -202,7 +202,11 @@ if (cmd === 'status') {
       );
       process.exit(0);
     }
-    const servers = existsSync(codexConfigPath()) ? codexServers(readFileSync(codexConfigPath(), 'utf8')) : [];
+    if (!existsSync(codexConfigPath())) {
+      console.log(`No Codex setup found (${codexConfigPath()}). Set CODEX_HOME if Codex keeps it elsewhere.`);
+      process.exit(0);
+    }
+    const servers = codexServers(readFileSync(codexConfigPath(), 'utf8'));
     const r = codexTrimReport({ servers, used: await codexUsedServers(since), startup: await codexStartup(), days: days(), pro });
     if (args.includes('--apply')) {
       const changed = applyCodexTrim(r.unused);
