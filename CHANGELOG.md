@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+- `trim` measures your latest interactive session's starting context from its transcript: each SessionStart hook's output, MCP server instructions and tool names (per server), the agent list, the skill listing (per skill) and instruction files. "Measured savings" counts the MCP servers and skills you haven't used in the period (Skill calls, slash commands and MCP tool calls in your transcripts), with exact sizes.
+- The subagent guard is now Pro. Without a license, `guard` allows everything and `install --guard` installs only the free features.
+- Landing page: "stretch your plan" positioning and a comparison with ClaudeBar and ccusage.
+
 ## 0.3.0
 
 - Codex subagent guard: `install --guard` appends it to `~/.codex/hooks.json` (existing hooks keep their positions and trust); it judges `spawn_agent` by Codex's own limits from the last two hours of session logs. `doctor` reports whether Codex has trusted it.

@@ -52,6 +52,31 @@ export function claudeUsage(line, seen, session) {
 }
 
 /**
+ * Record which skills and MCP servers a Claude Code transcript line used: Skill tool calls, /slash commands, mcp__server__tool calls.
+ * @param {string} line
+ * @param {import('./trim.mjs').Activity} act
+ */
+export function claudeActivity(line, act) {
+  if (line.includes('<command-name>')) {
+    for (const m of line.matchAll(/<command-name>\/?([^<\s]+)<\/command-name>/g)) act.skills.add(m[1]);
+  }
+  if (!line.includes('"name":"Skill"') && !line.includes('"name":"mcp__')) return;
+  let ev;
+  try {
+    ev = JSON.parse(line);
+  } catch {
+    return;
+  }
+  const content = ev?.message?.content;
+  if (!Array.isArray(content)) return;
+  for (const c of content) {
+    if (c?.type !== 'tool_use' || typeof c.name !== 'string') continue;
+    if (c.name === 'Skill' && c.input?.skill) act.skills.add(String(c.input.skill));
+    else if (c.name.startsWith('mcp__')) act.mcp.add(c.name.split('__')[1] ?? '');
+  }
+}
+
+/**
  * Codex rollout lines → usage. token_count events carry a running total, so emit the increase since the last one.
  * @param {string} line
  * @param {{prev:any, cwd:string, model:string}} st per-file state
@@ -135,15 +160,17 @@ function grokLedgers(root, since) {
  * All usage since `since` from Claude Code, Codex and Grok.
  * @param {number} since epoch ms
  * @param {{claude?:string, codex?:string, grok?:string}} [roots]
+ * @param {import('./trim.mjs').Activity} [activity] if given, filled with the skills and MCP servers Claude Code used
  * @returns {Promise<Usage[]>}
  */
-export async function readUsage(since, roots = {}) {
+export async function readUsage(since, roots = {}, activity) {
   /** @type {Usage[]} */
   const out = [];
   for (const file of jsonlFiles(roots.claude ?? claudeRoot(), since, () => true)) {
     const seen = new Set();
     const session = basename(file, '.jsonl');
     for await (const line of lines(file)) {
+      if (activity) claudeActivity(line, activity);
       const u = claudeUsage(line, seen, session);
       if (u && u.t >= since) out.push(u);
     }

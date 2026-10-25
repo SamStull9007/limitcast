@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { forecast, oneClaudeSession, slopePerHour, windowName } from '../src/forecast.mjs';
 import { claudeSamples, codexSamples, readCodex } from '../src/sources.mjs';
-import { guardDecision } from '../src/guard.mjs';
+import { guardDecision, runGuard } from '../src/guard.mjs';
 
 const H = 3600_000;
 const now = Date.UTC(2026, 9, 24, 18, 0);
@@ -121,7 +121,7 @@ test('guard blocks subagents only when a Claude window runs out soon', () => {
   assert.equal(guardDecision('Agent', [{ ...risky, src: 'codex' }], now, 30), null);
 });
 
-test('CLI end to end: statusline records, wraps the command, guard denies', () => {
+test('CLI end to end: statusline records, wraps the command; guard is Pro-gated and denies with Pro', async () => {
   const state = mkdtempSync(join(tmpdir(), 'lc-state-'));
   const env = { ...process.env, LIMITCAST_STATE: state, CODEX_HOME: join(state, 'nocodex') };
   const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
@@ -143,15 +143,18 @@ test('CLI end to end: statusline records, wraps the command, guard denies', () =
   const status = JSON.parse(execFileSync('node', [bin, 'status', '--json'], { env }).toString());
   assert.equal(status[0].verdict, 'AT_RISK'); // +80%/h, 10% left -> ~7 min, reset in 60 min
 
-  const deny = execFileSync('node', [bin, 'guard'], { input: JSON.stringify({ tool_name: 'Agent' }), env }).toString();
-  assert.equal(JSON.parse(deny).hookSpecificOutput.permissionDecision, 'deny');
-  const allowed = execFileSync('node', [bin, 'guard'], {
-    input: JSON.stringify({ tool_name: 'Agent' }),
-    env: { ...env, LIMITCAST_ALLOW: '1' },
-  }).toString();
-  assert.equal(allowed, '');
-  const failOpen = execFileSync('node', [bin, 'guard'], { input: 'not json', env, stdio: ['pipe', 'pipe', 'ignore'] }).toString();
-  assert.equal(failOpen, '');
+  // No license: the guard allows even though the window is at risk.
+  const free = execFileSync('node', [bin, 'guard'], { input: JSON.stringify({ tool_name: 'Agent' }), env }).toString();
+  assert.equal(free, '');
+  // With Pro the CLI runs runGuard; on the same readings it denies.
+  const prev = process.env.LIMITCAST_STATE;
+  process.env.LIMITCAST_STATE = state;
+  try {
+    assert.match(await runGuard({ tool_name: 'Agent' }, Date.now(), 30), /^limitcast: Claude 5h/);
+    assert.equal(await runGuard({ tool_name: 'Bash' }, Date.now(), 30), null);
+  } finally {
+    process.env.LIMITCAST_STATE = prev;
+  }
 });
 
 test('untagged readings from before session tagging never mix into a tagged session', () => {

@@ -1,4 +1,7 @@
 // @ts-check
+import { forecastAll, oneClaudeSession } from './forecast.mjs';
+import { readCodex } from './sources.mjs';
+import { KEEP_MS, load } from './store.mjs';
 
 const NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok' };
 
@@ -39,4 +42,24 @@ export function guardDecision(tool, forecasts, now, minutes) {
     }
   }
   return null;
+}
+
+/**
+ * The PreToolUse hook: load the readings for the spawning tool and decide. Returns the deny reason or null.
+ * Claude Code and Codex send snake_case fields; Grok sends camelCase.
+ * @param {any} hook parsed hook input
+ * @param {number} now epoch ms
+ * @param {number} minutes
+ */
+export async function runGuard(hook, now, minutes) {
+  const tool = String(hook?.tool_name ?? hook?.toolName ?? hook?.tool ?? '');
+  const src = spawnSource(tool);
+  // Codex: only the last two hours of rollouts, so the hook stays fast; Grok has no readings to judge by.
+  const samples =
+    src === 'claude'
+      ? oneClaudeSession(load(now - KEEP_MS), hook.session_id ?? hook.sessionId)
+      : src === 'codex'
+        ? await readCodex(now - 2 * 3600_000)
+        : [];
+  return guardDecision(tool, forecastAll(samples, now), now, minutes);
 }

@@ -3,12 +3,33 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>limitcast: never hit your Claude Code limit by surprise</title>
+    <title>limitcast: stretch your Claude Code plan</title>
     <meta
       name="description"
-      content="limitcast forecasts when Claude Code and Codex will hit their usage limits, stops new subagents before you run out, and shows where your tokens go. Runs locally."
+      content="limitcast measures the ~100k tokens every Claude Code session loads before you type, shows what you never use, and stops runaway subagents before they burn your window. Runs locally."
     >
     <style>
+    .table-wrap {
+      overflow-x: auto;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      min-width: 560px;
+      font-size: 0.95rem;
+    }
+    th,
+    td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    th:nth-child(2),
+    td:nth-child(2) {
+      background: var(--card);
+      font-weight: 600;
+    }
     :root {
       --bg: #fbfaf7;
       --fg: #1d1c1a;
@@ -184,48 +205,123 @@
     <main>
       <header>
         <span class="logo">limitcast</span>
-        <nav><a href="#how">How it works</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a></nav>
+        <nav><a href="#how">How it works</a><a href="#compare">Compare</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a></nav>
       </header>
 
-      <h1>Never hit your Claude Code limit by surprise.</h1>
+      <h1>Stretch your Claude Code plan.</h1>
       <p class="lede">
-        limitcast forecasts when Claude Code and Codex will run out, stops new subagents before they burn the rest of your window, and shows exactly
-        where your tokens go. It runs on your machine and reads only the files your tools already write.
+        Every Claude Code session starts with ~100k tokens of context before you type, re-sent on every turn and to every subagent. limitcast measures
+        exactly what's in it, shows what you never use, and stops runaway subagents before they burn the rest of your window. More work out of the
+        plan you already pay for.
       </p>
       <div class="cta">
         <a class="btn primary" href="#pricing">Get Pro</a>
         <a class="btn" href="#install">Install free</a>
       </div>
 
-      <pre>$ limitcast status
-window     used  burn      runs out  resets     status
-claude 5h  71%   +24.0%/h  17:52     18:40      <span class="warn">AT_RISK</span>
-claude 7d  48%   +1.1%/h   -         Tue 09:00  <span class="ok">OK</span>
-codex 7d   10%   +0.5%/h   -         Fri 12:41  <span class="ok">OK</span></pre>
+      <pre>$ limitcast trim
+Every Claude Code session starts at <b>102.7k tokens</b> before your first message.
+
+## Measured savings: ~6.2k tokens per session (6% of your starting context)
+- Disable 9 MCP servers you haven't used in 14 days (~0.9k): postman, context7, ...
+- Hide 66 skills from the model (~5.3k): dataviz, block-kit, ...
+
+| Instruction files      8.2k | Tool names          7.1k |
+| Skill listing          6.7k | SessionStart hooks  6.5k |
+| Agent list             4.9k | MCP instructions    3.1k |</pre>
+      <p><small>A real run on a heavy user's setup, names shortened. Your numbers come from your own transcripts.</small></p>
 
       <h2 id="how">How it works</h2>
       <div class="grid">
         <div class="card">
-          <h3>Runout forecast</h3>
-          <p>Burn rate and the exact time each 5-hour and weekly window runs out, for Claude Code and Codex, side by side.</p>
+          <h3>Trim advisor <small>(Pro)</small></h3>
+          <p>
+            Measures what your latest session loaded before you typed: hook output, MCP servers, tool names, skills, agents, instruction files. Then
+            names the ones you haven't used, with the tokens each one costs you.
+          </p>
         </div>
         <div class="card">
-          <h3>Subagent guard</h3>
-          <p>A hook that blocks new subagents when you're on pace to run out before the reset. Override any time.</p>
+          <h3>Subagent guard <small>(Pro)</small></h3>
+          <p>
+            Blocks a new subagent in Claude Code or Codex when that window is on pace to run out before it resets. Never blocks once you're past 100%,
+            so extra usage keeps working.
+          </p>
         </div>
         <div class="card">
           <h3>Burn report <small>(Pro)</small></h3>
-          <p>Tokens by day, project, model and session, plus how much your subagents really cost. One shareable Markdown file.</p>
+          <p>Claude Code, Codex and Grok tokens by day, project, model and session, plus the share your subagents use.</p>
         </div>
         <div class="card">
-          <h3>Trim advisor <small>(Pro)</small></h3>
-          <p>What every session loads before you type (often 100k+ tokens) and the specific files, MCP servers and skills to cut.</p>
+          <h3>Runout forecast <small>(free)</small></h3>
+          <p>Burn rate and the clock time each 5-hour and weekly window runs out, for Claude Code and Codex.</p>
         </div>
       </div>
 
+      <h2 id="compare">How it compares</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th></th>
+              <th>limitcast</th>
+              <th>ClaudeBar</th>
+              <th>ccusage</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Price</td>
+              <td>Free core, Pro $79/yr</td>
+              <td>Free</td>
+              <td>Free</td>
+            </tr>
+            <tr>
+              <td>Usage and quota display</td>
+              <td>Claude Code, Codex, Grok</td>
+              <td>10+ tools, menu bar</td>
+              <td>18 tools, token and cost reports</td>
+            </tr>
+            <tr>
+              <td>When you'll run out</td>
+              <td>Clock time from your burn rate</td>
+              <td>Pace label (running hot / on track)</td>
+              <td>5-hour block tracking</td>
+            </tr>
+            <tr>
+              <td>Stops subagents before you run out</td>
+              <td>Yes, Claude Code and Codex</td>
+              <td>No (hooks observe only)</td>
+              <td>No</td>
+            </tr>
+            <tr>
+              <td>Measures what loads into every session, and what to cut</td>
+              <td>Yes</td>
+              <td>No</td>
+              <td>No</td>
+            </tr>
+            <tr>
+              <td>Uses your Claude login token</td>
+              <td>No</td>
+              <td>Yes, for its usage API probe</td>
+              <td>No</td>
+            </tr>
+            <tr>
+              <td>Runs on</td>
+              <td>macOS, Linux, over SSH</td>
+              <td>macOS</td>
+              <td>Command line (npx / bunx)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        <small>From each project's public README and source, October 2026. If you only want to see your numbers, the free tools are great.</small>
+      </p>
+
       <h2 id="install">Install in 30 seconds</h2>
       <pre>npm install -g limitcast
-limitcast install --guard   # wraps your status line, adds the guard, backs up settings.json
+limitcast install           # wraps your status line, backs up settings.json
+limitcast install --guard   # Pro: also adds the subagent guard to Claude Code and Codex
 limitcast doctor</pre>
       <p>Requires Node 20+, macOS or Linux. <code>limitcast uninstall</code> restores your original settings.</p>
 
@@ -236,7 +332,6 @@ limitcast doctor</pre>
           <div class="price">$0</div>
           <ul>
             <li>Runout forecast for Claude Code and Codex</li>
-            <li>Subagent guard</li>
             <li>Status-line readout</li>
           </ul>
           <a class="btn" href="#install">Install</a>
@@ -246,8 +341,9 @@ limitcast doctor</pre>
           <div class="price">$79 <small>/ year</small></div>
           <ul>
             <li>Everything in Free</li>
-            <li>Weekly burn report</li>
-            <li>Trim advisor</li>
+            <li>Trim advisor: measured savings per session</li>
+            <li>Subagent guard for Claude Code and Codex</li>
+            <li>Burn report across Claude Code, Codex and Grok</li>
             <li>Email support</li>
           </ul>
           <a class="btn primary" data-checkout="annual" href="#pricing">Buy Pro</a>

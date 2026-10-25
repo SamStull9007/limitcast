@@ -6,11 +6,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { claudeUsage, codexUsage, grokUsage, readUsage, total } from '../src/usage.mjs';
-import { guardDecision, spawnSource } from '../src/guard.mjs';
+import { claudeActivity, claudeUsage, codexUsage, grokUsage, readUsage, total } from '../src/usage.mjs';
+import { guardDecision, runGuard, spawnSource } from '../src/guard.mjs';
 import { forecast } from '../src/forecast.mjs';
 import { burnReport } from '../src/report.mjs';
-import { baseline, contributors, trimReport } from '../src/trim.mjs';
+import { baseline, contributors, measuredSavings, savings, skillListing, startupReport, trimReport } from '../src/trim.mjs';
+import { startupBreakdown } from '../src/startup.mjs';
 import { checkLicense, issueLicense } from '../src/license.mjs';
 import { doctor, install, uninstall, wrappedCommand } from '../src/install.mjs';
 
@@ -112,18 +113,65 @@ test('baseline is the median first-response context of main sessions only', () =
   assert.equal(baseline([]), null);
 });
 
-test('trim lists what loads every session, largest first, with fixes', () => {
+test('trim measures savings from unused skills and MCP servers, honoring skillOverrides', () => {
   const home = tmp('lc-home-');
-  mkdirSync(join(home, '.claude', 'skills', 'one'), { recursive: true });
+  const skill = (dir, fm) => {
+    mkdirSync(join(home, '.claude', 'skills', dir), { recursive: true });
+    writeFileSync(join(home, '.claude', 'skills', dir, 'SKILL.md'), `---\n${fm}\n---\n# body\n`);
+  };
+  skill('used-one', 'name: used-one\ndescription: Used often.');
+  skill('stale', `name: stale\ndescription: "${'d'.repeat(392)}"`); // name + ': ' + 392 + 4 = 403 chars -> 101 tokens
+  skill('folded', 'name: folded\ndescription: >\n  first line\n  second line');
+  skill('hidden', 'name: hidden\ndescription: never listed');
+  writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ skillOverrides: { hidden: 'user-invocable-only' } }));
   writeFileSync(join(home, '.claude', 'CLAUDE.md'), 'x'.repeat(40_000));
-  writeFileSync(join(home, '.claude.json'), JSON.stringify({ mcpServers: { a: {}, b: {} } }));
-  const parts = contributors({ home, cwd: home });
-  assert.equal(parts[0].what, 'Global CLAUDE.md');
-  assert.equal(parts[0].tokens, 10_000);
-  const md = trimReport({ sessions: 3, median: 105_000, max: 120_000 }, parts);
+  writeFileSync(join(home, '.claude.json'), JSON.stringify({ mcpServers: { 'demo-mcp': {}, idle: {} } }));
+
+  const c = contributors({ home, cwd: home });
+  assert.deepEqual(c.files[0], { what: 'Global CLAUDE.md', tokens: 10_000, path: '~/.claude/CLAUDE.md' });
+  assert.equal(c.skills.find((k) => k.name === 'hidden').tokens, 0);
+  assert.equal(c.skills.find((k) => k.name === 'stale').tokens, 101);
+
+  const used = { skills: new Set(['plugin:used-one', 'folded']), mcp: new Set(['demo_mcp']) };
+  const s = savings(c, used);
+  assert.deepEqual(
+    s.unusedSkills.map((k) => k.name),
+    ['stale'],
+  );
+  assert.equal(s.skillTokens, 101);
+  assert.deepEqual(s.unusedMcp, ['idle']);
+
+  const md = trimReport({ sessions: 3, median: 105_000, max: 120_000 }, c, used, 7);
   assert.match(md, /105\.0k tokens/);
-  assert.match(md, /2 MCP servers/);
-  assert.match(md, /1 skills/);
+  assert.match(md, /Measured savings: ~101 tokens per session \(0% of your fixed overhead\)/);
+  assert.match(md, /Hide 1 skills you haven't used in 7 days/);
+  assert.match(md, /Disable 1 MCP servers you haven't used in 7 days\*\*: idle/);
+  assert.match(md, /Skill listing: 3 visible of 4 skills/);
+});
+
+test('skillListing reads plain, quoted and block-scalar descriptions', () => {
+  assert.deepEqual(skillListing('---\nname: a\ndescription: plain text\n---', 'x'), { name: 'a', desc: 'plain text' });
+  assert.deepEqual(skillListing("---\ndescription: 'quoted'\n---", 'fallback'), { name: 'fallback', desc: 'quoted' });
+  assert.deepEqual(skillListing('---\nname: b\ndescription: |\n  one\n  two\nother: x\n---', 'x'), { name: 'b', desc: 'one two' });
+  assert.deepEqual(skillListing('no frontmatter', 'z'), { name: 'z', desc: '' });
+});
+
+test('claudeActivity picks up Skill calls, slash commands and MCP servers', () => {
+  const act = { skills: new Set(), mcp: new Set() };
+  claudeActivity(
+    JSON.stringify({
+      message: {
+        content: [
+          { type: 'tool_use', name: 'Skill', input: { skill: 'superpowers:brainstorming' } },
+          { type: 'tool_use', name: 'mcp__demo51-mcp__demo51_health', input: {} },
+        ],
+      },
+    }),
+    act,
+  );
+  claudeActivity(JSON.stringify({ type: 'user', message: { content: '<command-name>/forecast</command-name>' } }), act);
+  assert.deepEqual([...act.skills].sort(), ['forecast', 'superpowers:brainstorming']);
+  assert.deepEqual([...act.mcp], ['demo51-mcp']);
 });
 
 test('license: valid, tampered, expired, wrong format', () => {
@@ -318,7 +366,7 @@ test('install skips Codex when it is not installed', () => {
   );
 });
 
-test('CLI guard: blocks a Codex spawn on pace to run out, allows Grok, reads camelCase input', () => {
+test('guard hook: blocks a Codex spawn on pace to run out, allows Grok, reads camelCase input; CLI needs Pro', async () => {
   const codexHome = tmp('lc-cli-codex-');
   const day = join(codexHome, 'sessions', '2026', '10', '24');
   mkdirSync(day, { recursive: true });
@@ -330,10 +378,94 @@ test('CLI guard: blocks a Codex spawn on pace to run out, allows Grok, reads cam
       payload: { type: 'token_count', rate_limits: { primary: { used_percent: pct, window_minutes: 300, resets_at: reset }, secondary: null } },
     });
   writeFileSync(join(day, 'rollout-x.jsonl'), [ev(40, 50), ev(0, 90)].join('\n')); // +60%/h, 10% left: ~10 min
+  const prevCodex = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = codexHome;
+  try {
+    const now = Date.now();
+    assert.match(await runGuard({ tool_name: 'collaborationspawn_agent', session_id: 'c1' }, now, 30), /^limitcast: Codex 5h/);
+    assert.equal(await runGuard({ hookEventName: 'pre_tool_use', toolName: 'spawn_subagent', sessionId: 'g1' }, now, 30), null);
+    assert.equal(await runGuard({ tool_name: 'Agent', session_id: 'x' }, now, 30), null); // Claude has no readings here
+  } finally {
+    process.env.CODEX_HOME = prevCodex;
+  }
+  // Without a license the CLI hook allows the same at-risk Codex spawn.
   const env = { ...process.env, CODEX_HOME: codexHome, LIMITCAST_STATE: tmp('lc-cli-st-') };
+  delete env.LIMITCAST_LICENSE;
   const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
-  const run = (hook) => execFileSync('node', [bin, 'guard'], { input: JSON.stringify(hook), env }).toString();
-  assert.match(JSON.parse(run({ tool_name: 'collaborationspawn_agent', session_id: 'c1' })).hookSpecificOutput.permissionDecisionReason, /Codex 5h/);
-  assert.equal(run({ hookEventName: 'pre_tool_use', toolName: 'spawn_subagent', sessionId: 'g1' }), '');
-  assert.equal(run({ tool_name: 'Agent', session_id: 'x' }), ''); // Claude has no readings here
+  assert.equal(execFileSync('node', [bin, 'guard'], { input: JSON.stringify({ tool_name: 'collaborationspawn_agent' }), env }).toString(), '');
+});
+
+test('install --guard without Pro installs only the free features', () => {
+  const claudeDir = tmp('lc-free-claude-');
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: claudeDir, CODEX_HOME: tmp('lc-free-codex-'), LIMITCAST_STATE: tmp('lc-free-st-') };
+  delete env.LIMITCAST_LICENSE;
+  const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
+  const out = execFileSync('node', [bin, 'install', '--guard'], { env }).toString();
+  assert.match(out, /part of limitcast Pro/);
+  const cfg = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf8'));
+  assert.match(cfg.statusLine.command, /limitcast\.mjs statusline$/);
+  assert.equal(cfg.hooks?.PreToolUse, undefined);
+});
+
+test('startup breakdown: measures hooks, MCP, tool names, agents, skills and files from transcript attachments', async () => {
+  const dir = tmp('lc-startup-');
+  const file = join(dir, 'sess.jsonl');
+  const att = (attachment) => JSON.stringify({ type: 'attachment', attachment });
+  writeFileSync(
+    file,
+    [
+      att({
+        type: 'hook_success',
+        hookEvent: 'SessionStart',
+        command: 'sed x ${CLAUDE_PLUGIN_ROOT}/hooks/session-architecture.md',
+        content: 'a'.repeat(400),
+      }),
+      att({
+        type: 'hook_success',
+        hookEvent: 'SessionStart',
+        command: 'python3 router.py',
+        content: '',
+        stdout: JSON.stringify({ hookSpecificOutput: { additionalContext: 'b'.repeat(80) } }),
+      }),
+      att({ type: 'hook_success', hookEvent: 'UserPromptSubmit', command: 'x.sh', content: 'ignored' }),
+      att({ type: 'mcp_instructions_delta', addedNames: ['claude.ai Postman', 'attention'], addedBlocks: ['p'.repeat(40), 'q'.repeat(100)] }),
+      att({ type: 'deferred_tools_delta', addedNames: ['Read', 'mcp__claude_ai_Postman__get'], addedLines: ['Read', 'mcp__claude_ai_Postman__get'] }),
+      att({ type: 'agent_listing_delta', addedLines: ['- a: one', '- b: two'] }),
+      att({ type: 'skill_listing', content: '- hookify:configure: Enable rules\n- dataviz: Charts\n  more text' }),
+      att({ type: 'instructions', files: [{ path: '/Users/me/CLAUDE.md', content: 'c'.repeat(200) }] }),
+      JSON.stringify({ type: 'assistant', entrypoint: 'cli', timestamp: iso(0), message: { usage: {} } }),
+      att({ type: 'hook_success', hookEvent: 'SessionStart', command: 'late.sh', content: 'after first reply: not startup' }),
+    ].join('\n'),
+  );
+  const b = await startupBreakdown(file);
+  assert.equal(b.entry, 'cli');
+  const by = (g) => b.pieces.filter((p) => p.group === g).map((p) => [p.name, p.chars]);
+  assert.deepEqual(by('SessionStart hooks'), [
+    ['session-architecture.md', 400],
+    ['router.py', 80],
+  ]);
+  assert.deepEqual(by('MCP server instructions'), [
+    ['claude.ai Postman', 40],
+    ['attention', 100],
+  ]);
+  assert.deepEqual(by('Tool names'), [
+    ['(built-in)', 5],
+    ['claude_ai_Postman', 28],
+  ]);
+  assert.deepEqual(
+    by('Skill listing').map((x) => x[0]),
+    ['hookify:configure', 'dataviz'],
+  );
+  assert.deepEqual(by('Instruction files'), [['/Users/me/CLAUDE.md', 200]]);
+
+  // Postman is unused: its instructions (40) and tool names (28) merge into one entry; attention was used.
+  const s = measuredSavings(b.pieces, { skills: new Set(['dataviz']), mcp: new Set(['attention']) });
+  assert.deepEqual(s.unusedMcp, [{ name: 'claude.ai Postman', chars: 68 }]);
+  assert.deepEqual(
+    s.unusedSkills.map((k) => k.name),
+    ['hookify:configure'],
+  );
+  const md = startupReport({ sessions: 1, median: 1000, max: 1000 }, b, { skills: new Set(['dataviz']), mcp: new Set(['attention']) }, 7);
+  assert.match(md, /Disable 1 MCP servers/);
+  assert.match(md, /SessionStart hooks inject/);
 });
