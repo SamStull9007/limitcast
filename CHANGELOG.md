@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.0
+
+Pro now acts on what limitcast sees; free gets the daily allowance and a preview of each action.
+
+- **Daily allowance (free):** weekly windows show today's even share of what's left until the reset, and how much of it today used: `7d 41% · today 6% left` in the status line, a `today` column in `status`.
+- **Model guard (Pro):** while a Claude window is NEAR or AT_RISK, a new subagent that would run on the main model (or Opus/Fable) runs on Sonnet instead, through the hook's `updatedInput`. An explicit Sonnet or Haiku is left alone; `LIMITCAST_ALLOW=1` keeps the main model. Free installs record what Pro would have switched. `results` counts the switches.
+- **Account headroom (Pro):** `status` lists every other Claude account with current readings; when the current one is NEAR, AT_RISK or at its limit, the status line points to the one with the most room.
+- **Long sessions (Pro):** past ~150k tokens re-sent per model call, the status line suggests `/compact`. If you wrap your own status line, Pro adds a second line only when there is something to act on.
+- **Desktop notifications (Pro, opt-in):** `limitcast notify on` sends one notification when a Claude window turns NEAR, AT_RISK or HIT, and when it resets after a HIT (macOS, or Linux with notify-send).
+- **Run after reset (Pro):** `limitcast after-reset [--src] [--window] [--detach] -- <command>` waits for the reset, then runs the command.
+- **Codex trim:** `limitcast trim --codex` shows the AGENTS.md size Codex loads and the MCP servers in `~/.codex/config.toml` you haven't used; Pro names them and `--apply` turns them off with `enabled = false` (backed up; `--undo` restores the file exactly).
+- **HTML dashboard (Pro):** `limitcast results --html` writes results, current windows and the burn report to one page and opens it.
+
 ## 0.8.1
 
 - Weekly (and other multi-day) windows are forecast from the average pace over the last full day, idle time included, instead of the last hour. One busy hour no longer shows a weekly runout days early (`7d 3% ⚠ out Tue`). If the last hour's pace would run the window out within the hour, that still wins, so the guard catches a burst near the end of the week. The 5-hour window is unchanged.

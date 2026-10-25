@@ -15,6 +15,7 @@ import {
   transcriptCwd,
   undoTrim,
 } from '../src/apply.mjs';
+import { applyCodexTrim, codexConfigPath, codexServers, codexStartup, codexTrimReport, codexUsedServers, undoCodexTrim } from '../src/codex.mjs';
 import { forecastAll, oneClaudeAccount, resetTarget } from '../src/forecast.mjs';
 import { formatChecks } from '../src/formats.mjs';
 import { runGuard } from '../src/guard.mjs';
@@ -41,8 +42,9 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
                                      (without Pro the guard is a preview: it records what it would block, never blocks)
   limitcast uninstall                remove it and restore your original status line
   limitcast doctor                   check the setup
-  limitcast status [--json]          used, burn rate, runout time and reset per limit window
+  limitcast status [--json]          used, burn rate, runout time, reset, and today's share of each weekly window
   limitcast trim [--share]           tokens every session loads before you type, and how much you never use
+  limitcast trim --codex             the same for Codex: AGENTS.md size and MCP servers you haven't used
   limitcast results [--days N]       limits you reached, how far ahead limitcast warned, what the guard blocked
                     [--share]        totals only, safe to post
   limitcast license                  show the license and re-check it with Polar
@@ -51,10 +53,17 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
   limitcast trim [--days N] [--share]        names what to cut and what each costs
                                              (--share: totals only, no names, safe to post)
   limitcast trim --apply / --undo            hide those skills and turn off those MCP servers (backed up, reversible)
+  limitcast trim --codex --apply / --undo    turn off unused Codex MCP servers (enabled = false; reversible)
   limitcast saved                            tokens saved since limitcast first measured you
-  limitcast install --guard                  block new subagents when a window is on pace to run out
+  limitcast install --guard                  block new subagents when a window is on pace to run out, and run
+                                             them on Sonnet while a window is tight (NEAR or AT_RISK)
   limitcast install --alerts                 tell you when your starting context grows, plus a weekly summary
+  limitcast notify on|off|test               desktop notification when a window turns NEAR, AT_RISK or HIT, or resets
+  limitcast after-reset [--src claude|codex] [--window 5h|7d] [--detach] -- <command>
+                                             run a heavy job once the window has reset
+  limitcast results --html [--out FILE]      results, current windows and the burn report as one page
   limitcast report [--days N] [--out FILE]   tokens by tool, day, project, model and session
+  (status line, Pro: points to another account with room, and suggests /compact past ~150k tokens a call)
   limitcast activate <license-key>           unlock Pro on this computer (online once; then a weekly check, offline up to 30 days)
   limitcast deactivate                       free this computer's activation to use the key elsewhere
 
@@ -180,6 +189,31 @@ if (cmd === 'status') {
     process.exit(2);
   }
   const since = now - days() * 86400_000;
+  if (cmd === 'trim' && args.includes('--codex')) {
+    // Codex: AGENTS.md and the MCP servers in ~/.codex/config.toml. Free counts them; Pro names them and turns them off.
+    if ((args.includes('--apply') || args.includes('--undo')) && !pro) {
+      console.log(`\`limitcast trim --codex --apply\` is part of limitcast Pro: ${UPGRADE_URL}`);
+      process.exit(2);
+    }
+    if (args.includes('--undo')) {
+      const e = undoCodexTrim();
+      console.log(
+        e ? `✓ Back to how they were: ${e.servers.map((s) => s.name).join(', ')}. Takes effect in your next Codex session.` : 'Nothing to undo.',
+      );
+      process.exit(0);
+    }
+    const servers = existsSync(codexConfigPath()) ? codexServers(readFileSync(codexConfigPath(), 'utf8')) : [];
+    const r = codexTrimReport({ servers, used: await codexUsedServers(since), startup: await codexStartup(), days: days(), pro });
+    if (args.includes('--apply')) {
+      const changed = applyCodexTrim(r.unused);
+      console.log(
+        changed.length
+          ? `✓ Turned off ${changed.length} Codex MCP servers (enabled = false in ${codexConfigPath()}): ${changed.map((s) => s.name).join(', ')}\nTakes effect in your next Codex session. Undo: limitcast trim --codex --undo`
+          : 'Nothing to turn off: every server that is on was used.',
+      );
+    } else console.log(r.text);
+    process.exit(0);
+  }
   /** @type {import('../src/trim.mjs').Activity} */
   const used = { skills: new Set(), mcp: new Set() };
   const usage = await readUsage(since, {}, cmd === 'trim' ? used : undefined);
