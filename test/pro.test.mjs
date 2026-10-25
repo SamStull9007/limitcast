@@ -428,16 +428,18 @@ test('guard hook: blocks a Codex spawn on pace to run out, allows Grok, reads ca
   assert.equal(execFileSync('node', [bin, 'guard'], { input: JSON.stringify({ tool_name: 'collaborationspawn_agent' }), env }).toString(), '');
 });
 
-test('install --guard without Pro installs only the free features', () => {
+test('install --guard without Pro installs the guard as a preview; --alerts stays Pro', () => {
   const claudeDir = tmp('lc-free-claude-');
   const env = { ...process.env, CLAUDE_CONFIG_DIR: claudeDir, CODEX_HOME: tmp('lc-free-codex-'), LIMITCAST_STATE: tmp('lc-free-st-') };
   delete env.LIMITCAST_LICENSE;
   const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
-  const out = execFileSync('node', [bin, 'install', '--guard'], { env }).toString();
-  assert.match(out, /part of limitcast Pro/);
+  const out = execFileSync('node', [bin, 'install', '--guard', '--alerts'], { env }).toString();
+  assert.match(out, /runs as a preview: it never blocks/);
+  assert.match(out, /Alerts and the weekly summary are part of limitcast Pro/);
   const cfg = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf8'));
   assert.match(cfg.statusLine.command, /limitcast\.mjs statusline$/);
-  assert.equal(cfg.hooks?.PreToolUse, undefined);
+  assert.match(JSON.stringify(cfg.hooks?.PreToolUse), /limitcast\.mjs guard/);
+  assert.equal(cfg.hooks?.SessionStart, undefined);
 });
 
 test('startup breakdown: measures hooks, MCP, tool names, agents, skills and files from transcript attachments', async () => {

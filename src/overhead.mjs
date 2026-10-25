@@ -86,7 +86,7 @@ export function driftMessage(d) {
  * @param {number} sessions interactive sessions since s.first.at
  */
 export function savedSummary(s, sessions) {
-  const perSession = tok(s.first.chars - s.last.chars);
+  const perSession = savedPerSession(s);
   const since = new Date(s.first.at).toLocaleDateString();
   if (perSession <= 0) {
     return `Since ${since}, the part of your starting context you control (hooks, MCP servers, skills, agents, instruction files) went from ~${fmtK(tok(s.first.chars))} to ~${fmtK(tok(s.last.chars))} tokens (${perSession === 0 ? 'no change' : `+${fmtK(-perSession)}`}). Run \`limitcast trim\` to find cuts.`;
@@ -96,6 +96,12 @@ export function savedSummary(s, sessions) {
     `Across ${sessions} interactive sessions that's ~${fmtK(perSession * sessions)} tokens not loaded, counting each session's start once (the real figure is higher: that context is re-sent every turn).`,
   ].join('\n');
 }
+
+/**
+ * Tokens per session the controllable starting context dropped since limitcast first measured it (negative: it grew).
+ * @param {{first:Snapshot, last:Snapshot}} s
+ */
+export const savedPerSession = (s) => tok(s.first.chars - s.last.chars);
 
 /** @param {number} n */
 const fmtK = (n) => (Math.abs(n) >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : Math.abs(n) >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : `${n}`);

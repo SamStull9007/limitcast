@@ -1,11 +1,11 @@
 // @ts-check
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { claudeAccounts, forecast } from './forecast.mjs';
 import { stateDir } from './store.mjs';
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */
-/** @typedef {{t:number, src:string, win:string, pct:number, wall:number, reset:number, sid?:string}} Block  t, wall, reset: epoch ms */
+/** @typedef {{t:number, src:string, win:string, pct:number, wall:number, reset:number, sid?:string, shadow?:boolean}} Block  t, wall, reset: epoch ms; shadow: a free install's preview, not blocked */
 
 const JITTER_MS = 120_000; // Codex resets_at drifts by seconds between events
 const NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok' };
@@ -111,20 +111,84 @@ export function blockOutcomes(blocks, samples, now) {
 }
 
 /**
- * @param {{now:number, days:number, samples:Sample[], blocks:Block[]|null, saved:string|null}} r
- *   blocks: null when the guard isn't available (no Pro license); saved: the `limitcast saved` text, if any
+ * The numbers behind `results`, its --share summary and the weekly line.
+ * Pro sees the blocks the guard made; free sees the preview: what Pro would have blocked (shadow blocks).
+ * @param {{now:number, days:number, samples:Sample[], blocks:Block[], pro:boolean}} r
  */
-export function resultsReport({ now, days, samples, blocks, saved }) {
+export function resultsStats({ now, days, samples, blocks, pro }) {
   const since = now - days * 86400_000;
+  const readings = samples.filter((s) => s.t >= since).length;
+  const hits = limitHits(samples.filter((s) => s.t >= since));
+  const watched = hits.filter((h) => !h.unseen);
+  const leads = hits.flatMap((h) => (h.warnedAt === null ? [] : [Math.round((h.at - h.warnedAt) / 60_000)]));
+  const mine = blocks.filter((b) => b.t >= since && Boolean(b.shadow) === !pro);
+  const outcomes = blockOutcomes(mine, samples, now);
+  return { readings, hits, watched: watched.length, leads, outcomes };
+}
+
+/**
+ * Totals only, no project, file or session names: safe to post.
+ * @param {ReturnType<typeof resultsStats>} st
+ * @param {{days:number, pro:boolean, savedPerSession:number|null}} o
+ */
+export function resultsShare(st, { days, pro, savedPerSession }) {
+  const parts = [`limitcast, last ${days} days:`, `${st.hits.length} usage limit${st.hits.length === 1 ? '' : 's'} reached`];
+  if (st.watched)
+    parts.push(`forecast ${st.leads.length} of the ${st.watched} it watched in advance${st.leads.length ? ` (avg ${avg(st.leads)} min ahead)` : ''}`);
+  if (st.outcomes.length)
+    parts.push(`${pro ? 'blocked' : 'would have blocked'} ${st.outcomes.length} runaway subagent${st.outcomes.length === 1 ? '' : 's'}`);
+  if (savedPerSession && savedPerSession > 0) parts.push(`starting context ${fmtK(savedPerSession)} tokens smaller per session`);
+  return `${parts[0]} ${parts.slice(1).join('; ')}. https://limitcast.dev`;
+}
+
+/**
+ * One line for the weekly SessionStart summary (shown to the user, never the model).
+ * @param {ReturnType<typeof resultsStats>} st
+ * @param {number|null} savedPerSession
+ */
+export function weeklyLine(st, savedPerSession) {
+  const parts = [`${st.hits.length} limit${st.hits.length === 1 ? '' : 's'} reached`];
+  if (st.leads.length) parts.push(`warned ahead on ${st.leads.length} (avg ${avg(st.leads)} min)`);
+  parts.push(`guard blocked ${st.outcomes.length} subagent${st.outcomes.length === 1 ? '' : 's'}`);
+  if (savedPerSession && savedPerSession > 0) parts.push(`starting context ${fmtK(savedPerSession)} tokens smaller`);
+  return `limitcast this week: ${parts.join(', ')}. Details: limitcast results`;
+}
+
+/**
+ * True once every 7 days. The first call only starts the clock, so the first summary covers a full week.
+ * @param {number} now epoch ms
+ */
+export function weeklyDue(now) {
+  const mark = join(stateDir(), 'weekly.at');
+  let last = null;
+  try {
+    last = Number(readFileSync(mark, 'utf8'));
+  } catch {
+    /* never shown */
+  }
+  if (last !== null && now - last < 7 * 86400_000) return false;
+  mkdirSync(stateDir(), { recursive: true });
+  writeFileSync(mark, String(now));
+  return last !== null;
+}
+
+const avg = (/** @type {number[]} */ xs) => Math.round(xs.reduce((a, b) => a + b, 0) / xs.length);
+const fmtK = (/** @type {number} */ n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
+
+/**
+ * @param {{now:number, days:number, samples:Sample[], blocks:Block[], pro:boolean, saved:string|null}} r
+ *   blocks: every logged block (Pro blocks and free previews); saved: the starting-context text, if any
+ */
+export function resultsReport({ now, days, samples, blocks, pro, saved }) {
   const when = (/** @type {number} */ ms) =>
     new Date(ms).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
   const name = (/** @type {{src:string, win:string}} */ x) => `${NAMES[/** @type {'claude'} */ (x.src)] ?? x.src} ${x.win}`;
   const out = [`# limitcast results, last ${days} day${days === 1 ? '' : 's'}`];
 
-  const inPeriod = samples.filter((s) => s.t >= since);
-  const hits = limitHits(inPeriod);
+  const st = resultsStats({ now, days, samples, blocks, pro });
+  const { hits } = st;
   out.push('', '## Limits reached');
-  if (!inPeriod.length) out.push('No limit readings in this period. Is the status-line recorder installed? Run `limitcast doctor`.');
+  if (!st.readings) out.push('No limit readings in this period. Is the status-line recorder installed? Run `limitcast doctor`.');
   else if (!hits.length) out.push('None: no window reached 100%.');
   else {
     const watched = hits.filter((h) => !h.unseen);
@@ -145,35 +209,35 @@ export function resultsReport({ now, days, samples, blocks, saved }) {
     }
   }
 
-  out.push('', '## Subagent guard');
-  if (blocks === null) out.push('Not active (Pro). It blocks new subagents when a window is on pace to run out before it resets.');
-  else {
-    const outcomes = blockOutcomes(
-      blocks.filter((b) => b.t >= since),
-      samples,
-      now,
+  out.push('', pro ? '## Subagent guard' : '## Subagent guard (preview)');
+  const { outcomes } = st;
+  if (!outcomes.length)
+    out.push(
+      pro
+        ? 'No subagents blocked in this period.'
+        : 'Nothing Pro would have blocked in this period. (`limitcast install --guard` records it; without Pro the guard never blocks.)',
     );
-    if (!outcomes.length) out.push('No subagents blocked in this period.');
-    else {
-      const n = (/** @type {string} */ o) => outcomes.filter((x) => x.outcome === o).length;
-      out.push(
-        `${outcomes.length} subagent spawn${outcomes.length === 1 ? '' : 's'} blocked. Afterwards: ${n('hit')} window(s) reached 100% anyway (the forecast was right), ` +
-          `${n('under')} reset without reaching 100% (the block may have saved them, or the forecast ran high), ${n('open')} still open.`,
-      );
-      for (const o of outcomes) {
-        const what =
-          o.outcome === 'hit'
-            ? `reached 100% at ${when(/** @type {number} */ (o.hitAt))}`
-            : o.outcome === 'under'
-              ? `reset at ${o.peak}%`
-              : `now at ${o.peak}%, resets ${when(o.reset)}`;
-        out.push(`- ${when(o.t)}: ${name(o)} at ${o.pct}%, forecast out in ~${Math.max(0, Math.round((o.wall - o.t) / 60_000))} min; ${what}`);
-      }
+  else {
+    const n = (/** @type {string} */ o) => outcomes.filter((x) => x.outcome === o).length;
+    const count = `${outcomes.length} subagent spawn${outcomes.length === 1 ? '' : 's'}`;
+    out.push(
+      `${pro ? `${count} blocked` : `Pro would have blocked ${count} (your free install let them run)`}. Afterwards: ${n('hit')} window(s) reached 100% (the forecast was right), ` +
+        `${n('under')} reset without reaching 100% (${pro ? 'the block may have saved them, or' : 'here'} the forecast ran high), ${n('open')} still open.`,
+    );
+    for (const o of outcomes) {
+      const what =
+        o.outcome === 'hit'
+          ? `reached 100% at ${when(/** @type {number} */ (o.hitAt))}`
+          : o.outcome === 'under'
+            ? `reset at ${o.peak}%`
+            : `now at ${o.peak}%, resets ${when(o.reset)}`;
+      out.push(`- ${when(o.t)}: ${name(o)} at ${o.pct}%, forecast out in ~${Math.max(0, Math.round((o.wall - o.t) / 60_000))} min; ${what}`);
     }
   }
 
   out.push('', '## Starting context');
   out.push(saved ?? 'Run `limitcast trim` once to record your starting context, then check back here.');
+  if (!pro && outcomes.length) out.push('', `Pro blocks those subagents before they use up your window: https://limitcast.dev/#pricing`);
   if (days > 8) out.push('', 'Limit readings are kept for 8 days, so the first two sections cover at most the last 8 days.');
   return out.join('\n');
 }

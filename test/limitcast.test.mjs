@@ -170,20 +170,25 @@ test('CLI end to end: statusline records, wraps the command; guard is Pro-gated 
   const status = JSON.parse(execFileSync('node', [bin, 'status', '--json'], { env }).toString());
   assert.equal(status[0].verdict, 'AT_RISK'); // +80%/h, 10% left -> ~7 min, reset in 60 min
 
-  // No license: the guard allows even though the window is at risk.
+  // No license: the guard allows even though the window is at risk, and records the preview.
   const free = execFileSync('node', [bin, 'guard'], { input: JSON.stringify({ tool_name: 'Agent' }), env }).toString();
   assert.equal(free, '');
+  const preview = execFileSync('node', [bin, 'results'], { env }).toString();
+  assert.match(preview, /Pro would have blocked 1 subagent spawn/);
   // With Pro the CLI runs runGuard; on the same readings it denies.
   const prev = process.env.LIMITCAST_STATE;
   process.env.LIMITCAST_STATE = state;
   try {
     assert.match(await runGuard({ tool_name: 'Agent' }, Date.now(), 30), /^limitcast: Claude 5h/);
     assert.equal(await runGuard({ tool_name: 'Bash' }, Date.now(), 30), null);
-    // Only the block is logged, for `limitcast results`.
+    // Only blocks are logged, for `limitcast results`: the free preview, then the real block.
     const logged = readFileSync(join(state, 'guard.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
     assert.deepEqual(
-      logged.map((b) => [b.src, b.win, b.pct]),
-      [['claude', '5h', 90]],
+      logged.map((b) => [b.src, b.win, b.pct, Boolean(b.shadow)]),
+      [
+        ['claude', '5h', 90, true],
+        ['claude', '5h', 90, false],
+      ],
     );
   } finally {
     process.env.LIMITCAST_STATE = prev;

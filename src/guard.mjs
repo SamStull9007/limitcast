@@ -57,8 +57,9 @@ function blockingForecast(tool, forecasts, now, minutes) {
  * @param {any} hook parsed hook input
  * @param {number} now epoch ms
  * @param {number} minutes
+ * @param {{preview?:boolean}} [opts] preview: a free install; log what Pro would block, never block
  */
-export async function runGuard(hook, now, minutes) {
+export async function runGuard(hook, now, minutes, { preview = false } = {}) {
   const tool = String(hook?.tool_name ?? hook?.toolName ?? hook?.tool ?? '');
   const src = spawnSource(tool);
   // Codex: only the last two hours of rollouts, so the hook stays fast; Grok has no readings to judge by.
@@ -75,10 +76,19 @@ export async function runGuard(hook, now, minutes) {
     // Any session of the blocking account identifies it for `results`.
     const sid = f.src === 'claude' ? samples.find((s) => s.src === 'claude' && s.sid)?.sid : undefined;
     try {
-      logBlock({ t: now, src: f.src, win: f.win, pct: f.pct, wall: f.wall, reset: f.reset, ...(sid ? { sid } : {}) });
+      logBlock({
+        t: now,
+        src: f.src,
+        win: f.win,
+        pct: f.pct,
+        wall: f.wall,
+        reset: f.reset,
+        ...(sid ? { sid } : {}),
+        ...(preview ? { shadow: true } : {}),
+      });
     } catch {
       /* a failed log must not change the decision */
     }
   }
-  return reason;
+  return preview ? null : reason;
 }

@@ -9,10 +9,10 @@ import { formatChecks } from '../src/formats.mjs';
 import { runGuard } from '../src/guard.mjs';
 import { doctor, install, uninstall } from '../src/install.mjs';
 import { activate, currentLicense, isPro, UPGRADE_URL } from '../src/license.mjs';
-import { driftMessage, loadOverhead, recordOverhead, savedSummary, snapshot } from '../src/overhead.mjs';
+import { driftMessage, loadOverhead, recordOverhead, savedPerSession, savedSummary, snapshot } from '../src/overhead.mjs';
 import { activatePolar, deactivatePolar, refreshDue, refreshPolar } from '../src/polar.mjs';
 import { burnReport } from '../src/report.mjs';
-import { loadBlocks, resultsReport } from '../src/results.mjs';
+import { loadBlocks, resultsReport, resultsShare, resultsStats, weeklyDue, weeklyLine } from '../src/results.mjs';
 import { claudeSamples, readCodex } from '../src/sources.mjs';
 import { countInteractiveSince, latestInteractiveTranscript } from '../src/startup.mjs';
 import { KEEP_MS, load, record, stateDir } from '../src/store.mjs';
@@ -87,10 +87,10 @@ if (cmd === 'status') {
   }
   console.log(oneLine(forecastAll(oneClaudeAccount(load(now - KEEP_MS), sid), now)));
 } else if (cmd === 'guard') {
-  // The guard is Pro; without a valid license it allows everything (an expired license must never block work).
-  if (process.env.LIMITCAST_ALLOW === '1' || !isPro()) process.exit(0);
+  // Blocking is Pro; without a valid license the guard only previews (logs what Pro would block) and allows everything.
+  if (process.env.LIMITCAST_ALLOW === '1') process.exit(0);
   try {
-    const reason = await runGuard(JSON.parse(readStdin()), now, Number(process.env.LIMITCAST_GUARD_MINUTES ?? 30));
+    const reason = await runGuard(JSON.parse(readStdin()), now, Number(process.env.LIMITCAST_GUARD_MINUTES ?? 30), { preview: !isPro() });
     if (reason) {
       console.log(
         JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }),
@@ -103,10 +103,13 @@ if (cmd === 'status') {
 } else if (cmd === 'install') {
   const wantGuard = args.includes('--guard');
   const wantAlerts = args.includes('--alerts');
-  if ((wantGuard || wantAlerts) && !isPro()) {
-    console.log(`The subagent guard and alerts are part of limitcast Pro (${UPGRADE_URL}). Installing the free features.`);
+  if (wantGuard && !isPro()) {
+    console.log(
+      `Without Pro the subagent guard runs as a preview: it never blocks, it records what Pro would have blocked (see \`limitcast results\`). Pro: ${UPGRADE_URL}`,
+    );
   }
-  for (const c of install({ guard: wantGuard && isPro(), alerts: wantAlerts && isPro() })) console.log(`✓ ${c}`);
+  if (wantAlerts && !isPro()) console.log(`Alerts and the weekly summary are part of limitcast Pro (${UPGRADE_URL}). Skipping them.`);
+  for (const c of install({ guard: wantGuard, alerts: wantAlerts && isPro() })) console.log(`✓ ${c}`);
   console.log('Restart Claude Code and Codex to load it. Then: limitcast doctor');
 } else if (cmd === 'uninstall') {
   const changes = uninstall();
@@ -164,7 +167,15 @@ if (cmd === 'status') {
     const latest = await latestInteractiveTranscript(claudeRoot());
     const d = latest ? recordOverhead(snapshot(latest)) : null;
     if (hook) {
-      if (d?.alert) console.log(JSON.stringify({ systemMessage: driftMessage(d) }));
+      const lines = d?.alert ? [driftMessage(d)] : [];
+      // Once a week, what limitcast did: shown to the user at session start, never to the model.
+      if (weeklyDue(now)) {
+        const since = now - 7 * 86400_000;
+        const samples = [...load(since), ...(await readCodex(since))];
+        const s = loadOverhead();
+        lines.push(weeklyLine(resultsStats({ now, days: 7, samples, blocks: loadBlocks(since), pro: true }), s ? savedPerSession(s) : null));
+      }
+      if (lines.length) console.log(JSON.stringify({ systemMessage: lines.join('\n') }));
     } else if (!latest) console.log('No interactive Claude Code session found yet.');
     else if (!d) console.log('Starting context recorded. limitcast will tell you when it grows.');
     else console.log(d.alert ? driftMessage(d) : 'No meaningful change in your starting context since the last session.');
@@ -181,20 +192,26 @@ if (cmd === 'status') {
   const s = loadOverhead();
   console.log(s ? savedSummary(s, await countInteractiveSince(claudeRoot(), s.first.at)) : 'Nothing measured yet. Run `limitcast trim` first.');
 } else if (cmd === 'results') {
-  // Free shows limits reached and how far ahead limitcast warned; the guard and savings sections are Pro.
+  // Free shows limits reached, how far ahead limitcast warned, and the guard preview; Pro adds real blocks and savings.
   const pro = isPro();
   const since = now - days() * 86400_000;
   let saved = `Pro tracks how much your starting context shrinks and what that saves: ${UPGRADE_URL}`;
+  let perSession = null;
   if (pro) {
     const latest = await latestInteractiveTranscript(claudeRoot());
     if (latest) recordOverhead(snapshot(latest));
     const s = loadOverhead();
-    saved = s
-      ? savedSummary(s, await countInteractiveSince(claudeRoot(), s.first.at))
-      : 'Run `limitcast trim` once to record your starting context, then check back here.';
+    perSession = s ? savedPerSession(s) : null;
+    saved =
+      s && !args.includes('--share')
+        ? savedSummary(s, await countInteractiveSince(claudeRoot(), s.first.at))
+        : 'Run `limitcast trim` once to record your starting context, then check back here.';
   }
   const samples = [...load(since), ...(await readCodex(since))];
-  console.log(resultsReport({ now, days: days(), samples, blocks: pro ? loadBlocks(since) : null, saved }));
+  const blocks = loadBlocks(since);
+  if (args.includes('--share'))
+    console.log(resultsShare(resultsStats({ now, days: days(), samples, blocks, pro }), { days: days(), pro, savedPerSession: perSession }));
+  else console.log(resultsReport({ now, days: days(), samples, blocks, pro, saved }));
 } else if (cmd === 'activate') {
   // Signed offline keys start with LC1.; anything else is a Polar license key.
   const key = args[0] ?? '';
