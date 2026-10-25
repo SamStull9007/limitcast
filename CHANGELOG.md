@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.1
+
+- Weekly (and other multi-day) windows are forecast from the average pace over the last full day, idle time included, instead of the last hour. One busy hour no longer shows a weekly runout days early (`7d 3% ⚠ out Tue`). If the last hour's pace would run the window out within the hour, that still wins, so the guard catches a burst near the end of the week. The 5-hour window is unchanged.
+
 ## 0.8.0
 
 - Fix: Claude readings were forecast per session, and a short session rarely has 5 minutes of readings, so the forecast and the guard often had no burn rate. Sessions of the same account (same window reset times, usage only rising) now share one history. On the author's own data this turned a missed 7-day limit into a 40-minute warning.

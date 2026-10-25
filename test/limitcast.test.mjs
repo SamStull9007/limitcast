@@ -92,6 +92,31 @@ test('NEAR at 95%+ even with no burn rate; the guard does not block on NEAR alon
   assert.equal(guardDecision('Agent', [forecast([s(0, 97)], now)], now, 30), null);
 });
 
+test('7d: one busy hour is not projected across the week; a burst near the end still is', () => {
+  const week = now / 1000 + 5 * 86400; // resets in 5 days
+  const w = (minsAgo, pct) => ({ ...s(minsAgo, pct, week), win: '7d' });
+  // Reset 14h ago at 0%, idle, then +3% in the last hour: the hour alone says ~32h to runout (AT_RISK);
+  // the day's pace says weeks.
+  const burst = [w(14 * 60, 0), w(60, 0), w(30, 1.5), w(0, 3)];
+  const f = forecast(burst, now);
+  assert.equal(f.verdict, 'OK');
+  assert.ok(f.rate < 0.5);
+  // 97% and +6%/h over the last 20 minutes: out in ~30 min, so the short pace wins and the guard can act.
+  const end = [w(24 * 60, 80), w(20, 95), w(10, 96), w(0, 97)];
+  const g = forecast(end, now);
+  assert.equal(g.verdict, 'AT_RISK');
+  assert.ok(g.wall - now <= 60 * 60_000);
+  assert.match(guardDecision('Agent', [g], now, 60), /Claude 7d/);
+  assert.equal(f.rate, 3 / 24); // 3% over the last full day
+  // A week window that began 2h ago at 0%: still averaged over a full day, not 2 hours.
+  const fresh = (minsAgo, pct) => ({ ...s(minsAgo, pct, now / 1000 + 7 * 86400 - 2 * 3600), win: '7d' });
+  assert.equal(forecast([fresh(60, 1), fresh(0, 2)], now).verdict, 'OK');
+  // A day after the burst with nothing new: no pace, no runout.
+  assert.equal(forecast(burst, now + 25 * 3600_000).wall, null);
+  // The 5h window keeps the last hour's pace.
+  assert.equal(forecast([s(60, 40), s(30, 55), s(0, 70)], now).wall, now + 3600_000);
+});
+
 test('window names', () => {
   assert.equal(windowName(300), '5h');
   assert.equal(windowName(10080), '7d');

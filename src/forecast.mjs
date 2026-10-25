@@ -5,6 +5,8 @@
 const RESET_JITTER_S = 120; // Codex resets_at drifts by seconds between events
 const RECENT_MS = 60 * 60 * 1000;
 const NEAR_PCT = 95;
+const DAY_MS = 24 * 3600_000;
+const IMMINENT_MS = 60 * 60_000;
 
 /**
  * Burn rate and limit forecast for one (src, win) series.
@@ -22,14 +24,36 @@ export function forecast(samples, now) {
 
   const window = sorted.filter((s) => Math.abs(s.reset - last.reset) <= RESET_JITTER_S);
   const recent = window.filter((s) => s.t >= now - RECENT_MS);
-  const pts = recent.length >= 2 ? recent : window;
-  const rate = slopePerHour(pts);
+  const short = slopePerHour(recent.length >= 2 ? recent : window);
   // NEAR: so close to the limit that one heavy turn can finish it, even with no burn rate to go on yet.
   const calm = last.pct >= NEAR_PCT ? 'NEAR' : 'OK';
-  if (rate === null || rate <= 0) return { ...base, rate, verdict: calm };
+  const runout = (/** @type {number|null} */ r) => (r === null || r <= 0 ? null : last.t + ((100 - last.pct) / r) * 3600_000);
 
-  const wall = last.t + ((100 - last.pct) / rate) * 3600_000;
+  let rate = short;
+  let wall = runout(short);
+  // A multi-day window spans nights and idle days: one busy hour projected across them predicts a runout days
+  // early. Use the average pace over the last full day, idle time included, unless the last hour's pace runs
+  // the window out within the hour (a burst near the end of the week must still be caught).
+  const len = windowMs(last.win);
+  if (len >= DAY_MS && !(wall !== null && wall - now <= IMMINENT_MS)) {
+    const from = now - DAY_MS;
+    // Usage a day ago: 0% if the window began since then, else the last reading before then (or the first one).
+    const before = window.filter((s) => s.t <= from);
+    const then = resetMs - len >= from ? 0 : (before.at(-1) ?? window[0]).pct;
+    rate = (last.pct - then) / 24;
+    wall = runout(rate);
+  }
+  if (wall === null) return { ...base, rate, verdict: calm };
   return { ...base, rate, wall, verdict: wall < resetMs ? 'AT_RISK' : calm };
+}
+
+/**
+ * Length of a window from its name ("5h", "7d", "90m"), in ms; 0 if unknown.
+ * @param {string} win
+ */
+export function windowMs(win) {
+  const m = /^(\d+)([mhd])$/.exec(win);
+  return m ? Number(m[1]) * { m: 60_000, h: 3600_000, d: DAY_MS }[/** @type {'m'|'h'|'d'} */ (m[2])] : 0;
 }
 
 /**
