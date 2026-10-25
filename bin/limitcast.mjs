@@ -29,6 +29,7 @@ import { countInteractiveSince, latestInteractiveTranscript } from '../src/start
 import { KEEP_MS, load, record, stateDir } from '../src/store.mjs';
 import { baseline, contributors, measuredSavings, shareSummary, startupReport, trimReport } from '../src/trim.mjs';
 import { claudeRoot, grokRoot, readUsage } from '../src/usage.mjs';
+import { dailyDue, foldEvents, loadValue, saveValue, scanSessions, valueSection, valueTotals } from '../src/value.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
@@ -90,6 +91,8 @@ if (cmd === 'status') {
     saveFeedShape(feed);
     // Hook-only Pro users never run an interactive command, so the weekly Polar check starts here, detached.
     if (refreshDue(now)) spawn(process.execPath, [fileURLToPath(import.meta.url), 'license'], { detached: true, stdio: 'ignore' }).unref();
+    // Readings are kept 8 days; the daily rollup folds what they showed into the long-term value record.
+    if (dailyDue(now)) spawn(process.execPath, [fileURLToPath(import.meta.url), 'rollup'], { detached: true, stdio: 'ignore' }).unref();
   } catch {
     /* never break the status line */
   }
@@ -203,7 +206,15 @@ if (cmd === 'status') {
         const since = now - 7 * 86400_000;
         const samples = [...load(since), ...(await readCodex(since))];
         const s = loadOverhead();
-        lines.push(weeklyLine(resultsStats({ now, days: 7, samples, blocks: loadBlocks(since), pro: true }), s ? savedPerSession(s) : null));
+        // The daily rollup keeps the value record current; a session-start hook must not scan transcripts itself.
+        const week = Object.values(loadValue().sessions).filter((x) => x.at >= since);
+        lines.push(
+          weeklyLine(
+            resultsStats({ now, days: 7, samples, blocks: loadBlocks(since), pro: true }),
+            s ? savedPerSession(s) : null,
+            week.reduce((a, x) => a + x.turns * x.savedPerTurn, 0),
+          ),
+        );
       }
       if (lines.length) console.log(JSON.stringify({ systemMessage: lines.join('\n') }));
     } else if (!latest) console.log('No interactive Claude Code session found yet.');
@@ -234,14 +245,29 @@ if (cmd === 'status') {
     perSession = s ? savedPerSession(s) : null;
     saved =
       s && !args.includes('--share')
-        ? savedSummary(s, await countInteractiveSince(claudeRoot(), s.first.at))
+        ? savedSummary(s, 0).split('\n')[0] // the per-session drop; the value section above has the totals
         : 'Run `limitcast trim` once to record your starting context, then check back here.';
   }
   const samples = [...load(since), ...(await readCodex(since))];
   const blocks = loadBlocks(since);
+  const totals = valueTotals(await refreshValue());
   if (args.includes('--share'))
-    console.log(resultsShare(resultsStats({ now, days: days(), samples, blocks, pro }), { days: days(), pro, savedPerSession: perSession }));
-  else console.log(resultsReport({ now, days: days(), samples, blocks, pro, saved }));
+    console.log(
+      resultsShare(resultsStats({ now, days: days(), samples, blocks, pro }), {
+        days: days(),
+        pro,
+        savedPerSession: perSession,
+        notResent: totals.tokens,
+      }),
+    );
+  else console.log(resultsReport({ now, days: days(), samples, blocks, pro, saved, value: valueSection(totals, { now, pro }) }));
+} else if (cmd === 'rollup') {
+  // Started daily in the background by the status line: keeps the value record current. Never prints.
+  try {
+    await refreshValue();
+  } catch {
+    /* next time */
+  }
 } else if (cmd === 'activate') {
   // Signed offline keys start with LC1.; anything else is a Polar license key.
   const key = args[0] ?? '';
@@ -260,6 +286,19 @@ if (cmd === 'status') {
 } else {
   console.log(HELP);
   process.exit(cmd && !['help', '--help', '-h'].includes(cmd) ? 1 : 0);
+}
+
+/** Fold the last 8 days of readings and blocks, and any new sessions, into the long-term value record. */
+async function refreshValue() {
+  const since = now - KEEP_MS;
+  const claude = load(since);
+  const o = loadOverhead();
+  // limitcast started watching at its first status-line reading (or first measurement), not when Codex's logs begin.
+  const start = Math.min(now, o?.first.at ?? now, ...claude.map((s) => s.t));
+  const v = foldEvents(loadValue(), { now, samples: [...claude, ...(await readCodex(since))], blocks: loadBlocks(since), start });
+  await scanSessions(v, { root: claudeRoot(), baseline: o ? { at: o.first.at, chars: o.first.chars } : null, now });
+  saveValue(v);
+  return v;
 }
 
 /**

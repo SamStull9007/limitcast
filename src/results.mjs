@@ -129,15 +129,17 @@ export function resultsStats({ now, days, samples, blocks, pro }) {
 /**
  * Totals only, no project, file or session names: safe to post.
  * @param {ReturnType<typeof resultsStats>} st
- * @param {{days:number, pro:boolean, savedPerSession:number|null}} o
+ * @param {{days:number, pro:boolean, savedPerSession:number|null, notResent?:number}} o
+ *   notResent: tokens not re-sent since install (the value record)
  */
-export function resultsShare(st, { days, pro, savedPerSession }) {
+export function resultsShare(st, { days, pro, savedPerSession, notResent = 0 }) {
   const parts = [`limitcast, last ${days} days:`, `${st.hits.length} usage limit${st.hits.length === 1 ? '' : 's'} reached`];
   if (st.watched)
     parts.push(`forecast ${st.leads.length} of the ${st.watched} it watched in advance${st.leads.length ? ` (avg ${avg(st.leads)} min ahead)` : ''}`);
   if (st.outcomes.length)
     parts.push(`${pro ? 'blocked' : 'would have blocked'} ${st.outcomes.length} runaway subagent${st.outcomes.length === 1 ? '' : 's'}`);
   if (savedPerSession && savedPerSession > 0) parts.push(`starting context ${fmtK(savedPerSession)} tokens smaller per session`);
+  if (notResent > 0) parts.push(`${fmtK(notResent)} tokens not re-sent since install`);
   return `${parts[0]} ${parts.slice(1).join('; ')}. https://limitcast.dev`;
 }
 
@@ -145,12 +147,14 @@ export function resultsShare(st, { days, pro, savedPerSession }) {
  * One line for the weekly SessionStart summary (shown to the user, never the model).
  * @param {ReturnType<typeof resultsStats>} st
  * @param {number|null} savedPerSession
+ * @param {number} [notResent] tokens not re-sent this week
  */
-export function weeklyLine(st, savedPerSession) {
+export function weeklyLine(st, savedPerSession, notResent = 0) {
   const parts = [`${st.hits.length} limit${st.hits.length === 1 ? '' : 's'} reached`];
   if (st.leads.length) parts.push(`warned ahead on ${st.leads.length} (avg ${avg(st.leads)} min)`);
   parts.push(`guard blocked ${st.outcomes.length} subagent${st.outcomes.length === 1 ? '' : 's'}`);
   if (savedPerSession && savedPerSession > 0) parts.push(`starting context ${fmtK(savedPerSession)} tokens smaller`);
+  if (notResent > 0) parts.push(`${fmtK(notResent)} tokens not re-sent`);
   return `limitcast this week: ${parts.join(', ')}. Details: limitcast results`;
 }
 
@@ -173,17 +177,20 @@ export function weeklyDue(now) {
 }
 
 const avg = (/** @type {number[]} */ xs) => Math.round(xs.reduce((a, b) => a + b, 0) / xs.length);
-const fmtK = (/** @type {number} */ n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
+const fmtK = (/** @type {number} */ n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
 
 /**
- * @param {{now:number, days:number, samples:Sample[], blocks:Block[], pro:boolean, saved:string|null}} r
- *   blocks: every logged block (Pro blocks and free previews); saved: the starting-context text, if any
+ * @param {{now:number, days:number, samples:Sample[], blocks:Block[], pro:boolean, saved:string|null, value?:string}} r
+ *   blocks: every logged block (Pro blocks and free previews); saved: the starting-context text, if any;
+ *   value: the "since you installed" section, shown first
  */
-export function resultsReport({ now, days, samples, blocks, pro, saved }) {
+export function resultsReport({ now, days, samples, blocks, pro, saved, value = '' }) {
   const when = (/** @type {number} */ ms) =>
     new Date(ms).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
   const name = (/** @type {{src:string, win:string}} */ x) => `${NAMES[/** @type {'claude'} */ (x.src)] ?? x.src} ${x.win}`;
-  const out = [`# limitcast results, last ${days} day${days === 1 ? '' : 's'}`];
+  const out = value
+    ? ['# limitcast results', '', value, '', `# Last ${days} day${days === 1 ? '' : 's'} in detail`]
+    : [`# limitcast results, last ${days} day${days === 1 ? '' : 's'}`];
 
   const st = resultsStats({ now, days, samples, blocks, pro });
   const { hits } = st;

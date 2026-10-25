@@ -8,6 +8,7 @@
 - Guard preview: without Pro, `install --guard` installs the guard in log-only mode. It never blocks; `limitcast results` shows what Pro would have blocked and whether those windows then ran out.
 - Weekly summary (Pro, with `--alerts`): once a week at session start, one line to you (never the model): limits reached, warning lead, subagents blocked, tokens saved.
 - `limitcast results --share`: totals only, safe to post.
+- `limitcast results` opens with what limitcast did since it started watching, kept beyond the 8 days of raw readings: tokens not re-sent (your smaller starting context times every main-thread model call, read from your transcripts), how many of the limits it watched you approach it warned you about and how far ahead, and the subagents the guard stopped. A daily background rollup, started by the status line, keeps it current.
 
 ## 0.7.0
 

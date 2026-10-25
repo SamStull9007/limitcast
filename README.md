@@ -13,7 +13,7 @@ Every Claude Code session starts at 102.7k tokens before your first message.
 
 - **Trim advisor:** measures your latest session's starting context from its transcript (SessionStart hook output, MCP server instructions and tool names, skills, agents, instruction files). Free shows the total and how much of it you haven't used; Pro names each item and what it costs, and `trim --apply` makes the cuts for you (reversible).
 - **Subagent guard (Pro)** for Claude Code and Codex: blocks a new subagent when that tool's own window is on pace to run out before it resets. Free installs get a preview that never blocks and shows what it would have stopped.
-- **Results:** `limitcast results` checks limitcast against what actually happened: every limit you hit, how far ahead it warned, and what the guard blocked.
+- **Results:** `limitcast results` shows the value since you installed it (tokens not re-sent, limits it warned you about and how far ahead, subagents stopped), then checks the last week against what actually happened.
 - **Burn report (Pro):** Claude Code, Codex and Grok tokens by day, project, model and session.
 - **Runout forecast (free):** burn rate and the clock time each window runs out.
 - **Local only.** Reads the limit readings Claude Code passes to your status line and the logs Claude Code, Codex and Grok already write. No logins, and your usage data never leaves your machine. The free tier makes no network calls; a Pro license key talks to Polar only to activate, to re-check weekly, and to deactivate (it sends the key and your computer's name).
