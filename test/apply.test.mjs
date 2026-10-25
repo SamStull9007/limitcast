@@ -5,9 +5,36 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { applyTrim, installedPlugins, planTrim, stillLoading, transcriptCwd, undoTrim } from '../src/apply.mjs';
+import { applyTrim, installedPlugins, planTrim, reapplyTrim, stillLoading, transcriptCwd, undoTrim } from '../src/apply.mjs';
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
+
+test('re-apply: a rewrite that drops every cut puts them back; one turned back on by you stays on', () => {
+  const dir = tmp('lc-reapply-');
+  const prev = process.env.LIMITCAST_STATE;
+  process.env.LIMITCAST_STATE = join(dir, 'state');
+  try {
+    const settings = join(dir, 'settings.json');
+    const claudeJson = join(dir, 'claude.json');
+    writeFileSync(settings, '{}');
+    writeFileSync(claudeJson, JSON.stringify({ projects: { '/p': {} } }));
+    applyTrim({ hide: ['a', 'b'], pluginSkills: [], disable: ['x', 'y'], manualMcp: [] }, { cwd: '/p', now: 1, settings, claudeJson });
+    assert.deepEqual(reapplyTrim({ settings, claudeJson }), { reapplied: [], released: [] }); // nothing changed
+    // Claude Code rewrites ~/.claude.json from memory: both servers gone at once.
+    writeFileSync(claudeJson, JSON.stringify({ projects: { '/p': { disabledMcpServers: ['mine'] } } }));
+    assert.deepEqual(reapplyTrim({ settings, claudeJson }).reapplied, ['x', 'y']);
+    assert.deepEqual(JSON.parse(readFileSync(claudeJson, 'utf8')).projects['/p'].disabledMcpServers, ['mine', 'x', 'y']);
+    // You turn one skill back on in /skills: limitcast lets it be, and forgets it.
+    const s = JSON.parse(readFileSync(settings, 'utf8'));
+    delete s.skillOverrides.a;
+    writeFileSync(settings, JSON.stringify(s));
+    assert.deepEqual(reapplyTrim({ settings, claudeJson }), { reapplied: [], released: ['a'] });
+    assert.equal(JSON.parse(readFileSync(settings, 'utf8')).skillOverrides.a, undefined);
+    assert.deepEqual(reapplyTrim({ settings, claudeJson }), { reapplied: [], released: [] });
+  } finally {
+    process.env.LIMITCAST_STATE = prev;
+  }
+});
 const plugins = { names: new Set(['slack']), servers: ['plugin:greptile:greptile'] };
 
 test('plan: standalone skills are hidden, plugin skills listed; MCP names must be exact', () => {

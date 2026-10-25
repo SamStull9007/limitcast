@@ -11,6 +11,7 @@ import {
   localSkillFolders,
   planTrim,
   projectMcpServers,
+  reapplyTrim,
   stillLoading,
   transcriptCwd,
   undoTrim,
@@ -308,6 +309,12 @@ if (cmd === 'status') {
     const d = latest ? recordOverhead(snapshot(latest)) : null;
     if (hook) {
       const lines = d?.alert ? [driftMessage(d)] : [];
+      // Claude Code may have rewritten the files `trim --apply` changed: put the cuts back for the next session.
+      const re = reapplyTrim();
+      if (re.reapplied.length)
+        lines.push(
+          `limitcast: Claude Code had undone ${re.reapplied.length} of your trim cuts; they're back from your next session. (limitcast trim --undo to drop them)`,
+        );
       // Once a week, what limitcast did: shown to the user at session start, never to the model.
       if (weeklyDue(now)) {
         const since = now - 7 * 86400_000;

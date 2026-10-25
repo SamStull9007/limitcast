@@ -190,6 +190,52 @@ export function undoTrim({ settings = settingsPath(), claudeJson = claudeJsonPat
 }
 
 /**
+ * Keep the last --apply in place. A running Claude Code session can rewrite ~/.claude.json (or settings) and drop
+ * every change at once: then put them back. When only some are gone, you turned those back on yourself (/mcp,
+ * /skills): leave them and forget them, so limitcast never fights your choice. Checked per file.
+ * @param {{settings?:string, claudeJson?:string}} [o]
+ * @returns {{reapplied:string[], released:string[]}}
+ */
+export function reapplyTrim({ settings = settingsPath(), claudeJson = claudeJsonPath() } = {}) {
+  const ledger = loadLedger();
+  const last = ledger.at(-1);
+  const out = { reapplied: /** @type {string[]} */ ([]), released: /** @type {string[]} */ ([]) };
+  if (!last) return out;
+  if (last.skills.length && existsSync(settings)) {
+    const cfg = readSettings(settings);
+    const gone = last.skills.filter((s) => cfg.skillOverrides?.[s.name] !== 'user-invocable-only');
+    if (gone.length === last.skills.length) {
+      cfg.skillOverrides ??= {};
+      for (const s of gone) cfg.skillOverrides[s.name] = 'user-invocable-only';
+      backup(settings);
+      writeJson(settings, cfg);
+      out.reapplied.push(...gone.map((s) => s.name));
+    } else if (gone.length) {
+      last.skills = last.skills.filter((s) => !gone.includes(s));
+      out.released.push(...gone.map((s) => s.name));
+    }
+  }
+  if (last.mcp.length && existsSync(claudeJson)) {
+    const cj = readSettings(claudeJson);
+    const list = cj.projects?.[last.cwd]?.disabledMcpServers ?? [];
+    const gone = last.mcp.filter((n) => !list.includes(n));
+    if (gone.length === last.mcp.length) {
+      cj.projects ??= {};
+      cj.projects[last.cwd] ??= {};
+      cj.projects[last.cwd].disabledMcpServers = [...list, ...gone];
+      backup(claudeJson);
+      writeJson(claudeJson, cj);
+      out.reapplied.push(...gone);
+    } else if (gone.length) {
+      last.mcp = last.mcp.filter((n) => !gone.includes(n));
+      out.released.push(...gone);
+    }
+  }
+  if (out.released.length) writeJson(ledgerPath(), ledger);
+  return out;
+}
+
+/**
  * Items an earlier --apply turned off that still loaded in a session started after it
  * (for example, a running Claude Code session rewrote ~/.claude.json).
  * @param {{pieces:{group:string, name:string}[], at:number}} b latest measured session

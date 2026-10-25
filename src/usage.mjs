@@ -1,8 +1,9 @@
 // @ts-check
-import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { stateDir } from './store.mjs';
 
 /**
  * One model response's token usage.
@@ -166,24 +167,58 @@ function grokLedgers(root, since) {
 export async function readUsage(since, roots = {}, activity) {
   /** @type {Usage[]} */
   const out = [];
+  // Parsed transcripts are cached by size and mtime: only new or changed ones are read again.
+  const cache = loadUsageCache();
+  /** @type {typeof cache} */
+  const next = {};
+  /**
+   * @param {string} file
+   * @param {(file:string)=>Promise<{u:Usage[], a?:{skills:string[], mcp:string[]}}>} parse
+   */
+  const cached = async (file, parse) => {
+    const st = statSync(file);
+    const hit = cache[file];
+    const entry = hit && hit.s === st.size && hit.m === st.mtimeMs ? hit : { s: st.size, m: st.mtimeMs, ...(await parse(file)) };
+    next[file] = entry;
+    return entry;
+  };
   for (const file of jsonlFiles(roots.claude ?? claudeRoot(), since, () => true)) {
-    const seen = new Set();
-    const session = basename(file, '.jsonl');
-    for await (const line of lines(file)) {
-      if (activity) claudeActivity(line, activity);
-      const u = claudeUsage(line, seen, session);
-      if (u && u.t >= since) out.push(u);
+    const e = await cached(file, async (f) => {
+      const seen = new Set();
+      const session = basename(f, '.jsonl');
+      /** @type {import('./trim.mjs').Activity} */
+      const act = { skills: new Set(), mcp: new Set() };
+      const u = [];
+      for await (const line of lines(f)) {
+        claudeActivity(line, act);
+        const x = claudeUsage(line, seen, session);
+        if (x) u.push(x);
+      }
+      return { u, a: { skills: [...act.skills], mcp: [...act.mcp] } };
+    });
+    for (const u of e.u) if (u.t >= since) out.push(u);
+    if (activity && e.a) {
+      for (const s of e.a.skills) activity.skills.add(s);
+      for (const m of e.a.mcp) activity.mcp.add(m);
     }
   }
   for (const file of jsonlFiles(roots.codex ?? codexRoot(), since, (n) => n.startsWith('rollout-'))) {
-    const st = { prev: null, cwd: '', model: '' };
-    // rollout-2026-10-23T18-39-41-<session uuid>.jsonl → the uuid
-    const session = basename(file, '.jsonl').replace(/^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-/, '');
-    for await (const line of lines(file)) {
-      const u = codexUsage(line, st, session);
-      if (u && u.t >= since) out.push(u);
-    }
+    const e = await cached(file, async (f) => {
+      const st = { prev: null, cwd: '', model: '' };
+      // rollout-2026-10-23T18-39-41-<session uuid>.jsonl → the uuid
+      const session = basename(f, '.jsonl').replace(/^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-/, '');
+      const u = [];
+      for await (const line of lines(f)) {
+        const x = codexUsage(line, st, session);
+        if (x) u.push(x);
+      }
+      return { u };
+    });
+    for (const u of e.u) if (u.t >= since) out.push(u);
   }
+  // Keep entries for files this run didn't need (another period) while they are recent; drop the rest.
+  for (const [f, e] of Object.entries(cache)) if (!next[f] && e.m >= Date.now() - CACHE_KEEP_MS && existsSync(f)) next[f] = e;
+  saveUsageCache(next);
   for (const { file, session, project } of grokLedgers(roots.grok ?? grokRoot(), since)) {
     let ledger;
     try {
@@ -194,6 +229,28 @@ export async function readUsage(since, roots = {}, activity) {
     for (const u of grokUsage(ledger, session, project)) if (u.t >= since) out.push(u);
   }
   return out;
+}
+
+const CACHE_KEEP_MS = 35 * 86400_000;
+const usageCacheFile = () => join(stateDir(), 'usage-cache.json');
+
+/** @returns {Record<string, {s:number, m:number, u:Usage[], a?:{skills:string[], mcp:string[]}}>} */
+function loadUsageCache() {
+  try {
+    return JSON.parse(readFileSync(usageCacheFile(), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+/** @param {ReturnType<typeof loadUsageCache>} c */
+function saveUsageCache(c) {
+  try {
+    mkdirSync(stateDir(), { recursive: true });
+    writeFileSync(usageCacheFile(), JSON.stringify(c));
+  } catch {
+    /* a cache: the next run just reads the transcripts */
+  }
 }
 
 /** @param {string} s */
