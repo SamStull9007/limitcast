@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2
+
+- README: Lifetime is $149 once, with no "first 100 buyers" limit. No code changes.
+
 ## 0.6.1
 
 - Fix: a Pro license used only through hooks (guard, alerts) was never re-checked with Polar and switched off after 30 days. The status line now starts a detached weekly re-check (at most one attempt an hour) and never waits on the network.
