@@ -1,8 +1,12 @@
 # limitcast plugin
 
+In a terminal:
+
 ```
-/plugin install limitcast --marketplace SamStull9007/limitcast
+claude plugin install limitcast --marketplace SamStull9007/limitcast
 ```
+
+Or inside Claude Code: `/plugin marketplace add SamStull9007/limitcast`, then `/plugin install limitcast@limitcast`.
 
 Slash commands for [limitcast](https://limitcast.dev), which forecasts when your Claude Code usage limits run out, measures the starting context every session re-sends, and stops runaway subagents before they burn the rest of your window.
 
