@@ -1,0 +1,5 @@
+{
+  "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 150 },
+  "javascript": { "formatter": { "quoteStyle": "single" } },
+  "html": { "formatter": { "enabled": true } }
+}

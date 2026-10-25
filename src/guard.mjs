@@ -17,8 +17,10 @@ export function guardDecision(tool, forecasts, now, minutes) {
     if (f.src !== 'claude') continue;
     if (f.verdict === 'AT_RISK' && f.wall !== null && f.wall - now <= minutes * 60_000) {
       const left = Math.max(0, Math.round((f.wall - now) / 60_000));
-      return `limitcast: Claude ${f.win} limit is ${f.pct}% used and on pace to run out in ~${left} min, before it resets. ` +
-        'Finish with the agents already running, or set LIMITCAST_ALLOW=1 to spawn anyway.';
+      return (
+        `limitcast: Claude ${f.win} limit is ${f.pct}% used and on pace to run out in ~${left} min, before it resets. ` +
+        'Finish with the agents already running, or set LIMITCAST_ALLOW=1 to spawn anyway.'
+      );
     }
   }
   return null;

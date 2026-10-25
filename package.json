@@ -1,12 +1,16 @@
 {
   "name": "limitcast",
-  "version": "0.1.0",
-  "description": "Forecast when Claude Code and Codex hit their usage limits, and stop new subagents before you do.",
+  "version": "0.2.0",
+  "description": "Forecast when Claude Code and Codex hit their usage limits, stop new subagents before you do, and see where your tokens go.",
   "type": "module",
   "bin": { "limitcast": "bin/limitcast.mjs" },
   "files": ["bin", "src"],
   "engines": { "node": ">=20" },
+  "os": ["darwin", "linux"],
   "scripts": { "test": "node --test" },
-  "keywords": ["claude-code", "codex", "rate-limit", "usage", "tokens", "hooks"],
-  "license": "MIT"
+  "keywords": ["claude-code", "codex", "rate-limit", "usage-limit", "tokens", "hooks", "status-line", "ai-agents"],
+  "homepage": "https://limitcast.dev",
+  "repository": { "type": "git", "url": "git+https://github.com/Taste4458/limitcast.git" },
+  "author": "Sam Stull",
+  "license": "Elastic-2.0"
 }

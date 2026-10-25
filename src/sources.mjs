@@ -18,7 +18,10 @@ export function claudeSamples(input, now) {
   if (!rl || typeof rl !== 'object') return [];
   /** @type {Sample[]} */
   const out = [];
-  for (const [key, win] of [['five_hour', '5h'], ['seven_day', '7d']]) {
+  for (const [key, win] of [
+    ['five_hour', '5h'],
+    ['seven_day', '7d'],
+  ]) {
     const w = rl[key];
     const pct = Number(w?.used_percentage);
     const reset = Number(w?.resets_at);
@@ -37,7 +40,11 @@ export function claudeSamples(input, now) {
 export function codexSamples(line) {
   if (!line.includes('"rate_limits"')) return [];
   let ev;
-  try { ev = JSON.parse(line); } catch { return []; }
+  try {
+    ev = JSON.parse(line);
+  } catch {
+    return [];
+  }
   const rl = ev?.payload?.rate_limits;
   const t = Date.parse(ev?.timestamp);
   if (!rl || !Number.isFinite(t)) return [];

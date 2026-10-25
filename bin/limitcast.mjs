@@ -7,38 +7,59 @@ import { forecastAll, oneClaudeSession } from '../src/forecast.mjs';
 import { claudeSamples, readCodex } from '../src/sources.mjs';
 import { KEEP_MS, load, record, stateDir } from '../src/store.mjs';
 import { guardDecision } from '../src/guard.mjs';
+import { readUsage } from '../src/usage.mjs';
+import { burnReport } from '../src/report.mjs';
+import { baseline, contributors, trimReport } from '../src/trim.mjs';
+import { activate, currentLicense, isPro, UPGRADE_URL } from '../src/license.mjs';
+import { doctor, install, uninstall } from '../src/install.mjs';
 
-const HELP = `limitcast: forecast when Claude Code and Codex hit their usage limits
+const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+const HELP = `limitcast ${VERSION}: know when Claude Code and Codex will hit their usage limits
 
-  limitcast status [--json]              burn rate, limit time and reset per window
-  limitcast statusline [-- <cmd...>]     record Claude limits from the status-line feed,
-                                         then run your existing status-line command
-  limitcast guard                        PreToolUse hook: block new subagents when on
-                                         pace to hit a Claude limit before it resets
+  limitcast install [--guard]        wire limitcast into Claude Code (backs up settings.json)
+  limitcast uninstall                remove it and restore your original status line
+  limitcast doctor                   check the setup
+  limitcast status [--json]          used, burn rate, runout time and reset per limit window
+
+  Pro (${UPGRADE_URL})
+  limitcast report [--days N] [--out FILE]   token burn report: by day, project, model, session
+  limitcast trim [--days N]                  what every session loads before you type, and how to cut it
+  limitcast activate <license-key>           unlock Pro
+
+  Used by Claude Code (set up by install)
+  limitcast statusline [-- <cmd...>]  record limit readings, then run your status-line command
+  limitcast guard                     PreToolUse hook: block new subagents when on pace to run out
 `;
 
 const [cmd, ...args] = process.argv.slice(2);
 const now = Date.now();
+const flag = (/** @type {string} */ name) => {
+  const i = args.indexOf(name);
+  return i >= 0 ? args[i + 1] : undefined;
+};
+const days = () => Math.max(1, Number(flag('--days') ?? 7));
 
 if (cmd === 'status') {
   const rows = forecastAll(oneClaudeSession([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS))]), now);
   if (args.includes('--json')) console.log(JSON.stringify(rows, null, 2));
-  else console.log(rows.length ? table(rows) : 'No data yet. Add `limitcast statusline` to Claude Code, or run Codex once.');
+  else console.log(rows.length ? table(rows) : 'No data yet. Run `limitcast install`, then send a message in Claude Code, or run Codex once.');
 } else if (cmd === 'statusline') {
   const input = readStdin();
+  let sid;
   try {
     const feed = JSON.parse(input);
+    sid = feed?.session_id;
     record(claudeSamples(feed, now));
     saveFeedShape(feed);
-  } catch { /* never break the status line */ }
+  } catch {
+    /* never break the status line */
+  }
   const sep = args.indexOf('--');
   const wrapped = sep >= 0 ? args.slice(sep + 1) : [];
   if (wrapped.length) {
     const r = spawnSync(wrapped[0], wrapped.slice(1), { input, stdio: ['pipe', 'inherit', 'inherit'] });
     process.exit(r.status ?? 1);
   }
-  let sid;
-  try { sid = JSON.parse(input).session_id; } catch { /* no session: use the latest */ }
   console.log(oneLine(forecastAll(oneClaudeSession(load(now - KEEP_MS), sid), now)));
 } else if (cmd === 'guard') {
   if (process.env.LIMITCAST_ALLOW === '1') process.exit(0);
@@ -48,15 +69,56 @@ if (cmd === 'status') {
     const samples = oneClaudeSession(load(now - KEEP_MS), hook.session_id);
     const reason = guardDecision(hook.tool_name, forecastAll(samples, now), now, minutes);
     if (reason) {
-      console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }));
+      console.log(
+        JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }),
+      );
     }
   } catch (e) {
     // Fail open: a broken governor must not stop the agent.
     console.error(`limitcast guard skipped: ${e instanceof Error ? e.message : e}`);
   }
+} else if (cmd === 'install') {
+  for (const c of install({ guard: args.includes('--guard') })) console.log(`✓ ${c}`);
+  console.log('Restart Claude Code (or open /hooks) to load it. Then: limitcast doctor');
+} else if (cmd === 'uninstall') {
+  const changes = uninstall();
+  console.log(changes.length ? changes.map((c) => `✓ ${c}`).join('\n') : 'Nothing to remove.');
+} else if (cmd === 'doctor') {
+  // Readings are only stored when they change, so freshness comes from the last feed the status line saw.
+  let latest = 0;
+  try {
+    latest = JSON.parse(readFileSync(join(stateDir(), 'last-feed.json'), 'utf8')).at ?? 0;
+  } catch {
+    /* never fed */
+  }
+  const checks = doctor({ samplesAgeMs: latest ? now - latest : null, license: currentLicense() });
+  for (const c of checks) console.log(`${c.ok ? '✓' : '✗'} ${c.line}`);
+  process.exit(checks.every((c) => c.ok) ? 0 : 1);
+} else if (cmd === 'report' || cmd === 'trim') {
+  if (!isPro()) {
+    console.log(`\`limitcast ${cmd}\` is part of limitcast Pro: ${UPGRADE_URL}\nAlready bought it? limitcast activate <license-key>`);
+    process.exit(2);
+  }
+  const since = now - days() * 86400_000;
+  const usage = await readUsage(since);
+  const text = cmd === 'report' ? burnReport(usage, { since, now }) : trimReport(baseline(usage), contributors());
+  const out = flag('--out');
+  if (out) {
+    writeFileSync(out, text + '\n');
+    console.log(`Wrote ${out}`);
+  } else console.log(text);
+} else if (cmd === 'activate') {
+  const res = activate(args[0] ?? '');
+  console.log(res.ok ? `✓ limitcast Pro activated for ${res.claims.e}` : `✗ ${res.reason}`);
+  process.exit(res.ok ? 0 : 1);
+} else if (cmd === 'license') {
+  const l = currentLicense();
+  console.log(l === null ? `Free tier. Pro: ${UPGRADE_URL}` : l.ok ? `Pro: ${l.claims.e}` : `License problem: ${l.reason}`);
+} else if (cmd === '--version' || cmd === '-v') {
+  console.log(VERSION);
 } else {
   console.log(HELP);
-  process.exit(cmd && cmd !== '--help' && cmd !== '-h' ? 1 : 0);
+  process.exit(cmd && !['help', '--help', '-h'].includes(cmd) ? 1 : 0);
 }
 
 /**
@@ -69,7 +131,11 @@ function saveFeedShape(feed) {
 }
 
 function readStdin() {
-  try { return readFileSync(0, 'utf8'); } catch { return ''; }
+  try {
+    return readFileSync(0, 'utf8');
+  } catch {
+    return '';
+  }
 }
 
 /** @param {number|null} ms */
@@ -92,12 +158,22 @@ function table(rows) {
   ]);
   const head = ['window', 'used', 'burn', 'runs out', 'resets', 'status'];
   const w = head.map((h, i) => Math.max(h.length, ...lines.map((l) => l[i].length)));
-  return [head, ...lines].map((l) => l.map((c, i) => c.padEnd(w[i])).join('  ').trimEnd()).join('\n');
+  return [head, ...lines]
+    .map((l) =>
+      l
+        .map((c, i) => c.padEnd(w[i]))
+        .join('  ')
+        .trimEnd(),
+    )
+    .join('\n');
 }
 
 /** @param {ReturnType<typeof forecastAll>} rows */
 function oneLine(rows) {
-  return rows.filter((f) => f.src === 'claude').map((f) =>
-    `${f.win} ${Math.round(f.pct)}%${f.verdict === 'AT_RISK' ? ` ⚠ out ${clock(f.wall)}` : f.verdict === 'HIT' ? ' ⛔' : ''}`,
-  ).join(' · ') || 'limitcast: waiting for data';
+  return (
+    rows
+      .filter((f) => f.src === 'claude')
+      .map((f) => `${f.win} ${Math.round(f.pct)}%${f.verdict === 'AT_RISK' ? ` ⚠ out ${clock(f.wall)}` : f.verdict === 'HIT' ? ' ⛔' : ''}`)
+      .join(' · ') || 'limitcast: waiting for data'
+  );
 }

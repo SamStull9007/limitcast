@@ -49,9 +49,18 @@ test('two accounts in parallel: each session forecasts only its own readings', (
   const a = (minsAgo, pct) => ({ ...s(minsAgo, pct), win: '7d', sid: 'A' });
   const b = (minsAgo, pct) => ({ ...s(minsAgo, pct), win: '7d', sid: 'B' });
   const mixed = [a(60, 90), b(50, 10), a(30, 94), b(1, 13), a(0, 98)];
-  assert.deepEqual(oneClaudeSession(mixed, 'B').map((x) => x.pct), [10, 13]);
-  assert.deepEqual(oneClaudeSession(mixed).map((x) => x.pct), [90, 94, 98]); // latest is A
-  assert.deepEqual(oneClaudeSession(mixed, 'unknown').map((x) => x.pct), [90, 94, 98]);
+  assert.deepEqual(
+    oneClaudeSession(mixed, 'B').map((x) => x.pct),
+    [10, 13],
+  );
+  assert.deepEqual(
+    oneClaudeSession(mixed).map((x) => x.pct),
+    [90, 94, 98],
+  ); // latest is A
+  assert.deepEqual(
+    oneClaudeSession(mixed, 'unknown').map((x) => x.pct),
+    [90, 94, 98],
+  );
   const codex = { t: now, src: 'codex', win: '7d', pct: 10, reset };
   assert.ok(oneClaudeSession([...mixed, codex], 'B').includes(codex));
 });
@@ -64,16 +73,21 @@ test('window names', () => {
 });
 
 test('claude status-line JSON parses both windows and skips missing ones', () => {
-  const out = claudeSamples({ rate_limits: { five_hour: { used_percentage: 42.5, resets_at: 1793390000 }, seven_day: { used_percentage: 63 } } }, now);
+  const out = claudeSamples(
+    { rate_limits: { five_hour: { used_percentage: 42.5, resets_at: 1793390000 }, seven_day: { used_percentage: 63 } } },
+    now,
+  );
   assert.deepEqual(out, [{ t: now, src: 'claude', win: '5h', pct: 42.5, reset: 1793390000 }]);
   assert.deepEqual(claudeSamples({}, now), []);
   assert.deepEqual(claudeSamples(null, now), []);
 });
 
-const codexLine = (pct, ts = '2026-10-24T17:00:00.000Z') => JSON.stringify({
-  timestamp: ts, type: 'event_msg',
-  payload: { type: 'token_count', rate_limits: { primary: { used_percent: pct, window_minutes: 10080, resets_at: 1793382091 }, secondary: null } },
-});
+const codexLine = (pct, ts = '2026-10-24T17:00:00.000Z') =>
+  JSON.stringify({
+    timestamp: ts,
+    type: 'event_msg',
+    payload: { type: 'token_count', rate_limits: { primary: { used_percent: pct, window_minutes: 10080, resets_at: 1793382091 }, secondary: null } },
+  });
 
 test('codex token_count line parses; other lines are ignored', () => {
   assert.deepEqual(codexSamples(codexLine(10)), [{ t: Date.parse('2026-10-24T17:00:00.000Z'), src: 'codex', win: '7d', pct: 10, reset: 1793382091 }]);
@@ -84,10 +98,16 @@ test('codex token_count line parses; other lines are ignored', () => {
 test('readCodex walks nested rollout files', async () => {
   const root = mkdtempSync(join(tmpdir(), 'lc-codex-'));
   mkdirSync(join(root, '2026', '10', '24'), { recursive: true });
-  writeFileSync(join(root, '2026', '10', '24', 'rollout-a.jsonl'), [codexLine(10), '{"type":"x"}', codexLine(12, '2026-10-24T17:30:00.000Z')].join('\n'));
+  writeFileSync(
+    join(root, '2026', '10', '24', 'rollout-a.jsonl'),
+    [codexLine(10), '{"type":"x"}', codexLine(12, '2026-10-24T17:30:00.000Z')].join('\n'),
+  );
   writeFileSync(join(root, '2026', '10', '24', 'other.jsonl'), codexLine(99));
   const out = await readCodex(0, root);
-  assert.deepEqual(out.map((x) => x.pct), [10, 12]);
+  assert.deepEqual(
+    out.map((x) => x.pct),
+    [10, 12],
+  );
 });
 
 test('guard blocks subagents only when a Claude window runs out soon', () => {
@@ -109,7 +129,10 @@ test('CLI end to end: statusline records, wraps the command, guard denies', () =
   const feed = (pct) => JSON.stringify({ rate_limits: { five_hour: { used_percentage: pct, resets_at: r } } });
 
   // Wrapped command receives the same stdin and its output passes through.
-  const out = execFileSync('node', [bin, 'statusline', '--', 'node', '-e', 'process.stdin.pipe(process.stdout)'], { input: feed(50), env }).toString();
+  const out = execFileSync('node', [bin, 'statusline', '--', 'node', '-e', 'process.stdin.pipe(process.stdout)'], {
+    input: feed(50),
+    env,
+  }).toString();
   assert.equal(JSON.parse(out).rate_limits.five_hour.used_percentage, 50);
 
   // Backdate the first sample so the slope spans > 5 minutes, then add a second.
@@ -122,7 +145,10 @@ test('CLI end to end: statusline records, wraps the command, guard denies', () =
 
   const deny = execFileSync('node', [bin, 'guard'], { input: JSON.stringify({ tool_name: 'Agent' }), env }).toString();
   assert.equal(JSON.parse(deny).hookSpecificOutput.permissionDecision, 'deny');
-  const allowed = execFileSync('node', [bin, 'guard'], { input: JSON.stringify({ tool_name: 'Agent' }), env: { ...env, LIMITCAST_ALLOW: '1' } }).toString();
+  const allowed = execFileSync('node', [bin, 'guard'], {
+    input: JSON.stringify({ tool_name: 'Agent' }),
+    env: { ...env, LIMITCAST_ALLOW: '1' },
+  }).toString();
   assert.equal(allowed, '');
   const failOpen = execFileSync('node', [bin, 'guard'], { input: 'not json', env, stdio: ['pipe', 'pipe', 'ignore'] }).toString();
   assert.equal(failOpen, '');

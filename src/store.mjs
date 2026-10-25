@@ -24,7 +24,11 @@ export function record(samples) {
   const lastPath = join(dir, 'last.json');
   /** @type {Record<string, {pct:number, reset:number}>} */
   let last = {};
-  try { last = JSON.parse(readFileSync(lastPath, 'utf8')); } catch { /* first run or corrupt: start fresh */ }
+  try {
+    last = JSON.parse(readFileSync(lastPath, 'utf8'));
+  } catch {
+    /* first run or corrupt: start fresh */
+  }
   const key = (/** @type {Sample} */ s) => `${s.src}:${s.win}:${s.sid ?? ''}`;
   const fresh = samples.filter((s) => {
     const prev = last[key(s)];
@@ -35,7 +39,13 @@ export function record(samples) {
   appendFileSync(file, fresh.map((s) => JSON.stringify(s)).join('\n') + '\n');
   for (const s of fresh) last[key(s)] = { pct: s.pct, reset: s.reset };
   writeFileSync(lastPath, JSON.stringify(last));
-  if (statSync(file).size > PRUNE_BYTES) writeFileSync(file, load(Date.now() - KEEP_MS).map((s) => JSON.stringify(s) + '\n').join(''));
+  if (statSync(file).size > PRUNE_BYTES)
+    writeFileSync(
+      file,
+      load(Date.now() - KEEP_MS)
+        .map((s) => JSON.stringify(s) + '\n')
+        .join(''),
+    );
 }
 
 /**
@@ -52,7 +62,9 @@ export function load(since) {
     try {
       const s = JSON.parse(line);
       if (s.t >= since) out.push(s);
-    } catch { /* skip a torn line from a concurrent write */ }
+    } catch {
+      /* skip a torn line from a concurrent write */
+    }
   }
   return out;
 }
