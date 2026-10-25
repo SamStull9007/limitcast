@@ -4,7 +4,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { forecastAll, oneClaudeSession } from '../src/forecast.mjs';
+import { forecastAll, oneClaudeAccount } from '../src/forecast.mjs';
 import { formatChecks } from '../src/formats.mjs';
 import { runGuard } from '../src/guard.mjs';
 import { doctor, install, uninstall } from '../src/install.mjs';
@@ -60,7 +60,7 @@ if (['report', 'trim', 'saved', 'results', 'drift', 'doctor', 'license'].include
 }
 
 if (cmd === 'status') {
-  const rows = forecastAll(oneClaudeSession([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS))]), now);
+  const rows = forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS))]), now);
   if (args.includes('--json')) console.log(JSON.stringify(rows, null, 2));
   else {
     console.log(rows.length ? table(rows) : 'No data yet. Run `limitcast install`, then send a message in Claude Code, or run Codex once.');
@@ -85,7 +85,7 @@ if (cmd === 'status') {
     const r = spawnSync(wrapped[0], wrapped.slice(1), { input, stdio: ['pipe', 'inherit', 'inherit'] });
     process.exit(r.status ?? 1);
   }
-  console.log(oneLine(forecastAll(oneClaudeSession(load(now - KEEP_MS), sid), now)));
+  console.log(oneLine(forecastAll(oneClaudeAccount(load(now - KEEP_MS), sid), now)));
 } else if (cmd === 'guard') {
   // The guard is Pro; without a valid license it allows everything (an expired license must never block work).
   if (process.env.LIMITCAST_ALLOW === '1' || !isPro()) process.exit(0);
@@ -267,7 +267,10 @@ function oneLine(rows) {
   return (
     rows
       .filter((f) => f.src === 'claude')
-      .map((f) => `${f.win} ${Math.round(f.pct)}%${f.verdict === 'AT_RISK' ? ` ⚠ out ${clock(f.wall)}` : f.verdict === 'HIT' ? ' ⛔' : ''}`)
+      .map(
+        (f) =>
+          `${f.win} ${Math.round(f.pct)}%${f.verdict === 'AT_RISK' ? ` ⚠ out ${clock(f.wall)}` : f.verdict === 'NEAR' ? ' ⚠ near limit' : f.verdict === 'HIT' ? ' ⛔' : ''}`,
+      )
       .join(' · ') || 'limitcast: waiting for data'
   );
 }

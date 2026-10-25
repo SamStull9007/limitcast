@@ -4,6 +4,7 @@
 
 const RESET_JITTER_S = 120; // Codex resets_at drifts by seconds between events
 const RECENT_MS = 60 * 60 * 1000;
+const NEAR_PCT = 95;
 
 /**
  * Burn rate and limit forecast for one (src, win) series.
@@ -23,10 +24,12 @@ export function forecast(samples, now) {
   const recent = window.filter((s) => s.t >= now - RECENT_MS);
   const pts = recent.length >= 2 ? recent : window;
   const rate = slopePerHour(pts);
-  if (rate === null || rate <= 0) return { ...base, rate, verdict: 'OK' };
+  // NEAR: so close to the limit that one heavy turn can finish it, even with no burn rate to go on yet.
+  const calm = last.pct >= NEAR_PCT ? 'NEAR' : 'OK';
+  if (rate === null || rate <= 0) return { ...base, rate, verdict: calm };
 
   const wall = last.t + ((100 - last.pct) / rate) * 3600_000;
-  return { ...base, rate, wall, verdict: wall < resetMs ? 'AT_RISK' : 'OK' };
+  return { ...base, rate, wall, verdict: wall < resetMs ? 'AT_RISK' : calm };
 }
 
 /**
@@ -69,16 +72,67 @@ export function forecastAll(samples, now) {
 
 /**
  * Claude sessions can belong to different accounts with different limits, and the feed has no account id.
- * Keep Claude samples from one session: `sid` if it has any, else the most recently active one. Codex is untouched.
- * Untagged Claude samples (recorded before 0.2) can't be attributed to an account, so they're dropped once tagged ones exist.
+ * Keep the Claude samples of one account: the one `sid` belongs to if it has readings, else the most recently active one.
+ * Codex is untouched. Untagged Claude samples (recorded before 0.2) can't be attributed, so they're dropped once tagged ones exist.
  * @param {Sample[]} samples
  * @param {string} [sid]
  */
-export function oneClaudeSession(samples, sid) {
-  const claude = samples.filter((s) => s.src === 'claude' && s.sid);
-  if (!claude.length) return samples;
-  const pick = sid && claude.some((s) => s.sid === sid) ? sid : claude.reduce((a, b) => (b.t > a.t ? b : a)).sid;
-  return samples.filter((s) => s.src !== 'claude' || s.sid === pick);
+export function oneClaudeAccount(samples, sid) {
+  const accounts = claudeAccounts(samples);
+  if (!accounts.length) return samples;
+  const pick = accounts.find((a) => a.some((s) => s.sid === sid)) ?? accounts[0];
+  return [...samples.filter((s) => s.src !== 'claude'), ...pick];
+}
+
+/**
+ * Tagged Claude samples grouped by account, most recently active account first.
+ * Each session reports the same account windows, and a session only records when a reading changes, so one
+ * session alone often holds too few readings to forecast from. Sessions are the same account when they share
+ * at least one window (same reset time) and their readings of every shared window never go down when merged:
+ * usage within a window only rises, so a second account's lower readings break the merge.
+ * shortcut: two accounts with identical reset times and near-identical usage could merge; split on a feed account id if Claude Code adds one.
+ * @param {Sample[]} samples
+ * @returns {Sample[][]}
+ */
+export function claudeAccounts(samples) {
+  /** @type {Map<string, Sample[]>} */
+  const sessions = new Map();
+  for (const s of samples) {
+    if (s.src !== 'claude' || !s.sid) continue;
+    sessions.set(s.sid, [...(sessions.get(s.sid) ?? []), s]);
+  }
+  const latest = (/** @type {Sample[]} */ g) => Math.max(...g.map((s) => s.t));
+  /** @type {Sample[][]} */
+  const accounts = [];
+  for (const g of [...sessions.values()].sort((a, b) => latest(b) - latest(a))) {
+    const a = accounts.find((acc) => sameAccount(acc, g));
+    if (a) a.push(...g);
+    else accounts.push([...g]);
+  }
+  return accounts;
+}
+
+/**
+ * @param {Sample[]} a
+ * @param {Sample[]} b
+ */
+function sameAccount(a, b) {
+  let shared = false;
+  const same = (/** @type {Sample} */ x, /** @type {Sample} */ s) => x.win === s.win && Math.abs(x.reset - s.reset) <= RESET_JITTER_S;
+  // One representative reading per window of b; the status line runs this, so keep it to a few passes.
+  const windows = b.filter((s, i) => b.findIndex((x) => same(x, s)) === i);
+  for (const s of windows) {
+    const series = a.filter((x) => same(x, s));
+    if (!series.length) continue;
+    shared = true;
+    const merged = [...series, ...b.filter((x) => same(x, s))].sort((x, y) => x.t - y.t);
+    let top = Number.NEGATIVE_INFINITY;
+    for (const x of merged) {
+      if (x.pct < top - 0.5) return false;
+      top = Math.max(top, x.pct);
+    }
+  }
+  return shared;
 }
 
 /** @param {number} minutes */

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { forecast, oneClaudeSession, slopePerHour, windowName } from '../src/forecast.mjs';
+import { claudeAccounts, forecast, oneClaudeAccount, slopePerHour, windowName } from '../src/forecast.mjs';
 import { guardDecision, runGuard } from '../src/guard.mjs';
 import { claudeSamples, codexSamples, readCodex } from '../src/sources.mjs';
 
@@ -50,19 +50,46 @@ test('two accounts in parallel: each session forecasts only its own readings', (
   const b = (minsAgo, pct) => ({ ...s(minsAgo, pct), win: '7d', sid: 'B' });
   const mixed = [a(60, 90), b(50, 10), a(30, 94), b(1, 13), a(0, 98)];
   assert.deepEqual(
-    oneClaudeSession(mixed, 'B').map((x) => x.pct),
+    oneClaudeAccount(mixed, 'B').map((x) => x.pct),
     [10, 13],
   );
   assert.deepEqual(
-    oneClaudeSession(mixed).map((x) => x.pct),
+    oneClaudeAccount(mixed).map((x) => x.pct),
     [90, 94, 98],
   ); // latest is A
   assert.deepEqual(
-    oneClaudeSession(mixed, 'unknown').map((x) => x.pct),
+    oneClaudeAccount(mixed, 'unknown').map((x) => x.pct),
     [90, 94, 98],
   );
   const codex = { t: now, src: 'codex', win: '7d', pct: 10, reset };
-  assert.ok(oneClaudeSession([...mixed, codex], 'B').includes(codex));
+  assert.ok(oneClaudeAccount([...mixed, codex], 'B').includes(codex));
+});
+
+test('sessions of one account share one history, so a short session still forecasts', () => {
+  // Three short sessions of the same account: each alone has under 5 minutes of readings.
+  const r = (minsAgo, pct, sid) => ({ ...s(minsAgo, pct), sid });
+  const mixed = [r(60, 40, 'A'), r(58, 41, 'A'), r(30, 55, 'B'), r(29, 56, 'B'), r(1, 69, 'C'), r(0, 70, 'C')];
+  const acct = oneClaudeAccount(mixed, 'C');
+  assert.equal(acct.length, 6);
+  assert.equal(forecast(acct, now).verdict, 'AT_RISK'); // +30%/h, 30% left -> 1h, reset in 2h
+  assert.equal(
+    forecast(
+      mixed.filter((x) => x.sid === 'C'),
+      now,
+    ).verdict,
+    'OK',
+  ); // one session alone: no rate
+  // A session from another window of the same account (earlier 5h reset) shares the 7d window and joins.
+  const older = { ...s(300, 20, reset - 5 * 3600), sid: 'D' };
+  const week = (minsAgo, pct, sid) => ({ ...s(minsAgo, pct), win: '7d', sid });
+  assert.equal(claudeAccounts([older, week(300, 30, 'D'), r(0, 70, 'C'), week(0, 33, 'C')]).length, 1);
+});
+
+test('NEAR at 95%+ even with no burn rate; the guard does not block on NEAR alone', () => {
+  assert.equal(forecast([s(0, 96)], now).verdict, 'NEAR');
+  assert.equal(forecast([s(60, 96), s(0, 96)], now).verdict, 'NEAR'); // flat
+  assert.equal(forecast([s(0, 94)], now).verdict, 'OK');
+  assert.equal(guardDecision('Agent', [forecast([s(0, 97)], now)], now, 30), null);
 });
 
 test('window names', () => {
@@ -166,11 +193,12 @@ test('CLI end to end: statusline records, wraps the command; guard is Pro-gated 
 test('untagged readings from before session tagging never mix into a tagged session', () => {
   const tagged = (minsAgo, pct) => ({ ...s(minsAgo, pct), win: '7d', sid: 'A' });
   const legacy = (minsAgo, pct) => ({ ...s(minsAgo, pct), win: '7d' });
-  const kept = oneClaudeSession([legacy(50, 13), legacy(40, 98), tagged(10, 98), tagged(0, 98)]);
+  const kept = oneClaudeAccount([legacy(50, 13), legacy(40, 98), tagged(10, 98), tagged(0, 98)]);
   assert.deepEqual(
     kept.map((x) => x.sid),
     ['A', 'A'],
   );
-  assert.equal(forecast(kept, now).verdict, 'OK'); // flat at 98%: no false runout
-  assert.equal(oneClaudeSession([legacy(5, 13), legacy(0, 98)]).length, 2); // nothing tagged yet: keep all
+  const f = forecast(kept, now);
+  assert.deepEqual([f.verdict, f.wall], ['NEAR', null]); // flat at 98%: near the limit, but no false runout time
+  assert.equal(oneClaudeAccount([legacy(5, 13), legacy(0, 98)]).length, 2); // nothing tagged yet: keep all
 });

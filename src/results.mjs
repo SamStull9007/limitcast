@@ -1,7 +1,7 @@
 // @ts-check
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { forecast } from './forecast.mjs';
+import { claudeAccounts, forecast } from './forecast.mjs';
 import { stateDir } from './store.mjs';
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */
@@ -38,16 +38,31 @@ export function loadBlocks(since) {
 }
 
 /**
- * Samples of one limit window (same tool, window, Claude session and reset time).
+ * The readings that belong together: each Claude account, then everything else (Codex), as `status` sees them.
+ * @param {Sample[]} samples
+ */
+function pools(samples) {
+  const accounts = claudeAccounts(samples);
+  const rest = samples.filter((s) => s.src !== 'claude' || (!accounts.length && !s.sid));
+  return [...accounts, rest];
+}
+
+/**
+ * Samples of one limit window (same pool, tool, window and reset time).
  * @param {Sample[]} samples
  */
 function windows(samples) {
   /** @type {Sample[][]} */
   const groups = [];
-  for (const s of [...samples].sort((a, b) => a.t - b.t)) {
-    const g = groups.find(([f]) => f.src === s.src && f.win === s.win && f.sid === s.sid && Math.abs(f.reset - s.reset) * 1000 <= JITTER_MS);
-    if (g) g.push(s);
-    else groups.push([s]);
+  for (const pool of pools(samples)) {
+    /** @type {Sample[][]} */
+    const local = [];
+    for (const s of [...pool].sort((a, b) => a.t - b.t)) {
+      const g = local.find(([f]) => f.src === s.src && f.win === s.win && Math.abs(f.reset - s.reset) * 1000 <= JITTER_MS);
+      if (g) g.push(s);
+      else local.push([s]);
+    }
+    groups.push(...local);
   }
   return groups;
 }
@@ -63,27 +78,17 @@ export function limitHits(samples) {
     const hitIdx = g.findIndex((s) => s.pct >= 100);
     if (hitIdx < 0) continue;
     const at = g[hitIdx].t;
-    // Earliest moment the forecast said AT_RISK, counting only warnings it kept until the hit.
+    // Earliest moment the forecast warned (AT_RISK or NEAR), counting only warnings it kept until the hit.
     let warnedAt = null;
     for (let i = hitIdx - 1; i >= 0; i--) {
       const f = forecast(g.slice(0, i + 1), g[i].t);
-      if (f?.verdict !== 'AT_RISK') break;
+      if (f?.verdict !== 'AT_RISK' && f?.verdict !== 'NEAR') break;
       warnedAt = g[i].t;
     }
     // unseen: already at 100% in its first reading, so there was nothing to forecast from.
     hits.push({ src: g[0].src, win: g[0].win, at, reset: g[0].reset * 1000, warnedAt, unseen: hitIdx === 0 });
   }
-  // The same account seen from two Claude sessions reports the same window twice.
-  // shortcut: two accounts with the same window and reset time would merge into one hit; rare, split by sid if it shows up.
-  const seen = new Set();
-  return hits
-    .sort((a, b) => a.at - b.at)
-    .filter((h) => {
-      const k = `${h.src}|${h.win}|${Math.round(h.reset / JITTER_MS)}`;
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    });
+  return hits.sort((a, b) => a.at - b.at);
 }
 
 /**
@@ -93,15 +98,11 @@ export function limitHits(samples) {
  * @param {number} now epoch ms
  */
 export function blockOutcomes(blocks, samples, now) {
+  const accounts = claudeAccounts(samples);
   return blocks.map((b) => {
-    const after = samples.filter(
-      (s) =>
-        s.src === b.src &&
-        s.win === b.win &&
-        (b.sid === undefined || s.sid === b.sid) &&
-        s.t >= b.t &&
-        Math.abs(s.reset * 1000 - b.reset) <= JITTER_MS,
-    );
+    // A Claude block is judged by the readings of the account its session belongs to.
+    const pool = b.src === 'claude' && b.sid ? (accounts.find((a) => a.some((s) => s.sid === b.sid)) ?? []) : samples;
+    const after = pool.filter((s) => s.src === b.src && s.win === b.win && s.t >= b.t && Math.abs(s.reset * 1000 - b.reset) <= JITTER_MS);
     const peak = Math.max(b.pct, ...after.map((s) => s.pct));
     const hit = after.find((s) => s.pct >= 100);
     const outcome = hit ? 'hit' : b.reset > now ? 'open' : 'under';

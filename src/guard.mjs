@@ -1,5 +1,5 @@
 // @ts-check
-import { forecastAll, oneClaudeSession } from './forecast.mjs';
+import { forecastAll, oneClaudeAccount } from './forecast.mjs';
 import { logBlock } from './results.mjs';
 import { readCodex } from './sources.mjs';
 import { KEEP_MS, load } from './store.mjs';
@@ -64,7 +64,7 @@ export async function runGuard(hook, now, minutes) {
   // Codex: only the last two hours of rollouts, so the hook stays fast; Grok has no readings to judge by.
   const samples =
     src === 'claude'
-      ? oneClaudeSession(load(now - KEEP_MS), hook.session_id ?? hook.sessionId)
+      ? oneClaudeAccount(load(now - KEEP_MS), hook.session_id ?? hook.sessionId)
       : src === 'codex'
         ? await readCodex(now - 2 * 3600_000)
         : [];
@@ -72,6 +72,7 @@ export async function runGuard(hook, now, minutes) {
   const reason = guardDecision(tool, forecasts, now, minutes);
   const f = reason ? blockingForecast(tool, forecasts, now, minutes) : undefined;
   if (f?.wall) {
+    // Any session of the blocking account identifies it for `results`.
     const sid = f.src === 'claude' ? samples.find((s) => s.src === 'claude' && s.sid)?.sid : undefined;
     try {
       logBlock({ t: now, src: f.src, win: f.win, pct: f.pct, wall: f.wall, reset: f.reset, ...(sid ? { sid } : {}) });
