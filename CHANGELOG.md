@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- Codex subagent guard: `install --guard` appends it to `~/.codex/hooks.json` (existing hooks keep their positions and trust); it judges `spawn_agent` by Codex's own limits from the last two hours of session logs. `doctor` reports whether Codex has trusted it.
+- The guard now judges each tool only by its own limits; Grok's `spawn_subagent` is never blocked (Grok keeps no limit readings on disk).
+- `report` includes Grok, read from each session's per-turn `usage.json` ledger.
+- Fix: Codex sessions were grouped into one row in `report`.
+- Fix: readings recorded before 0.2's session tagging no longer mix into forecasts (caused a false AT_RISK).
+
 ## 0.2.0
 
 - `install` / `uninstall` / `doctor`: one-command setup with settings backup, idempotent re-install, and exact restore of your original status line.

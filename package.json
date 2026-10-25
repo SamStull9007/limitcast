@@ -1,7 +1,7 @@
 {
   "name": "limitcast",
-  "version": "0.2.0",
-  "description": "Forecast when Claude Code and Codex hit their usage limits, stop new subagents before you do, and see where your tokens go.",
+  "version": "0.3.0",
+  "description": "Forecast when Claude Code and Codex hit their usage limits, stop new subagents before you do, and see where your Claude, Codex and Grok tokens go.",
   "type": "module",
   "bin": { "limitcast": "bin/limitcast.mjs" },
   "files": ["bin", "src"],

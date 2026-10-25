@@ -70,6 +70,7 @@ export function forecastAll(samples, now) {
 /**
  * Claude sessions can belong to different accounts with different limits, and the feed has no account id.
  * Keep Claude samples from one session: `sid` if it has any, else the most recently active one. Codex is untouched.
+ * Untagged Claude samples (recorded before 0.2) can't be attributed to an account, so they're dropped once tagged ones exist.
  * @param {Sample[]} samples
  * @param {string} [sid]
  */
@@ -77,7 +78,7 @@ export function oneClaudeSession(samples, sid) {
   const claude = samples.filter((s) => s.src === 'claude' && s.sid);
   if (!claude.length) return samples;
   const pick = sid && claude.some((s) => s.sid === sid) ? sid : claude.reduce((a, b) => (b.t > a.t ? b : a)).sid;
-  return samples.filter((s) => s.src !== 'claude' || !s.sid || s.sid === pick);
+  return samples.filter((s) => s.src !== 'claude' || s.sid === pick);
 }
 
 /** @param {number} minutes */

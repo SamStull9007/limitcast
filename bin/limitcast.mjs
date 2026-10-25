@@ -1,22 +1,22 @@
 #!/usr/bin/env node
 // @ts-check
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { forecastAll, oneClaudeSession } from '../src/forecast.mjs';
 import { claudeSamples, readCodex } from '../src/sources.mjs';
 import { KEEP_MS, load, record, stateDir } from '../src/store.mjs';
-import { guardDecision } from '../src/guard.mjs';
-import { readUsage } from '../src/usage.mjs';
+import { guardDecision, spawnSource } from '../src/guard.mjs';
+import { grokRoot, readUsage } from '../src/usage.mjs';
 import { burnReport } from '../src/report.mjs';
 import { baseline, contributors, trimReport } from '../src/trim.mjs';
 import { activate, currentLicense, isPro, UPGRADE_URL } from '../src/license.mjs';
 import { doctor, install, uninstall } from '../src/install.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
-const HELP = `limitcast ${VERSION}: know when Claude Code and Codex will hit their usage limits
+const HELP = `limitcast ${VERSION}: know when Claude Code and Codex will hit their usage limits, and where Claude, Codex and Grok tokens go
 
-  limitcast install [--guard]        wire limitcast into Claude Code (backs up settings.json)
+  limitcast install [--guard]        wire limitcast into Claude Code, plus the guard into Codex (backs up both)
   limitcast uninstall                remove it and restore your original status line
   limitcast doctor                   check the setup
   limitcast status [--json]          used, burn rate, runout time and reset per limit window
@@ -42,7 +42,10 @@ const days = () => Math.max(1, Number(flag('--days') ?? 7));
 if (cmd === 'status') {
   const rows = forecastAll(oneClaudeSession([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS))]), now);
   if (args.includes('--json')) console.log(JSON.stringify(rows, null, 2));
-  else console.log(rows.length ? table(rows) : 'No data yet. Run `limitcast install`, then send a message in Claude Code, or run Codex once.');
+  else {
+    console.log(rows.length ? table(rows) : 'No data yet. Run `limitcast install`, then send a message in Claude Code, or run Codex once.');
+    if (existsSync(grokRoot())) console.log('grok: no limit readings (Grok keeps none on disk); its token use is in `limitcast report`');
+  }
 } else if (cmd === 'statusline') {
   const input = readStdin();
   let sid;
@@ -65,9 +68,18 @@ if (cmd === 'status') {
   if (process.env.LIMITCAST_ALLOW === '1') process.exit(0);
   try {
     const hook = JSON.parse(readStdin());
+    // Claude Code and Codex send snake_case fields; Grok sends camelCase.
+    const tool = String(hook.tool_name ?? hook.toolName ?? hook.tool ?? '');
+    const src = spawnSource(tool);
     const minutes = Number(process.env.LIMITCAST_GUARD_MINUTES ?? 30);
-    const samples = oneClaudeSession(load(now - KEEP_MS), hook.session_id);
-    const reason = guardDecision(hook.tool_name, forecastAll(samples, now), now, minutes);
+    // Codex: only the last two hours of rollouts, so the hook stays fast; Grok has no readings to judge by.
+    const samples =
+      src === 'claude'
+        ? oneClaudeSession(load(now - KEEP_MS), hook.session_id ?? hook.sessionId)
+        : src === 'codex'
+          ? await readCodex(now - 2 * 3600_000)
+          : [];
+    const reason = guardDecision(tool, forecastAll(samples, now), now, minutes);
     if (reason) {
       console.log(
         JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }),
@@ -79,7 +91,7 @@ if (cmd === 'status') {
   }
 } else if (cmd === 'install') {
   for (const c of install({ guard: args.includes('--guard') })) console.log(`✓ ${c}`);
-  console.log('Restart Claude Code (or open /hooks) to load it. Then: limitcast doctor');
+  console.log('Restart Claude Code and Codex to load it. Then: limitcast doctor');
 } else if (cmd === 'uninstall') {
   const changes = uninstall();
   console.log(changes.length ? changes.map((c) => `✓ ${c}`).join('\n') : 'Nothing to remove.');

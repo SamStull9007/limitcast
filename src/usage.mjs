@@ -1,17 +1,18 @@
 // @ts-check
-import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
 
 /**
  * One model response's token usage.
- * @typedef {{t:number, src:'claude'|'codex', session:string, project:string, model:string, sidechain:boolean,
+ * @typedef {{t:number, src:'claude'|'codex'|'grok', session:string, project:string, model:string, sidechain:boolean,
  *   input:number, cacheWrite:number, cacheRead:number, output:number, entry?:string}} Usage  entry: how Claude Code was launched (cli, sdk-py, ...)
  */
 
 export const claudeRoot = () => join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'projects');
 export const codexRoot = () => join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'sessions');
+export const grokRoot = () => join(process.env.GROK_HOME ?? join(homedir(), '.grok'), 'sessions');
 
 /**
  * Claude Code transcript lines → usage, one per API message.
@@ -88,9 +89,52 @@ export function codexUsage(line, st, session) {
 }
 
 /**
- * All usage since `since` from both tools.
+ * A Grok session's usage.json ledger → usage, one record per turn (each turn's own tokens, stamped when it ended).
+ * @param {any} ledger parsed usage.json
+ * @param {string} session
+ * @param {string} project
+ * @returns {Usage[]}
+ */
+export function grokUsage(ledger, session, project) {
+  /** @type {Usage[]} */
+  const out = [];
+  for (const turn of Array.isArray(ledger?.turns) ? ledger.turns : []) {
+    const t = Date.parse(turn?.endedAt);
+    if (!Number.isFinite(t)) continue;
+    const cacheRead = turn.cachedReadTokens ?? 0;
+    const cacheWrite = turn.cacheCreationTokens ?? 0;
+    const input = Math.max(0, (turn.inputTokens ?? 0) - cacheRead - cacheWrite);
+    const output = turn.outputTokens ?? 0;
+    const model = turn.primaryModelId ?? Object.keys(turn.modelUsage ?? {})[0] ?? '';
+    out.push({ t, src: 'grok', session, project, model, sidechain: false, input, cacheWrite, cacheRead, output });
+  }
+  return out;
+}
+
+/**
+ * Grok session ledgers modified since `since`: <root>/<url-encoded project dir>/<session id>/usage.json.
+ * @param {string} root
+ * @param {number} since
+ */
+function grokLedgers(root, since) {
+  if (!existsSync(root)) return [];
+  const out = [];
+  for (const proj of readdirSync(root, { withFileTypes: true })) {
+    if (!proj.isDirectory()) continue;
+    for (const sess of readdirSync(join(root, proj.name), { withFileTypes: true })) {
+      const file = join(root, proj.name, sess.name, 'usage.json');
+      if (sess.isDirectory() && existsSync(file) && statSync(file).mtimeMs >= since) {
+        out.push({ file, session: sess.name, project: safeDecode(proj.name) });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * All usage since `since` from Claude Code, Codex and Grok.
  * @param {number} since epoch ms
- * @param {{claude?:string, codex?:string}} [roots]
+ * @param {{claude?:string, codex?:string, grok?:string}} [roots]
  * @returns {Promise<Usage[]>}
  */
 export async function readUsage(since, roots = {}) {
@@ -106,13 +150,32 @@ export async function readUsage(since, roots = {}) {
   }
   for (const file of jsonlFiles(roots.codex ?? codexRoot(), since, (n) => n.startsWith('rollout-'))) {
     const st = { prev: null, cwd: '', model: '' };
-    const session = basename(file, '.jsonl');
+    // rollout-2026-10-23T18-39-41-<session uuid>.jsonl → the uuid
+    const session = basename(file, '.jsonl').replace(/^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-/, '');
     for await (const line of lines(file)) {
       const u = codexUsage(line, st, session);
       if (u && u.t >= since) out.push(u);
     }
   }
+  for (const { file, session, project } of grokLedgers(roots.grok ?? grokRoot(), since)) {
+    let ledger;
+    try {
+      ledger = JSON.parse(readFileSync(file, 'utf8'));
+    } catch {
+      continue; // being written right now; picked up next run
+    }
+    for (const u of grokUsage(ledger, session, project)) if (u.t >= since) out.push(u);
+  }
   return out;
+}
+
+/** @param {string} s */
+function safeDecode(s) {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
 }
 
 /** @param {string} file */

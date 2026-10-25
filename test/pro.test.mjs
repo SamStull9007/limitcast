@@ -5,13 +5,21 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, readdirSync } from
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { claudeUsage, codexUsage, readUsage, total } from '../src/usage.mjs';
+import { fileURLToPath } from 'node:url';
+import { claudeUsage, codexUsage, grokUsage, readUsage, total } from '../src/usage.mjs';
+import { guardDecision, spawnSource } from '../src/guard.mjs';
+import { forecast } from '../src/forecast.mjs';
 import { burnReport } from '../src/report.mjs';
 import { baseline, contributors, trimReport } from '../src/trim.mjs';
 import { checkLicense, issueLicense } from '../src/license.mjs';
 import { doctor, install, uninstall, wrappedCommand } from '../src/install.mjs';
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
+// Never touch the real ~/.claude, ~/.codex or ~/.grok: every default path resolves into a temp dir.
+process.env.CLAUDE_CONFIG_DIR = tmp('lc-home-claude-');
+process.env.CODEX_HOME = tmp('lc-home-codex-');
+process.env.GROK_HOME = tmp('lc-home-grok-');
+process.env.LIMITCAST_STATE = tmp('lc-home-state-');
 const T0 = Date.parse('2026-10-24T12:00:00.000Z');
 const iso = (mins) => new Date(T0 + mins * 60_000).toISOString();
 
@@ -193,4 +201,139 @@ test('CLI: Pro commands are gated; version and help work', () => {
   assert.match(execFileSync('node', [bin, 'help'], { env }).toString(), /limitcast install/);
   const bad = spawnSync('node', [bin, 'activate', 'LC1.bad.key'], { env });
   assert.equal(bad.status, 1);
+});
+
+// ---- Codex and Grok ----
+
+test('spawn tools map to the tool whose limits they draw on', () => {
+  assert.equal(spawnSource('Agent'), 'claude');
+  assert.equal(spawnSource('Task'), 'claude');
+  assert.equal(spawnSource('collaborationspawn_agent'), 'codex');
+  assert.equal(spawnSource('spawn_agent'), 'codex');
+  assert.equal(spawnSource('spawn_subagent'), 'grok');
+  assert.equal(spawnSource('Bash'), null);
+  assert.equal(spawnSource('wait_agent'), null);
+});
+
+test('guard judges each tool only by its own limits; Grok is never blocked', () => {
+  const now = T0;
+  const reset = now / 1000 + 7200;
+  const mk = (src, minsAgo, pct) => ({ t: now - minsAgo * 60_000, src, win: '7d', pct, reset });
+  const codexRisky = forecast([mk('codex', 60, 40), mk('codex', 0, 85)], now); // 20 min left
+  const claudeOk = forecast([mk('claude', 60, 10), mk('claude', 0, 12)], now);
+  assert.match(guardDecision('collaborationspawn_agent', [codexRisky, claudeOk], now, 30), /^limitcast: Codex 7d/);
+  assert.equal(guardDecision('Agent', [codexRisky, claudeOk], now, 30), null); // Claude spawn, Codex at risk: allowed
+  assert.equal(guardDecision('spawn_subagent', [codexRisky], now, 30), null);
+});
+
+// Grok's usage.json: one entry per turn with that turn's own tokens (inputTokens includes cached reads).
+const grokTurn = (endedAt, inputTokens, cachedReadTokens, outputTokens) => ({
+  turnNumber: 1,
+  endedAt,
+  inputTokens,
+  cachedReadTokens,
+  cacheCreationTokens: 0,
+  outputTokens,
+  totalTokens: inputTokens + outputTokens,
+  primaryModelId: 'grok-4.6-build',
+});
+
+test('grok usage: one record per turn from the usage.json ledger, never summed across turns', () => {
+  const ledger = { turns: [grokTurn(iso(0), 1000, 600, 50), grokTurn(iso(5), 300, 100, 20), { endedAt: 'bad' }] };
+  const u = grokUsage(ledger, 's1', '/p/g');
+  assert.deepEqual(
+    u.map((x) => [x.src, x.input, x.cacheRead, x.output, x.model, x.t]),
+    [
+      ['grok', 400, 600, 50, 'grok-4.6-build', T0],
+      ['grok', 200, 100, 20, 'grok-4.6-build', T0 + 5 * 60_000],
+    ],
+  );
+  assert.equal(
+    u.reduce((a, x) => a + total(x), 0),
+    1050 + 320,
+  ); // equals the turns' totalTokens
+  assert.deepEqual(grokUsage({}, 's', 'p'), []);
+});
+
+test('readUsage finds Grok ledgers and decodes the project folder; skips a ledger mid-write', async () => {
+  const grok = tmp('lc-grok-');
+  const dir = join(grok, encodeURIComponent('/Users/me/proj'), '01abc');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'usage.json'), JSON.stringify({ sessionId: '01abc', turns: [grokTurn(iso(0), 10, 0, 5)] }));
+  const torn = join(grok, encodeURIComponent('/Users/me/other'), '01def');
+  mkdirSync(torn, { recursive: true });
+  writeFileSync(join(torn, 'usage.json'), '{"turns": [');
+  const u = await readUsage(0, { claude: tmp('e1-'), codex: tmp('e2-'), grok });
+  assert.deepEqual(
+    u.map((x) => [x.src, x.project, x.session]),
+    [['grok', '/Users/me/proj', '01abc']],
+  );
+});
+
+test('install appends the Codex guard last so trusted hooks keep their positions; re-install stays put; uninstall removes it', () => {
+  const codexHome = tmp('lc-codex-inst-');
+  const codexPath = join(codexHome, 'hooks.json');
+  const path = join(tmp('lc-claude-inst-'), 'settings.json');
+  const h0 = { matcher: '', hooks: [{ type: 'command', command: 'python3 router.py' }] };
+  const h1 = { matcher: 'Bash|apply_patch', hooks: [{ type: 'command', command: 'deja' }] };
+  writeFileSync(codexPath, JSON.stringify({ hooks: { PreToolUse: [h0, h1], Stop: [h0] } }));
+  install({ guard: true, path, codexPath, self: '/n /lc/limitcast.mjs' });
+  let codex = JSON.parse(readFileSync(codexPath, 'utf8'));
+  assert.deepEqual(codex.hooks.PreToolUse.slice(0, 2), [h0, h1]);
+  assert.deepEqual(codex.hooks.PreToolUse[2], {
+    matcher: '.*spawn_agent.*',
+    hooks: [{ type: 'command', command: '/n /lc/limitcast.mjs guard', timeout: 10 }],
+  });
+  assert.deepEqual(codex.hooks.Stop, [h0]);
+
+  // A later hook added by the user stays after ours; re-install updates ours in place.
+  codex.hooks.PreToolUse.push({ matcher: 'x', hooks: [{ type: 'command', command: 'later' }] });
+  writeFileSync(codexPath, JSON.stringify(codex));
+  install({ guard: true, path, codexPath, self: '/n2 /lc/limitcast.mjs' });
+  codex = JSON.parse(readFileSync(codexPath, 'utf8'));
+  assert.equal(codex.hooks.PreToolUse.length, 4);
+  assert.equal(codex.hooks.PreToolUse[2].hooks[0].command, '/n2 /lc/limitcast.mjs guard');
+
+  // Trust check reads Codex's config.toml for the guard's position.
+  assert.ok(doctor({ path, codexPath, samplesAgeMs: 0, license: null }).some((c) => /not trusted yet/.test(c.line)));
+  writeFileSync(join(codexHome, 'config.toml'), `[hooks.state."${codexPath}:pre_tool_use:2:0"]\ntrusted_hash = "sha256:x"\n`);
+  assert.ok(doctor({ path, codexPath, samplesAgeMs: 0, license: null }).some((c) => /installed and trusted/.test(c.line)));
+
+  uninstall({ path, codexPath });
+  codex = JSON.parse(readFileSync(codexPath, 'utf8'));
+  assert.equal(
+    codex.hooks.PreToolUse.some((h) => h.hooks[0].command.includes('limitcast.mjs guard')),
+    false,
+  );
+  assert.equal(codex.hooks.PreToolUse.length, 3);
+});
+
+test('install skips Codex when it is not installed', () => {
+  const path = join(tmp('lc-claude-only-'), 'settings.json');
+  const codexPath = join(tmp('lc-parent-'), 'no-codex', 'hooks.json');
+  const changes = install({ guard: true, path, codexPath, self: '/n /lc/limitcast.mjs' });
+  assert.equal(
+    changes.some((c) => /Codex/.test(c)),
+    false,
+  );
+});
+
+test('CLI guard: blocks a Codex spawn on pace to run out, allows Grok, reads camelCase input', () => {
+  const codexHome = tmp('lc-cli-codex-');
+  const day = join(codexHome, 'sessions', '2026', '10', '24');
+  mkdirSync(day, { recursive: true });
+  const reset = Math.floor(Date.now() / 1000) + 3 * 3600;
+  const ev = (minsAgo, pct) =>
+    JSON.stringify({
+      timestamp: new Date(Date.now() - minsAgo * 60_000).toISOString(),
+      type: 'event_msg',
+      payload: { type: 'token_count', rate_limits: { primary: { used_percent: pct, window_minutes: 300, resets_at: reset }, secondary: null } },
+    });
+  writeFileSync(join(day, 'rollout-x.jsonl'), [ev(40, 50), ev(0, 90)].join('\n')); // +60%/h, 10% left: ~10 min
+  const env = { ...process.env, CODEX_HOME: codexHome, LIMITCAST_STATE: tmp('lc-cli-st-') };
+  const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
+  const run = (hook) => execFileSync('node', [bin, 'guard'], { input: JSON.stringify(hook), env }).toString();
+  assert.match(JSON.parse(run({ tool_name: 'collaborationspawn_agent', session_id: 'c1' })).hookSpecificOutput.permissionDecisionReason, /Codex 5h/);
+  assert.equal(run({ hookEventName: 'pre_tool_use', toolName: 'spawn_subagent', sessionId: 'g1' }), '');
+  assert.equal(run({ tool_name: 'Agent', session_id: 'x' }), ''); // Claude has no readings here
 });

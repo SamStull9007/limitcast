@@ -153,3 +153,15 @@ test('CLI end to end: statusline records, wraps the command, guard denies', () =
   const failOpen = execFileSync('node', [bin, 'guard'], { input: 'not json', env, stdio: ['pipe', 'pipe', 'ignore'] }).toString();
   assert.equal(failOpen, '');
 });
+
+test('untagged readings from before session tagging never mix into a tagged session', () => {
+  const tagged = (minsAgo, pct) => ({ ...s(minsAgo, pct), win: '7d', sid: 'A' });
+  const legacy = (minsAgo, pct) => ({ ...s(minsAgo, pct), win: '7d' });
+  const kept = oneClaudeSession([legacy(50, 13), legacy(40, 98), tagged(10, 98), tagged(0, 98)]);
+  assert.deepEqual(
+    kept.map((x) => x.sid),
+    ['A', 'A'],
+  );
+  assert.equal(forecast(kept, now).verdict, 'OK'); // flat at 98%: no false runout
+  assert.equal(oneClaudeSession([legacy(5, 13), legacy(0, 98)]).length, 2); // nothing tagged yet: keep all
+});

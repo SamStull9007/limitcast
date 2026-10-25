@@ -5,7 +5,10 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 export const settingsPath = () => join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'settings.json');
+export const codexHooksPath = () => join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'hooks.json');
 const MARK = 'limitcast';
+// Codex reports the tool with a namespace prefix (e.g. "collaborationspawn_agent"); match it anywhere.
+const CODEX_MATCHER = '.*spawn_agent.*';
 
 /** Shell-quote one argument. @param {string} s */
 const q = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
@@ -19,9 +22,10 @@ export function selfCommand() {
 /**
  * Add the status-line recorder (wrapping any existing status line) and, optionally, the subagent guard.
  * Idempotent; backs up settings.json first; remembers the original status line for uninstall.
- * @param {{guard:boolean, path?:string, self?:string}} opts
+ * With `guard`, Codex gets the guard too when ~/.codex exists.
+ * @param {{guard:boolean, path?:string, codexPath?:string, self?:string}} opts
  */
-export function install({ guard, path = settingsPath(), self = selfCommand() }) {
+export function install({ guard, path = settingsPath(), codexPath = codexHooksPath(), self = selfCommand() }) {
   const cfg = readSettings(path);
   backup(path);
   const changes = [];
@@ -38,20 +42,39 @@ export function install({ guard, path = settingsPath(), self = selfCommand() }) 
     changes.push('status line already installed (command path refreshed)');
   }
   if (guard) {
-    cfg.hooks ??= {};
-    cfg.hooks.PreToolUse = (cfg.hooks.PreToolUse ?? []).filter((/** @type {any} */ h) => !isGuard(h));
-    cfg.hooks.PreToolUse.push({ matcher: 'Task|Agent', hooks: [{ type: 'command', command: `${self} guard`, timeout: 10 }] });
-    changes.push('added the subagent guard');
+    upsertGuard(cfg, { matcher: 'Task|Agent', hooks: [{ type: 'command', command: `${self} guard`, timeout: 10 }] });
+    changes.push('added the Claude Code subagent guard');
   }
   writeSettings(path, cfg);
+  if (guard && existsSync(join(codexPath, '..'))) {
+    const codex = readSettings(codexPath);
+    backup(codexPath);
+    upsertGuard(codex, { matcher: CODEX_MATCHER, hooks: [{ type: 'command', command: `${self} guard`, timeout: 10 }] });
+    writeSettings(codexPath, codex);
+    changes.push('added the Codex subagent guard (Codex runs it after you trust it: start Codex and approve the new hook)');
+  }
   return changes;
 }
 
 /**
- * Remove everything limitcast added and restore the original status line.
- * @param {{path?:string}} [opts]
+ * Put the guard in PreToolUse: update it where it is, else append.
+ * Codex trusts hooks by their position, so existing hooks must keep their places.
+ * @param {any} cfg
+ * @param {any} entry
  */
-export function uninstall({ path = settingsPath() } = {}) {
+function upsertGuard(cfg, entry) {
+  cfg.hooks ??= {};
+  const list = (cfg.hooks.PreToolUse ??= []);
+  const i = list.findIndex(isGuard);
+  if (i >= 0) list[i] = entry;
+  else list.push(entry);
+}
+
+/**
+ * Remove everything limitcast added and restore the original status line.
+ * @param {{path?:string, codexPath?:string}} [opts]
+ */
+export function uninstall({ path = settingsPath(), codexPath = codexHooksPath() } = {}) {
   const cfg = readSettings(path);
   backup(path);
   const changes = [];
@@ -64,9 +87,19 @@ export function uninstall({ path = settingsPath() } = {}) {
   const before = cfg.hooks?.PreToolUse?.length ?? 0;
   if (before) {
     cfg.hooks.PreToolUse = cfg.hooks.PreToolUse.filter((/** @type {any} */ h) => !isGuard(h));
-    if (cfg.hooks.PreToolUse.length < before) changes.push('removed the subagent guard');
+    if (cfg.hooks.PreToolUse.length < before) changes.push('removed the Claude Code subagent guard');
   }
   writeSettings(path, cfg);
+  if (existsSync(codexPath)) {
+    const codex = readSettings(codexPath);
+    const list = codex.hooks?.PreToolUse ?? [];
+    if (list.some(isGuard)) {
+      backup(codexPath);
+      codex.hooks.PreToolUse = list.filter((/** @type {any} */ h) => !isGuard(h));
+      writeSettings(codexPath, codex);
+      changes.push('removed the Codex subagent guard');
+    }
+  }
   return changes;
 }
 
@@ -110,11 +143,36 @@ function backup(path) {
 }
 
 /**
+ * Is the Codex guard installed, and has Codex trusted it? Codex records trust in config.toml per hook position.
+ * @param {string} codexPath
+ */
+function codexGuardCheck(codexPath) {
+  let list = [];
+  try {
+    list = readSettings(codexPath).hooks?.PreToolUse ?? [];
+  } catch (e) {
+    return { ok: false, line: String(e instanceof Error ? e.message : e) };
+  }
+  const i = list.findIndex(isGuard);
+  if (i < 0) return { ok: true, line: 'Codex subagent guard not installed (optional: `limitcast install --guard`)' };
+  let toml = '';
+  try {
+    toml = readFileSync(join(codexPath, '..', 'config.toml'), 'utf8');
+  } catch {
+    /* no config yet */
+  }
+  const trusted = toml.includes(`hooks.json:pre_tool_use:${i}:0"]`);
+  return trusted
+    ? { ok: true, line: 'Codex subagent guard installed and trusted' }
+    : { ok: false, line: 'Codex subagent guard installed but not trusted yet: start Codex and approve the new hook' };
+}
+
+/**
  * Health checks: settings wired, the node path in them still exists, data arriving, license state.
- * @param {{path?:string, samplesAgeMs:number|null, license:ReturnType<typeof import('./license.mjs').currentLicense>}} info
+ * @param {{path?:string, codexPath?:string, samplesAgeMs:number|null, license:ReturnType<typeof import('./license.mjs').currentLicense>}} info
  * @returns {{ok:boolean, line:string}[]}
  */
-export function doctor({ path = settingsPath(), samplesAgeMs, license }) {
+export function doctor({ path = settingsPath(), codexPath = codexHooksPath(), samplesAgeMs, license }) {
   /** @type {{ok:boolean, line:string}[]} */
   const out = [];
   const major = Number(process.versions.node.split('.')[0]);
@@ -138,8 +196,12 @@ export function doctor({ path = settingsPath(), samplesAgeMs, license }) {
       line: existsSync(exePath) ? 'Node path in settings exists' : `Node path in settings is gone (${exePath}): run \`limitcast install\` again`,
     });
   }
-  const guard = /** @type {any} */ ((cfg).hooks?.PreToolUse ?? []).some(isGuard);
-  out.push({ ok: true, line: guard ? 'Subagent guard installed' : 'Subagent guard not installed (optional: `limitcast install --guard`)' });
+  const guard = /** @type {any} */ (cfg.hooks?.PreToolUse ?? []).some(isGuard);
+  out.push({
+    ok: true,
+    line: guard ? 'Claude Code subagent guard installed' : 'Claude Code subagent guard not installed (optional: `limitcast install --guard`)',
+  });
+  if (existsSync(codexPath)) out.push(codexGuardCheck(codexPath));
   out.push(
     samplesAgeMs === null
       ? { ok: false, line: 'No Claude limit readings yet: send a message in Claude Code' }

@@ -10,10 +10,17 @@ claude 7d  48%   +1.1%/h   -         Tue 09:00  OK
 codex 7d   10%   +0.5%/h   -         Fri 12:41  OK
 ```
 
-- **Local only.** Reads the limit readings Claude Code passes to your status line and the logs Claude Code and Codex already write. No API calls, no logins, nothing leaves your machine.
+- **Local only.** Reads the limit readings Claude Code passes to your status line and the logs Claude Code, Codex and Grok already write. No API calls, no logins, nothing leaves your machine.
 - **Runout forecast** per limit window: burn rate, the time you'll run out, and whether that's before the reset.
-- **Subagent guard:** a PreToolUse hook that blocks new subagents when a Claude window is on pace to run out before it resets.
-- **Pro:** a weekly burn report and a trim advisor for the context every session loads before you type.
+- **Subagent guard** for Claude Code and Codex: blocks a new subagent when that tool's own window is on pace to run out before it resets.
+- **Pro:** a burn report across Claude Code, Codex and Grok, and a trim advisor for the context every Claude Code session loads before you type.
+
+| | Claude Code | Codex | Grok |
+|---|---|---|---|
+| Limit forecast (`status`) | ✓ status-line feed | ✓ session logs | no: Grok keeps no limit readings on disk |
+| Subagent guard | ✓ `Task`/`Agent` | ✓ `spawn_agent` | never blocks (nothing to judge by) |
+| Token report (`report`) | ✓ | ✓ | ✓ per-turn ledger |
+| Trim advisor (`trim`) | ✓ | - | - |
 
 Requires Node 20+ on macOS or Linux.
 
@@ -27,7 +34,9 @@ limitcast doctor
 
 `install` backs up `~/.claude/settings.json`, wraps your existing status line (it looks exactly the same), and with `--guard` adds the subagent guard. Restart Claude Code to load it. `limitcast uninstall` puts everything back.
 
-Codex needs no setup: `limitcast status` reads `~/.codex/sessions` (or `$CODEX_HOME/sessions`).
+**Codex:** forecasts and reports need no setup (`~/.codex/sessions`, or `$CODEX_HOME/sessions`). With `--guard`, `install` also appends the guard to `~/.codex/hooks.json`, after your existing hooks so the ones you've already trusted keep their trust. Codex runs a new hook only once you approve it: start Codex and accept it. `limitcast doctor` shows whether it's trusted.
+
+**Grok:** `report` reads each session's `~/.grok/sessions/*/*/usage.json`. Grok also loads hooks from `~/.claude/settings.json`; the guard's `Task|Agent` matcher doesn't match Grok's `spawn_subagent`, and the guard never blocks Grok spawns anyway.
 
 ## Commands
 
