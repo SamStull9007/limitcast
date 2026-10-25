@@ -208,6 +208,16 @@
         <nav><a href="#how">How it works</a><a href="#compare">Compare</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a></nav>
       </header>
 
+      <section id="thanks" class="card featured" hidden>
+        <h3>Thanks for buying limitcast Pro.</h3>
+        <p>Your license key is in your confirmation email (it starts with <code>LIMITCAST-</code>). Activate it:</p>
+        <pre>npm install -g limitcast
+limitcast activate LIMITCAST-your-key
+limitcast install --guard --alerts
+limitcast trim</pre>
+        <p>One key works on up to 3 computers. <code>limitcast deactivate</code> frees one. Questions: support@limitcast.dev</p>
+      </section>
+
       <h1>Stretch your Claude Code plan.</h1>
       <p class="lede">
         Every Claude Code session starts with ~100k tokens of context before you type, re-sent on every turn and to every subagent. limitcast measures
@@ -396,11 +406,18 @@ limitcast doctor</pre>
       <footer>limitcast is an independent tool and is not affiliated with Anthropic or OpenAI.</footer>
     </main>
     <script>
-    // Fill in the payment links once the checkout products exist.
-    const CHECKOUT = { annual: '', lifetime: '' };
+    // Polar checkout links (Products → Checkout Links).
+    const CHECKOUT = {
+      annual: 'https://buy.polar.sh/polar_cl_mODyL2toBGrw6OiIhFW1XrhAnhXkacurfpPpk0aNzJ6',
+      lifetime: 'https://buy.polar.sh/polar_cl_rmyvr52577NJLdK6D3HYUDdwMKAUlG3zPvCDa36ETGH',
+    };
     for (const a of document.querySelectorAll('[data-checkout]')) {
       const url = CHECKOUT[a.dataset.checkout];
       if (url) a.href = url;
+    }
+    // Polar returns buyers to ?purchase=success: show how to activate.
+    if (new URLSearchParams(location.search).get('purchase') === 'success') {
+      document.getElementById('thanks').hidden = false;
     }
     </script>
   </body>
