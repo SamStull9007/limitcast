@@ -9,8 +9,10 @@ import { KEEP_MS, load, record, stateDir } from '../src/store.mjs';
 import { runGuard } from '../src/guard.mjs';
 import { claudeRoot, grokRoot, readUsage } from '../src/usage.mjs';
 import { burnReport } from '../src/report.mjs';
-import { baseline, contributors, startupReport, trimReport } from '../src/trim.mjs';
-import { latestInteractiveTranscript } from '../src/startup.mjs';
+import { baseline, contributors, shareSummary, startupReport, trimReport } from '../src/trim.mjs';
+import { countInteractiveSince, latestInteractiveTranscript } from '../src/startup.mjs';
+import { driftMessage, loadOverhead, recordOverhead, savedSummary, snapshot } from '../src/overhead.mjs';
+import { formatChecks } from '../src/formats.mjs';
 import { activate, currentLicense, isPro, UPGRADE_URL } from '../src/license.mjs';
 import { doctor, install, uninstall } from '../src/install.mjs';
 
@@ -23,14 +25,18 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
   limitcast status [--json]          used, burn rate, runout time and reset per limit window
 
   Pro (${UPGRADE_URL})
-  limitcast trim [--days N]                  tokens every session loads before you type, and what to cut
+  limitcast trim [--days N] [--share]        tokens every session loads before you type, and what to cut
+                                             (--share: totals only, no names, safe to post)
+  limitcast saved                            tokens saved since limitcast first measured you
   limitcast install --guard                  block new subagents when a window is on pace to run out
+  limitcast install --alerts                 tell you when your starting context grows
   limitcast report [--days N] [--out FILE]   tokens by tool, day, project, model and session
   limitcast activate <license-key>           unlock Pro
 
   Used by Claude Code and Codex (set up by install)
   limitcast statusline [-- <cmd...>]  record limit readings, then run your status-line command
   limitcast guard                     PreToolUse hook (Pro)
+  limitcast drift [--hook]            SessionStart hook: compare starting context with the last session (Pro)
 `;
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -82,8 +88,11 @@ if (cmd === 'status') {
   }
 } else if (cmd === 'install') {
   const wantGuard = args.includes('--guard');
-  if (wantGuard && !isPro()) console.log(`The subagent guard is part of limitcast Pro (${UPGRADE_URL}). Installing the free features.`);
-  for (const c of install({ guard: wantGuard && isPro() })) console.log(`✓ ${c}`);
+  const wantAlerts = args.includes('--alerts');
+  if ((wantGuard || wantAlerts) && !isPro()) {
+    console.log(`The subagent guard and alerts are part of limitcast Pro (${UPGRADE_URL}). Installing the free features.`);
+  }
+  for (const c of install({ guard: wantGuard && isPro(), alerts: wantAlerts && isPro() })) console.log(`✓ ${c}`);
   console.log('Restart Claude Code and Codex to load it. Then: limitcast doctor');
 } else if (cmd === 'uninstall') {
   const changes = uninstall();
@@ -96,7 +105,7 @@ if (cmd === 'status') {
   } catch {
     /* never fed */
   }
-  const checks = doctor({ samplesAgeMs: latest ? now - latest : null, license: currentLicense() });
+  const checks = [...doctor({ samplesAgeMs: latest ? now - latest : null, license: currentLicense() }), ...(await formatChecks())];
   for (const c of checks) console.log(`${c.ok ? '✓' : '✗'} ${c.line}`);
   process.exit(checks.every((c) => c.ok) ? 0 : 1);
 } else if (cmd === 'report' || cmd === 'trim') {
@@ -113,13 +122,42 @@ if (cmd === 'status') {
   else {
     // Prefer the measured starting context of the latest interactive session; older Claude Code logs fall back to estimates.
     const latest = await latestInteractiveTranscript(claudeRoot());
-    text = latest ? startupReport(baseline(usage), latest, used, days()) : trimReport(baseline(usage), contributors(), used, days());
+    if (latest) recordOverhead(snapshot(latest));
+    if (latest && args.includes('--share')) text = shareSummary(baseline(usage), latest, used, days());
+    else text = latest ? startupReport(baseline(usage), latest, used, days()) : trimReport(baseline(usage), contributors(), used, days());
   }
   const out = flag('--out');
   if (out) {
     writeFileSync(out, text + '\n');
     console.log(`Wrote ${out}`);
   } else console.log(text);
+} else if (cmd === 'drift') {
+  // SessionStart hook: tells the user (systemMessage, never the model's context) when starting context grew.
+  const hook = args.includes('--hook');
+  if (!isPro()) {
+    if (!hook) console.log(`\`limitcast drift\` is part of limitcast Pro: ${UPGRADE_URL}`);
+    process.exit(hook ? 0 : 2);
+  }
+  try {
+    const latest = await latestInteractiveTranscript(claudeRoot());
+    const d = latest ? recordOverhead(snapshot(latest)) : null;
+    if (hook) {
+      if (d?.alert) console.log(JSON.stringify({ systemMessage: driftMessage(d) }));
+    } else if (!latest) console.log('No interactive Claude Code session found yet.');
+    else if (!d) console.log('Starting context recorded. limitcast will tell you when it grows.');
+    else console.log(d.alert ? driftMessage(d) : 'No meaningful change in your starting context since the last session.');
+  } catch (e) {
+    if (!hook) throw e; // a hook must never break session start
+  }
+} else if (cmd === 'saved') {
+  if (!isPro()) {
+    console.log(`\`limitcast saved\` is part of limitcast Pro: ${UPGRADE_URL}`);
+    process.exit(2);
+  }
+  const latest = await latestInteractiveTranscript(claudeRoot());
+  if (latest) recordOverhead(snapshot(latest));
+  const s = loadOverhead();
+  console.log(s ? savedSummary(s, await countInteractiveSince(claudeRoot(), s.first.at)) : 'Nothing measured yet. Run `limitcast trim` first.');
 } else if (cmd === 'activate') {
   const res = activate(args[0] ?? '');
   console.log(res.ok ? `✓ limitcast Pro activated for ${res.claims.e}` : `✗ ${res.reason}`);

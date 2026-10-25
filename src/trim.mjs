@@ -286,3 +286,27 @@ export function startupReport(base, b, used, days) {
   lines.push('', '_Token counts are estimated at ~4 characters per token._');
   return lines.join('\n');
 }
+
+/**
+ * A summary safe to post publicly: totals and counts only, no project, file, skill, server or hook names.
+ * @param {ReturnType<typeof baseline>} base
+ * @param {{pieces:import('./startup.mjs').Piece[]}} b
+ * @param {Activity} used
+ * @param {number} days
+ */
+export function shareSummary(base, b, used, days) {
+  const s = measuredSavings(b.pieces, used);
+  /** @type {Map<string, number>} */
+  const groups = new Map();
+  for (const p of b.pieces) groups.set(p.group, (groups.get(p.group) ?? 0) + p.chars);
+  const median = base?.median ?? 0;
+  const lines = [
+    `My Claude Code sessions start at ${fmt(median)} tokens before I type.`,
+    `limitcast found ~${fmt(s.tokens)} per session${median ? ` (${Math.round((s.tokens / median) * 100)}%)` : ''} I haven't used in ${days} days: ${s.unusedMcp.length} MCP servers, ${s.unusedSkills.length} skills.`,
+    'Where it comes from:',
+    ...[...groups].sort((x, y) => y[1] - x[1]).map(([g, c]) => `  ${g}: ${fmt(tok(c))}`),
+  ];
+  if (median) lines.push(`  Claude Code's own prompt and tools: ${fmt(Math.max(0, median - tok([...groups.values()].reduce((a, c) => a + c, 0))))}`);
+  lines.push('Measured with limitcast (https://limitcast.dev)');
+  return lines.join('\n');
+}

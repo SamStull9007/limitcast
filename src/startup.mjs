@@ -157,3 +157,28 @@ export async function latestInteractiveTranscript(root, scan = 40) {
   }
   return null;
 }
+
+/**
+ * Interactive (CLI-launched) Claude Code sessions started since `since`, read from transcript heads.
+ * @param {string} root ~/.claude/projects
+ * @param {number} since epoch ms
+ */
+export async function countInteractiveSince(root, since) {
+  let n = 0;
+  try {
+    for (const proj of readdirSync(root, { withFileTypes: true })) {
+      if (!proj.isDirectory()) continue;
+      for (const f of readdirSync(join(root, proj.name), { withFileTypes: true })) {
+        if (!f.isFile() || !f.name.endsWith('.jsonl')) continue;
+        const p = join(root, proj.name, f.name);
+        const st = statSync(p);
+        if ((st.birthtimeMs || st.mtimeMs) < since) continue;
+        const b = await startupBreakdown(p);
+        if (b.entry === 'cli' && b.at >= since) n++;
+      }
+    }
+  } catch {
+    /* unreadable root: count what we have */
+  }
+  return n;
+}

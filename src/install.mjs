@@ -22,10 +22,11 @@ export function selfCommand() {
 /**
  * Add the status-line recorder (wrapping any existing status line) and, optionally, the subagent guard.
  * Idempotent; backs up settings.json first; remembers the original status line for uninstall.
- * With `guard`, Codex gets the guard too when ~/.codex exists.
- * @param {{guard:boolean, path?:string, codexPath?:string, self?:string}} opts
+ * With `guard`, Codex gets the guard too when ~/.codex exists. With `alerts`, a SessionStart hook tells you
+ * (never the model) when your starting context grew.
+ * @param {{guard:boolean, alerts?:boolean, path?:string, codexPath?:string, self?:string}} opts
  */
-export function install({ guard, path = settingsPath(), codexPath = codexHooksPath(), self = selfCommand() }) {
+export function install({ guard, alerts = false, path = settingsPath(), codexPath = codexHooksPath(), self = selfCommand() }) {
   const cfg = readSettings(path);
   backup(path);
   const changes = [];
@@ -44,6 +45,15 @@ export function install({ guard, path = settingsPath(), codexPath = codexHooksPa
   if (guard) {
     upsertGuard(cfg, { matcher: 'Task|Agent', hooks: [{ type: 'command', command: `${self} guard`, timeout: 10 }] });
     changes.push('added the Claude Code subagent guard');
+  }
+  if (alerts) {
+    cfg.hooks ??= {};
+    const list = (cfg.hooks.SessionStart ??= []);
+    const entry = { matcher: '', hooks: [{ type: 'command', command: `${self} drift --hook`, timeout: 15 }] };
+    const i = list.findIndex(isAlert);
+    if (i >= 0) list[i] = entry;
+    else list.push(entry);
+    changes.push('added the starting-context alert');
   }
   writeSettings(path, cfg);
   if (guard && existsSync(join(codexPath, '..'))) {
@@ -89,6 +99,11 @@ export function uninstall({ path = settingsPath(), codexPath = codexHooksPath() 
     cfg.hooks.PreToolUse = cfg.hooks.PreToolUse.filter((/** @type {any} */ h) => !isGuard(h));
     if (cfg.hooks.PreToolUse.length < before) changes.push('removed the Claude Code subagent guard');
   }
+  const alertsBefore = cfg.hooks?.SessionStart?.length ?? 0;
+  if (alertsBefore) {
+    cfg.hooks.SessionStart = cfg.hooks.SessionStart.filter((/** @type {any} */ h) => !isAlert(h));
+    if (cfg.hooks.SessionStart.length < alertsBefore) changes.push('removed the starting-context alert');
+  }
   writeSettings(path, cfg);
   if (existsSync(codexPath)) {
     const codex = readSettings(codexPath);
@@ -119,6 +134,9 @@ export function wrappedCommand(command) {
 /** @param {any} h */
 const isGuard = (h) =>
   (h.hooks ?? []).some((/** @type {any} */ x) => typeof x.command === 'string' && x.command.includes(MARK) && /\bguard\b/.test(x.command));
+/** @param {any} h */
+const isAlert = (h) =>
+  (h.hooks ?? []).some((/** @type {any} */ x) => typeof x.command === 'string' && x.command.includes(MARK) && /\bdrift --hook\b/.test(x.command));
 
 /** @param {string} path */
 export function readSettings(path) {

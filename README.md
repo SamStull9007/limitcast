@@ -47,10 +47,12 @@ limitcast doctor
 | Command | |
 |---|---|
 | `limitcast status [--json]` | Used, burn rate, runout time and reset for each window |
-| `limitcast install [--guard]` / `uninstall` | Wire into Claude Code / restore your settings |
-| `limitcast doctor` | Check the setup, data freshness and license |
+| `limitcast install [--guard] [--alerts]` / `uninstall` | Wire into Claude Code / restore your settings |
+| `limitcast doctor` | Check the setup, data freshness, license, and that Claude Code, Codex and Grok logs are still in a format limitcast reads |
 | `limitcast report [--days N] [--out FILE]` | **Pro.** Tokens by tool, day, project, model and session; subagent share |
-| `limitcast trim [--days N]` | **Pro.** Measured starting context of your latest session and what you haven't used in N days (default 7) |
+| `limitcast trim [--days N] [--share]` | **Pro.** Measured starting context of your latest session and what you haven't used in N days (default 7). `--share`: totals only, no names, safe to post |
+| `limitcast saved` | **Pro.** How much the part of your starting context you control has dropped since limitcast first measured it, times your sessions since |
+| `install --alerts` | **Pro.** A SessionStart hook that tells you (never the model) when your starting context grew ~1k+ tokens, and what grew |
 | `limitcast activate <key>` | Unlock Pro (checked offline) |
 
 ### Subagent guard (Pro)

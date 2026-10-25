@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+- `install --alerts` (Pro): a SessionStart hook that tells you, as a message the model never sees, when your starting context grew ~1k+ tokens since the last session, naming what grew. Runs in ~0.3 s.
+- `limitcast saved` (Pro): how much the part of your starting context you control dropped since limitcast first measured it, times your interactive sessions since.
+- `limitcast trim --share`: a summary with totals only (no project, file, skill, server or hook names), safe to post.
+- `doctor` now checks that your latest Claude Code, Codex and Grok logs still contain the fields limitcast reads, and says so plainly when a tool changed its format.
+- Log-format contract tests with fixtures mirroring the real field names of all three tools.
+
 ## 0.4.0
 
 - `trim` measures your latest interactive session's starting context from its transcript: each SessionStart hook's output, MCP server instructions and tool names (per server), the agent list, the skill listing (per skill) and instruction files. "Measured savings" counts the MCP servers and skills you haven't used in the period (Skill calls, slash commands and MCP tool calls in your transcripts), with exact sizes.
