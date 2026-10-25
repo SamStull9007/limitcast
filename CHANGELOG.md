@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1
+
+- Pricing in the README: Pro is $9/month or $79/year with a 14-day free trial; the Lifetime plan is retired (existing keys keep working). No code changes.
+
 ## 0.9.0
 
 Pro now acts on what limitcast sees; free gets the daily allowance and a preview of each action.
