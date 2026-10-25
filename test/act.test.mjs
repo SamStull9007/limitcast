@@ -9,7 +9,7 @@ import { forecast, resetTarget } from '../src/forecast.mjs';
 import { runGuard, switchable } from '../src/guard.mjs';
 import { compactHint, headroom, lastCallTokens } from '../src/hints.mjs';
 import { mdToHtml } from '../src/html.mjs';
-import { transitions } from '../src/notify.mjs';
+import { buildNotifierApp, notifierApp, transitions } from '../src/notify.mjs';
 import { resultsStats } from '../src/results.mjs';
 
 const H = 3600_000;
@@ -36,6 +36,21 @@ test('daily allowance: an even share of what was left this morning, minus what t
 test('after-reset waits for the reset, or runs now if it already happened', () => {
   assert.equal(resetTarget({ verdict: 'HIT', reset: 5000_000 }, 1000), 5000_000 + 60_000);
   assert.equal(resetTarget({ verdict: 'RESET', reset: 500 }, 1000), 1000);
+});
+
+test('macOS notifier app: its own bundle id and name, no Dock icon, reads the queue', { skip: process.platform !== 'darwin' }, () => {
+  const prev = process.env.LIMITCAST_STATE;
+  process.env.LIMITCAST_STATE = tmp('lc-notifier-');
+  try {
+    assert.equal(buildNotifierApp(), true);
+    const plist = readFileSync(join(notifierApp(), 'Contents', 'Info.plist'), 'utf8');
+    assert.match(plist, /<key>CFBundleIdentifier<\/key>\s*<string>dev\.limitcast\.notifier<\/string>/);
+    assert.match(plist, /<key>CFBundleName<\/key>\s*<string>limitcast<\/string>/);
+    assert.match(plist, /<key>LSUIElement<\/key>\s*<true\/>/);
+    assert.match(readFileSync(join(process.env.LIMITCAST_STATE, 'notifier.applescript'), 'utf8'), /notify-queue\.txt/);
+  } finally {
+    process.env.LIMITCAST_STATE = prev;
+  }
 });
 
 test('notifications: one per worsening, a reset after a HIT, and no repeats', () => {

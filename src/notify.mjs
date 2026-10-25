@@ -1,6 +1,6 @@
 // @ts-check
-import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stateDir } from './store.mjs';
 
@@ -74,15 +74,71 @@ export function notifyChanges(rows, clock) {
 }
 
 /**
- * Show a desktop notification: macOS through osascript, Linux through notify-send. Fire and forget.
+ * Show a desktop notification. macOS: through limitcast's own notifier app, so it is listed as "limitcast" in
+ * System Settings → Notifications (osascript's notifications are attributed to Script Editor, which may not be
+ * listed at all). Linux: notify-send. Fire and forget.
  * @param {string} message
  */
 export function send(message) {
-  const [cmd, args] =
-    process.platform === 'darwin'
-      ? ['osascript', ['-e', `display notification ${JSON.stringify(message)} with title "limitcast"`]]
-      : ['notify-send', ['limitcast', message]];
+  if (process.platform === 'darwin' && existsSync(notifierApp())) {
+    appendFileSync(queueFile(), `${message.replace(/\n/g, ' ')}\n`);
+    run('open', ['-g', '-a', notifierApp()]);
+    return;
+  }
+  if (process.platform === 'darwin') run('osascript', ['-e', `display notification ${JSON.stringify(message)} with title "limitcast"`]);
+  else run('notify-send', ['limitcast', message]);
+}
+
+/** @param {string} cmd @param {string[]} args */
+function run(cmd, args) {
   const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
   child.on('error', () => {}); // no notifier installed: nothing to do
   child.unref();
+}
+
+export const notifierApp = () => join(stateDir(), 'limitcast.app');
+const queueFile = () => join(stateDir(), 'notify-queue.txt');
+
+/**
+ * Build the macOS notifier: a tiny AppleScript app (bundle id dev.limitcast.notifier, no Dock icon) that shows
+ * every queued message and exits. Built with the tools macOS ships (osacompile, plutil, codesign); ad-hoc signed.
+ * @returns {boolean} whether the app is ready
+ */
+export function buildNotifierApp() {
+  if (process.platform !== 'darwin') return false;
+  mkdirSync(stateDir(), { recursive: true });
+  const app = notifierApp();
+  const src = join(stateDir(), 'notifier.applescript');
+  const q = queueFile().replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  writeFileSync(
+    src,
+    [
+      'on run',
+      `\tset q to "${q}"`,
+      '\ttry',
+      `\t\tset msgs to do shell script "f=" & quoted form of q & "; if [ -f \\"$f\\" ]; then cat \\"$f\\"; rm -f \\"$f\\"; fi"`,
+      '\ton error',
+      '\t\treturn',
+      '\tend try',
+      '\trepeat with m in paragraphs of msgs',
+      '\t\tif (length of (m as text)) > 0 then display notification (m as text) with title "limitcast"',
+      '\tend repeat',
+      '\tdelay 2', // let Notification Center take the messages before the app exits
+      'end run',
+      '',
+    ].join('\n'),
+  );
+  rmSync(app, { recursive: true, force: true });
+  const plist = join(app, 'Contents', 'Info.plist');
+  const steps = [
+    ['osacompile', ['-o', app, src]],
+    ['plutil', ['-replace', 'CFBundleIdentifier', '-string', 'dev.limitcast.notifier', plist]],
+    ['plutil', ['-replace', 'CFBundleName', '-string', 'limitcast', plist]],
+    ['plutil', ['-replace', 'LSUIElement', '-bool', 'true', plist]],
+    ['codesign', ['--force', '--sign', '-', app]],
+  ];
+  for (const [cmd, args] of /** @type {[string, string[]][]} */ (steps)) {
+    if (spawnSync(cmd, args, { stdio: 'ignore' }).status !== 0) return false;
+  }
+  return existsSync(app);
 }

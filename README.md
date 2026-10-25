@@ -51,7 +51,7 @@ limitcast doctor
 |---|---|
 | `limitcast status [--json]` | Used, burn rate, runout time and reset for each window, and today's share of each weekly one. **Pro** also lists your other Claude accounts |
 | `limitcast trim --codex [--apply / --undo]` | Codex: AGENTS.md size and MCP servers in `~/.codex/config.toml` you haven't used. **Pro** names them and turns them off (`enabled = false`; `--undo` restores the file exactly) |
-| `limitcast notify on/off/test` | **Pro.** A desktop notification when a Claude window turns NEAR, AT_RISK or HIT, and when it resets after a HIT |
+| `limitcast notify on/off/test` | **Pro.** A desktop notification when a Claude window turns NEAR, AT_RISK or HIT, and when it resets after a HIT. On macOS they come from a tiny limitcast notifier app, listed as "limitcast" in System Settings → Notifications |
 | `limitcast after-reset [--src claude/codex] [--window 5h/7d] [--detach] -- <cmd>` | **Pro.** Wait for the window to reset, then run the command |
 | `limitcast results --html [--out FILE]` | **Pro.** Results, current windows and the burn report on one page, opened in your browser |
 | `limitcast install [--guard] [--alerts]` / `uninstall` | Wire into Claude Code / restore your settings |

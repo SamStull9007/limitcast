@@ -23,7 +23,7 @@ import { accountForecasts, compactHint, headroom, lastCallTokens } from '../src/
 import { htmlPage } from '../src/html.mjs';
 import { doctor, install, readSettings, settingsPath, uninstall } from '../src/install.mjs';
 import { activate, currentLicense, isPro, UPGRADE_URL } from '../src/license.mjs';
-import { notifyChanges, notifyEnabled, send, setNotify } from '../src/notify.mjs';
+import { buildNotifierApp, notifierApp, notifyChanges, notifyEnabled, send, setNotify } from '../src/notify.mjs';
 import { driftMessage, loadOverhead, recordOverhead, savedPerSession, savedSummary, snapshot } from '../src/overhead.mjs';
 import { activatePolar, deactivatePolar, refreshDue, refreshPolar } from '../src/polar.mjs';
 import { burnReport } from '../src/report.mjs';
@@ -362,12 +362,22 @@ if (cmd === 'status') {
   }
   const what = args[0];
   if (what === 'on' || what === 'off') setNotify(what === 'on');
-  if (what === 'test') send('limitcast notifications work.');
+  // macOS: limitcast's own notifier app, so it shows up as "limitcast" in System Settings → Notifications.
+  const mac = process.platform === 'darwin';
+  const app = mac && (what === 'on' || what === 'test') && !existsSync(notifierApp()) ? buildNotifierApp() : mac && existsSync(notifierApp());
+  if (mac && (what === 'on' || what === 'test') && !app) console.log('Could not build the notifier app; falling back to osascript.');
+  if (what === 'on' || what === 'test') send('limitcast notifications work.');
   console.log(
-    what === 'test'
-      ? 'Sent a test notification. Nothing showed up? Allow notifications for Script Editor (macOS) or install notify-send (Linux).'
-      : `Notifications are ${notifyEnabled() ? 'on: you get one when a Claude window turns NEAR, AT_RISK or HIT, and when it resets after a HIT' : 'off'}. (limitcast notify on|off|test)`,
+    what === 'test' || what === 'on'
+      ? mac
+        ? 'Sent a test notification. The first one asks to allow notifications from "limitcast"; if you missed it, turn it on in System Settings → Notifications → limitcast.'
+        : 'Sent a test notification. Nothing showed up? Install notify-send.'
+      : '',
   );
+  if (what !== 'test')
+    console.log(
+      `Notifications are ${notifyEnabled() ? 'on: you get one when a Claude window turns NEAR, AT_RISK or HIT, and when it resets after a HIT' : 'off'}. (limitcast notify on|off|test)`,
+    );
 } else if (cmd === 'after-reset') {
   // Run a command once a window has reset: queue the heavy job instead of watching the clock.
   if (!isPro()) {

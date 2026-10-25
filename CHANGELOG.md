@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.2
+
+- macOS notifications come from limitcast's own notifier app (`dev.limitcast.notifier`, no Dock icon, built and ad-hoc signed by `limitcast notify on` with the tools macOS ships), so "limitcast" is listed in System Settings → Notifications and can be allowed there. Before, they came from osascript, attributed to Script Editor, which may not be listed at all. `notify on` also sends a first test notification.
+
 ## 0.9.1
 
 - Pricing in the README: Pro is $9/month or $79/year with a 14-day free trial; the Lifetime plan is retired (existing keys keep working). No code changes.
