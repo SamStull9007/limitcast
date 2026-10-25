@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // @ts-check
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { forecastAll } from '../src/forecast.mjs';
 import { claudeSamples, readCodex } from '../src/sources.mjs';
-import { KEEP_MS, load, record } from '../src/store.mjs';
+import { KEEP_MS, load, record, stateDir } from '../src/store.mjs';
 import { guardDecision } from '../src/guard.mjs';
 
 const HELP = `limitcast: forecast when Claude Code and Codex hit their usage limits
@@ -25,7 +26,11 @@ if (cmd === 'status') {
   else console.log(rows.length ? table(rows) : 'No data yet. Add `limitcast statusline` to Claude Code, or run Codex once.');
 } else if (cmd === 'statusline') {
   const input = readStdin();
-  try { record(claudeSamples(JSON.parse(input), now)); } catch { /* never break the status line */ }
+  try {
+    const feed = JSON.parse(input);
+    record(claudeSamples(feed, now));
+    saveFeedShape(feed);
+  } catch { /* never break the status line */ }
   const sep = args.indexOf('--');
   const wrapped = sep >= 0 ? args.slice(sep + 1) : [];
   if (wrapped.length) {
@@ -49,6 +54,15 @@ if (cmd === 'status') {
 } else {
   console.log(HELP);
   process.exit(cmd && cmd !== '--help' && cmd !== '-h' ? 1 : 0);
+}
+
+/**
+ * Keep the latest feed's structure (key names and rate_limits only, no prompt or path content) for diagnosing parsing.
+ * @param {any} feed
+ */
+function saveFeedShape(feed) {
+  const shape = { at: now, keys: Object.keys(feed ?? {}), session_id: feed?.session_id, rate_limits: feed?.rate_limits };
+  writeFileSync(join(stateDir(), 'last-feed.json'), JSON.stringify(shape, null, 2));
 }
 
 function readStdin() {

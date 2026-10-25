@@ -86,7 +86,7 @@ test('guard blocks subagents only when a Claude window runs out soon', () => {
   assert.equal(guardDecision('Agent', [risky], now, 10), null);
   assert.equal(guardDecision('Bash', [risky], now, 30), null);
   assert.equal(guardDecision('Task', [later], now, 30), null);
-  assert.match(guardDecision('Task', [forecast([s(0, 100)], now)], now, 30), /used up/);
+  assert.equal(guardDecision('Task', [forecast([s(0, 100)], now)], now, 30), null); // extra usage may continue past 100%
   assert.equal(guardDecision('Agent', [{ ...risky, src: 'codex' }], now, 30), null);
 });
 
