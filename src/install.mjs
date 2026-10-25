@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeF
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stateDir } from './store.mjs';
 
 export const settingsPath = () => join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'settings.json');
 export const codexHooksPath = () => join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'hooks.json');
@@ -13,10 +14,62 @@ const CODEX_MATCHER = '.*spawn_agent.*';
 /** Shell-quote one argument. @param {string} s */
 const q = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
 
-/** The command that runs this copy of limitcast: absolute node + script, so hooks work without PATH. */
+/**
+ * The command hooks run: a launcher script in the state dir that runs this copy of limitcast (absolute node +
+ * script, so hooks work without PATH) and outlives a Node upgrade, which moves both under nvm and Homebrew.
+ */
 export function selfCommand() {
-  const bin = realpathSync(fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url)));
-  return `${q(process.execPath)} ${q(bin)}`;
+  return `/bin/sh ${q(writeLauncher())}`;
+}
+
+export const launcherPath = () => join(stateDir(), 'limitcast-hook.sh');
+
+/**
+ * Write the hook launcher. If this node or script is gone, it runs `limitcast` from PATH; if that is gone too,
+ * the status line still runs your own wrapped command and every other hook allows (exit 0).
+ * @returns {string} its path
+ */
+export function writeLauncher(node = process.execPath, bin = realpathSync(fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url)))) {
+  const path = launcherPath();
+  mkdirSync(stateDir(), { recursive: true });
+  writeFileSync(
+    path,
+    [
+      '#!/bin/sh',
+      '# limitcast hook launcher, written by `limitcast install`. Survives Node upgrades.',
+      `NODE=${q(node)}`,
+      `BIN=${q(bin)}`,
+      'if [ -x "$NODE" ] && [ -f "$BIN" ]; then exec "$NODE" "$BIN" "$@"; fi',
+      'PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin"',
+      'if command -v limitcast >/dev/null 2>&1; then exec limitcast "$@"; fi',
+      '# limitcast is gone: keep your status line working, allow every hook.',
+      'if [ "$1" = statusline ]; then',
+      '  while [ $# -gt 0 ] && [ "$1" != -- ]; do shift; done',
+      '  if [ $# -gt 0 ]; then shift; exec "$@"; fi',
+      'fi',
+      'exit 0',
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
+  return path;
+}
+
+/**
+ * The node and script a launcher points at (null when it isn't a launcher).
+ * @param {string} path
+ */
+export function launcherTargets(path) {
+  try {
+    const text = readFileSync(path, 'utf8');
+    const val = (/** @type {string} */ k) => {
+      const m = new RegExp(`^${k}=(?:'((?:[^']|'\\\\'')*)'|(\\S+))$`, 'm').exec(text);
+      return m ? (m[1] ?? m[2]).replace(/'\\''/g, "'") : null;
+    };
+    return { node: val('NODE'), bin: val('BIN') };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -131,6 +184,19 @@ export function wrappedCommand(command) {
   return plain ? plain[1] : rest;
 }
 
+/**
+ * Which optional parts are installed, so `doctor --fix` can re-install exactly those.
+ * @param {string} [path]
+ */
+export function installedFeatures(path = settingsPath()) {
+  const cfg = readSettings(path);
+  return {
+    statusLine: Boolean(cfg.statusLine?.command?.includes(MARK)),
+    guard: (cfg.hooks?.PreToolUse ?? []).some(isGuard),
+    alerts: (cfg.hooks?.SessionStart ?? []).some(isAlert),
+  };
+}
+
 /** @param {any} h */
 const isGuard = (h) =>
   (h.hooks ?? []).some((/** @type {any} */ x) => typeof x.command === 'string' && x.command.includes(MARK) && /\bguard\b/.test(x.command));
@@ -206,13 +272,27 @@ export function doctor({ path = settingsPath(), codexPath = codexHooksPath(), sa
     ok: sl.includes(MARK),
     line: sl.includes(MARK) ? 'Status-line recorder installed' : 'Status-line recorder missing: run `limitcast install`',
   });
-  const exe = sl.match(/^'([^']+)'|^(\S+)/);
-  const exePath = exe?.[1] ?? exe?.[2];
-  if (sl.includes(MARK) && exePath?.startsWith('/')) {
+  const launcher = /^\/bin\/sh '?([^' ]+limitcast-hook\.sh)'?/.exec(sl)?.[1];
+  const targets = launcher ? launcherTargets(launcher) : null;
+  if (sl.includes(MARK) && targets) {
+    const ok = Boolean(targets.node && existsSync(targets.node) && targets.bin && existsSync(targets.bin));
     out.push({
-      ok: existsSync(exePath),
-      line: existsSync(exePath) ? 'Node path in settings exists' : `Node path in settings is gone (${exePath}): run \`limitcast install\` again`,
+      ok,
+      line: ok
+        ? 'Hook launcher points at this Node and limitcast'
+        : 'Node or limitcast moved (a Node upgrade?): hooks fall back to `limitcast` on PATH. Fix: `limitcast doctor --fix`',
     });
+  } else if (sl.includes(MARK)) {
+    // Installed before 0.10: settings call node directly.
+    const exe = sl.match(/^'([^']+)'|^(\S+)/);
+    const exePath = exe?.[1] ?? exe?.[2];
+    if (exePath?.startsWith('/'))
+      out.push({
+        ok: existsSync(exePath),
+        line: existsSync(exePath)
+          ? 'Node path in settings exists (`limitcast doctor --fix` switches to the upgrade-proof launcher)'
+          : `Node path in settings is gone (${exePath}): run \`limitcast doctor --fix\``,
+      });
   }
   const guard = /** @type {any} */ (cfg.hooks?.PreToolUse ?? []).some(isGuard);
   out.push({

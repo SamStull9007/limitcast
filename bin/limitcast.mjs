@@ -21,8 +21,8 @@ import { formatChecks } from '../src/formats.mjs';
 import { runGuard } from '../src/guard.mjs';
 import { accountForecasts, compactHint, headroom, lastCallTokens } from '../src/hints.mjs';
 import { htmlPage } from '../src/html.mjs';
-import { doctor, install, readSettings, settingsPath, uninstall } from '../src/install.mjs';
-import { activate, currentLicense, isPro, UPGRADE_URL } from '../src/license.mjs';
+import { doctor, install, installedFeatures, readSettings, settingsPath, uninstall } from '../src/install.mjs';
+import { activate, currentLicense, isPro, startTrial, trialStatus, UPGRADE_URL } from '../src/license.mjs';
 import { buildNotifierApp, notifierApp, notifyChanges, notifyEnabled, send, setNotify } from '../src/notify.mjs';
 import { driftMessage, loadOverhead, recordOverhead, savedPerSession, savedSummary, snapshot } from '../src/overhead.mjs';
 import { activatePolar, deactivatePolar, refreshDue, refreshPolar } from '../src/polar.mjs';
@@ -113,6 +113,8 @@ if (cmd === 'status') {
     if (refreshDue(now)) spawn(process.execPath, [fileURLToPath(import.meta.url), 'license'], { detached: true, stdio: 'ignore' }).unref();
     // Readings are kept 8 days; the daily rollup folds what they showed into the long-term value record.
     if (dailyDue(now)) spawn(process.execPath, [fileURLToPath(import.meta.url), 'rollup'], { detached: true, stdio: 'ignore' }).unref();
+    const health = healthHint();
+    if (health) hints.push(health);
     if (isPro()) {
       const samples = load(now - KEEP_MS);
       if (notifyEnabled()) notifyChanges(forecastAll(oneClaudeAccount(samples, sid), now), clock);
@@ -120,6 +122,9 @@ if (cmd === 'status') {
       if (room) hints.push(room);
       const ctx = typeof feed?.transcript_path === 'string' ? compactHint(lastCallTokens(feed.transcript_path)) : null;
       if (ctx) hints.push(ctx);
+    } else {
+      const week = freeWeeklyHint(now);
+      if (week) hints.push(week);
     }
   } catch {
     /* never break the status line */
@@ -128,7 +133,7 @@ if (cmd === 'status') {
   const wrapped = sep >= 0 ? args.slice(sep + 1) : [];
   if (wrapped.length) {
     const r = spawnSync(wrapped[0], wrapped.slice(1), { input, stdio: ['pipe', 'inherit', 'inherit'] });
-    // Your status line stays as it was; Pro adds a second line only when there is something to act on.
+    // Your status line stays as it was; limitcast adds a second line only when there is something to act on.
     if (hints.length) console.log(`limitcast: ${hints.join(' · ')}`);
     process.exit(r.status ?? 1);
   }
@@ -168,24 +173,55 @@ if (cmd === 'status') {
   if (wantAlerts && !isPro()) console.log(`Alerts and the weekly summary are part of limitcast Pro (${UPGRADE_URL}). Skipping them.`);
   for (const c of install({ guard: wantGuard, alerts: wantAlerts && isPro() })) console.log(`✓ ${c}`);
   console.log('Restart Claude Code and Codex to load it. Then: limitcast doctor');
+  // First run: show the number that matters right away, and what comes next.
+  try {
+    const latest = await latestInteractiveTranscript(claudeRoot());
+    if (latest) {
+      recordOverhead(snapshot(latest));
+      /** @type {Map<string, number>} */
+      const groups = new Map();
+      for (const p of latest.pieces) groups.set(p.group, (groups.get(p.group) ?? 0) + p.chars);
+      const k = (/** @type {number} */ c) => `${(c / 4000).toFixed(1)}k`;
+      const total = [...groups.values()].reduce((a, c) => a + c, 0);
+      const top = [...groups].sort((a, b) => b[1] - a[1]).slice(0, 3);
+      console.log(
+        [
+          '',
+          `Your last Claude Code session loaded ~${k(total)} tokens of hooks, MCP servers, skills and instruction files before you typed`,
+          `(biggest: ${top.map(([g, c]) => `${g} ${k(c)}`).join(', ')}). It's re-sent on every turn and to every subagent.`,
+          'See what you never use: limitcast trim',
+        ].join('\n'),
+      );
+    }
+  } catch {
+    /* no transcripts yet */
+  }
+  console.log(
+    `In a week, \`limitcast results\` shows every limit you hit and how far ahead limitcast warned you.${isPro() ? '' : ' Try Pro free for 7 days, no card: limitcast trial'}`,
+  );
 } else if (cmd === 'uninstall') {
   const changes = uninstall();
   console.log(changes.length ? changes.map((c) => `✓ ${c}`).join('\n') : 'Nothing to remove.');
 } else if (cmd === 'doctor') {
-  // Readings are only stored when they change, so freshness comes from the last feed the status line saw.
-  let latest = 0;
-  try {
-    latest = JSON.parse(readFileSync(join(stateDir(), 'last-feed.json'), 'utf8')).at ?? 0;
-  } catch {
-    /* never fed */
+  if (args.includes('--fix')) {
+    // Re-install what is installed, with this Node and this copy of limitcast (after a Node upgrade, say).
+    const f = installedFeatures();
+    if (!f.statusLine) console.log('limitcast is not installed. Run `limitcast install` first.');
+    else {
+      for (const c of install({ guard: f.guard && isPro(), alerts: f.alerts && isPro() })) console.log(`✓ ${c}`);
+      console.log('Restart Claude Code to load it. Codex asks you to approve the guard again: start Codex and accept it.');
+    }
   }
-  const checks = [...doctor({ samplesAgeMs: latest ? now - latest : null, license: currentLicense() }), ...(await formatChecks())];
+  const checks = await healthChecks();
+  saveHealth(checks);
   for (const c of checks) console.log(`${c.ok ? '✓' : '✗'} ${c.line}`);
   process.exit(checks.every((c) => c.ok) ? 0 : 1);
 } else if (cmd === 'report' || cmd === 'trim') {
   const pro = isPro();
   if (!pro && cmd === 'report') {
-    console.log(`\`limitcast ${cmd}\` is part of limitcast Pro: ${UPGRADE_URL}\nAlready bought it? limitcast activate <license-key>`);
+    console.log(
+      `\`limitcast ${cmd}\` is part of limitcast Pro: ${UPGRADE_URL}\nTry it free for 7 days: limitcast trial. Already bought it? limitcast activate <license-key>`,
+    );
     process.exit(2);
   }
   const since = now - days() * 86400_000;
@@ -234,7 +270,9 @@ if (cmd === 'status') {
     }
     if (args.includes('--apply') || args.includes('--undo')) {
       if (!pro) {
-        console.log(`\`limitcast trim --apply\` is part of limitcast Pro: ${UPGRADE_URL}\nAlready bought it? limitcast activate <license-key>`);
+        console.log(
+          `\`limitcast trim --apply\` is part of limitcast Pro: ${UPGRADE_URL}\nTry it free for 7 days: limitcast trial. Already bought it? limitcast activate <license-key>`,
+        );
         process.exit(2);
       }
       console.log(args.includes('--undo') ? undoMessage(undoTrim()) : applyMessage(latest, used));
@@ -243,7 +281,7 @@ if (cmd === 'status') {
     if (latest && (args.includes('--share') || !pro)) text = shareSummary(baseline(usage), latest, used, days());
     else text = latest ? startupReport(baseline(usage), latest, used, days()) : trimReport(baseline(usage), contributors(), used, days());
     if (!pro)
-      text += `\n\nPro names each item and what it costs, so you can cut it: ${UPGRADE_URL}\nAlready bought it? limitcast activate <license-key>`;
+      text += `\n\nPro names each item and what it costs, so you can cut it: ${UPGRADE_URL}\nTry it free for 7 days: limitcast trial. Already bought it? limitcast activate <license-key>`;
     else if (latest && !args.includes('--share')) {
       const still = stillLoading(latest);
       text += still.length
@@ -414,7 +452,13 @@ if (cmd === 'status') {
   const r = spawnSync(command[0], command.slice(1), { stdio: 'inherit' });
   process.exit(r.status ?? 1);
 } else if (cmd === 'rollup') {
-  // Started daily in the background by the status line: keeps the value record current. Never prints.
+  // Started daily in the background by the status line: keeps the value record current and checks the setup.
+  // Never prints.
+  try {
+    saveHealth(await healthChecks());
+  } catch {
+    /* next time */
+  }
   try {
     await refreshValue();
   } catch {
@@ -432,12 +476,118 @@ if (cmd === 'status') {
   process.exit(res.ok ? 0 : 1);
 } else if (cmd === 'license') {
   const l = currentLicense();
-  console.log(l === null ? `Free tier. Pro: ${UPGRADE_URL}` : l.ok ? `Pro: ${l.claims.e}` : `License problem: ${l.reason}`);
+  console.log(l === null ? trialLine() : l.ok ? `Pro: ${l.claims.e}` : `License problem: ${l.reason}`);
+} else if (cmd === 'trial') {
+  // Pro for 7 days on this machine, no card, once.
+  if (currentLicense()?.ok) {
+    console.log('You already have Pro.');
+    process.exit(0);
+  }
+  const t = startTrial(now);
+  if (!t.ok) {
+    console.log(t.active ? `Your Pro trial is already running, until ${clock(t.ends)}.` : trialLine());
+    process.exit(t.active ? 0 : 2);
+  }
+  console.log(
+    [
+      `✓ Pro trial on: 7 days, until ${new Date(t.ends).toLocaleDateString()}. No card, nothing to cancel.`,
+      'Try it:',
+      '  limitcast install --guard --alerts   block runaway subagents, move them to Sonnet when a window is tight',
+      '  limitcast trim --apply               cut the context you never use (limitcast trim --undo reverses it)',
+      '  limitcast notify on                  a desktop notification before you hit a limit',
+      '  limitcast results                    what it did for you, any time',
+      `Keep Pro after the trial: ${UPGRADE_URL}`,
+    ].join('\n'),
+  );
 } else if (cmd === '--version' || cmd === '-v') {
   console.log(VERSION);
 } else {
   console.log(HELP);
   process.exit(cmd && !['help', '--help', '-h'].includes(cmd) ? 1 : 0);
+}
+
+/** Everything `doctor` checks: setup, data freshness, license, and whether each tool's logs still parse. */
+async function healthChecks() {
+  // Readings are only stored when they change, so freshness comes from the last feed the status line saw.
+  let latest = 0;
+  try {
+    latest = JSON.parse(readFileSync(join(stateDir(), 'last-feed.json'), 'utf8')).at ?? 0;
+  } catch {
+    /* never fed */
+  }
+  const license = currentLicense();
+  const checks = doctor({ samplesAgeMs: latest ? now - latest : null, license });
+  if (license === null && trialStatus(now)) checks.push({ ok: true, line: trialLine() });
+  return [...checks, ...(await formatChecks())];
+}
+
+/**
+ * Remember the failing checks that need the user (not just "no reading yet": that fixes itself), for the
+ * status-line hint, and notify once when a new one appears.
+ * @param {{ok:boolean, line:string}[]} checks
+ */
+function saveHealth(checks) {
+  const file = join(stateDir(), 'health.json');
+  const failed = checks.filter((c) => !c.ok && !/^(No Claude limit readings|Last Claude reading)/.test(c.line)).map((c) => c.line);
+  let before = [];
+  try {
+    before = JSON.parse(readFileSync(file, 'utf8')).failed ?? [];
+  } catch {
+    /* first check */
+  }
+  mkdirSync(stateDir(), { recursive: true });
+  writeFileSync(file, JSON.stringify({ at: now, failed }));
+  const fresh = failed.filter((l) => !before.includes(l));
+  if (fresh.length && isPro() && notifyEnabled()) send(`limitcast needs a fix: ${fresh[0]} Run: limitcast doctor`);
+  return failed;
+}
+
+/**
+ * Free installs: for one day a week, what the guard preview saw Pro would have done, e.g.
+ * "this week Pro would have stopped 2 subagents and moved 5 to Sonnet · limitcast trial". Silent when it's nothing.
+ * @param {number} t epoch ms
+ */
+function freeWeeklyHint(t) {
+  const file = join(stateDir(), 'free-weekly.json');
+  let from = 0;
+  try {
+    from = JSON.parse(readFileSync(file, 'utf8')).from ?? 0;
+  } catch {
+    /* first run: start the clock */
+  }
+  const WEEK = 7 * 86400_000;
+  if (!from || t >= from + 86400_000) {
+    // First run starts a week out; afterwards the next day-long showing is a week after this one.
+    from = from ? from + Math.ceil((t - from - 86400_000 + 1) / WEEK) * WEEK : t + WEEK;
+    mkdirSync(stateDir(), { recursive: true });
+    writeFileSync(file, JSON.stringify({ from }));
+  }
+  if (t < from) return null;
+  const preview = loadBlocks(t - WEEK).filter((b) => b.shadow);
+  const stopped = preview.filter((b) => b.kind !== 'switch').length;
+  const moved = preview.length - stopped;
+  if (!stopped && !moved) return null;
+  const parts = [stopped ? `stopped ${stopped} subagent${stopped === 1 ? '' : 's'}` : '', moved ? `moved ${moved} to Sonnet` : ''].filter(Boolean);
+  return `this week Pro would have ${parts.join(' and ')} · limitcast trial`;
+}
+
+/** Free tier, a running trial, or an ended one, in one line. */
+function trialLine() {
+  const t = trialStatus(now);
+  if (!t) return `Free tier. Try Pro free for 7 days, no card: limitcast trial. Buy: ${UPGRADE_URL}`;
+  if (t.active)
+    return `Pro trial: ${Math.ceil((t.ends - now) / 86400_000)} days left (until ${new Date(t.ends).toLocaleDateString()}). Keep Pro: ${UPGRADE_URL}`;
+  return `Pro trial ended ${new Date(t.ends).toLocaleDateString()}. Keep Pro: ${UPGRADE_URL}`;
+}
+
+/** The status-line hint while the last health check found something to fix. */
+function healthHint() {
+  try {
+    const { failed } = JSON.parse(readFileSync(join(stateDir(), 'health.json'), 'utf8'));
+    return failed?.length ? '⚠ run limitcast doctor' : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Fold the last 8 days of readings and blocks, and any new sessions, into the long-term value record. */

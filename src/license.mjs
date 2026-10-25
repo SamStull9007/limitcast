@@ -1,7 +1,8 @@
 // @ts-check
 import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { loadPolar, polarStatus } from './polar.mjs';
 import { stateDir } from './store.mjs';
 
@@ -68,4 +69,42 @@ export function activate(key) {
   return res;
 }
 
-export const isPro = () => currentLicense()?.ok === true;
+export const isPro = () => currentLicense()?.ok === true || trialStatus()?.active === true;
+
+const TRIAL_MS = 7 * 86400_000;
+const trialFile = () => join(stateDir(), 'trial.json');
+// A second marker outside the state dir, so clearing limitcast's state doesn't restart the trial.
+// shortcut: a determined user can still delete both; fine at this price, move to a server check if it matters.
+const trialMarker = () => join(process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'limitcast', 'trial-used');
+
+/**
+ * The no-card Pro trial on this machine: active, or when it ended. null if never started.
+ * @param {number} [now]
+ */
+export function trialStatus(now = Date.now()) {
+  let start = 0;
+  for (const f of [trialFile(), trialMarker()]) {
+    try {
+      start ||= Number(JSON.parse(readFileSync(f, 'utf8')).start) || 0;
+    } catch {
+      /* not this one */
+    }
+  }
+  if (!start) return null;
+  const ends = start + TRIAL_MS;
+  return { active: now < ends, ends };
+}
+
+/**
+ * Start the 7-day trial, once per machine.
+ * @param {number} [now]
+ */
+export function startTrial(now = Date.now()) {
+  const existing = trialStatus(now);
+  if (existing) return { ok: false, ...existing };
+  for (const f of [trialFile(), trialMarker()]) {
+    mkdirSync(dirname(f), { recursive: true });
+    writeFileSync(f, JSON.stringify({ start: now }));
+  }
+  return { ok: true, active: true, ends: now + TRIAL_MS };
+}

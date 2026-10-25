@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { forecast } from '../src/forecast.mjs';
 import { guardDecision, runGuard, spawnSource } from '../src/guard.mjs';
-import { doctor, install, uninstall, wrappedCommand } from '../src/install.mjs';
+import { doctor, install, installedFeatures, launcherTargets, uninstall, wrappedCommand, writeLauncher } from '../src/install.mjs';
 import { checkLicense, issueLicense } from '../src/license.mjs';
 import { burnReport } from '../src/report.mjs';
 import { startupBreakdown } from '../src/startup.mjs';
@@ -437,9 +437,49 @@ test('install --guard without Pro installs the guard as a preview; --alerts stay
   assert.match(out, /runs as a preview: it never blocks/);
   assert.match(out, /Alerts and the weekly summary are part of limitcast Pro/);
   const cfg = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf8'));
-  assert.match(cfg.statusLine.command, /limitcast\.mjs statusline$/);
-  assert.match(JSON.stringify(cfg.hooks?.PreToolUse), /limitcast\.mjs guard/);
+  // Hooks go through the upgrade-proof launcher in the state dir.
+  assert.match(cfg.statusLine.command, /^\/bin\/sh \S+limitcast-hook\.sh statusline$/);
+  assert.match(JSON.stringify(cfg.hooks?.PreToolUse), /limitcast-hook\.sh guard/);
   assert.equal(cfg.hooks?.SessionStart, undefined);
+  assert.match(out, /Try Pro free for 7 days, no card: limitcast trial/);
+});
+
+test('launcher: runs this copy, falls back to limitcast on PATH, then to your own status line', () => {
+  const state = tmp('lc-launch-');
+  const env = { ...process.env, LIMITCAST_STATE: state, PATH: '/usr/bin:/bin' };
+  const prev = process.env.LIMITCAST_STATE;
+  process.env.LIMITCAST_STATE = state;
+  try {
+    const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
+    const sh = writeLauncher(process.execPath, bin);
+    assert.deepEqual(launcherTargets(sh), { node: process.execPath, bin });
+    assert.match(execFileSync('/bin/sh', [sh, '--version'], { env }).toString(), /^\d+\.\d+\.\d+/);
+    // Node moved (an upgrade) and no limitcast on PATH: the status line still runs the wrapped command.
+    writeLauncher('/gone/node', '/gone/limitcast.mjs');
+    const out = execFileSync('/bin/sh', [sh, 'statusline', '--', 'sh', '-c', 'echo mine'], { env, input: '{}' }).toString();
+    assert.equal(out, 'mine\n');
+    assert.equal(execFileSync('/bin/sh', [sh, 'guard'], { env, input: '{}' }).toString(), ''); // allows
+  } finally {
+    process.env.LIMITCAST_STATE = prev;
+  }
+});
+
+test('doctor flags a launcher whose node is gone; --fix is offered', () => {
+  const state = tmp('lc-doc-');
+  const prev = process.env.LIMITCAST_STATE;
+  process.env.LIMITCAST_STATE = state;
+  try {
+    const path = join(tmp('lc-doc-claude-'), 'settings.json');
+    install({ guard: false, path, codexPath: join(tmp('lc-doc-cx-'), 'x', 'hooks.json') });
+    const ok = doctor({ path, codexPath: '/nonexistent', samplesAgeMs: 1, license: null });
+    assert.ok(ok.some((c) => c.ok && /Hook launcher points at this Node/.test(c.line)));
+    writeLauncher('/gone/node', '/gone/limitcast.mjs');
+    const bad = doctor({ path, codexPath: '/nonexistent', samplesAgeMs: 1, license: null });
+    assert.ok(bad.some((c) => !c.ok && /limitcast doctor --fix/.test(c.line)));
+    assert.deepEqual(installedFeatures(path), { statusLine: true, guard: false, alerts: false });
+  } finally {
+    process.env.LIMITCAST_STATE = prev;
+  }
 });
 
 test('startup breakdown: measures hooks, MCP, tool names, agents, skills and files from transcript attachments', async () => {
