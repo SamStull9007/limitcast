@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.0
+
+- `limitcast results [--days N]`: each limit window that reached 100% and how far ahead the forecast warned, replayed from your own readings. Pro adds every subagent the guard blocked and whether that window then ran out, plus starting-context savings.
+- The guard records each block (time, window, percent, forecast) in `guard.jsonl` so `results` can check it later. Nothing else is logged.
+
 ## 0.6.2
 
 - README: Lifetime is $149 once, with no "first 100 buyers" limit. No code changes.

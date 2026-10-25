@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -152,6 +152,12 @@ test('CLI end to end: statusline records, wraps the command; guard is Pro-gated 
   try {
     assert.match(await runGuard({ tool_name: 'Agent' }, Date.now(), 30), /^limitcast: Claude 5h/);
     assert.equal(await runGuard({ tool_name: 'Bash' }, Date.now(), 30), null);
+    // Only the block is logged, for `limitcast results`.
+    const logged = readFileSync(join(state, 'guard.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    assert.deepEqual(
+      logged.map((b) => [b.src, b.win, b.pct]),
+      [['claude', '5h', 90]],
+    );
   } finally {
     process.env.LIMITCAST_STATE = prev;
   }

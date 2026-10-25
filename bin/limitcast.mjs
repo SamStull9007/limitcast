@@ -12,6 +12,7 @@ import { activate, currentLicense, isPro, UPGRADE_URL } from '../src/license.mjs
 import { driftMessage, loadOverhead, recordOverhead, savedSummary, snapshot } from '../src/overhead.mjs';
 import { activatePolar, deactivatePolar, refreshDue, refreshPolar } from '../src/polar.mjs';
 import { burnReport } from '../src/report.mjs';
+import { loadBlocks, resultsReport } from '../src/results.mjs';
 import { claudeSamples, readCodex } from '../src/sources.mjs';
 import { countInteractiveSince, latestInteractiveTranscript } from '../src/startup.mjs';
 import { KEEP_MS, load, record, stateDir } from '../src/store.mjs';
@@ -26,6 +27,7 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
   limitcast doctor                   check the setup
   limitcast status [--json]          used, burn rate, runout time and reset per limit window
   limitcast trim [--share]           tokens every session loads before you type, and how much you never use
+  limitcast results [--days N]       limits you reached and how far ahead limitcast warned (Pro adds guard blocks and savings)
   limitcast license                  show the license and re-check it with Polar
 
   Pro (${UPGRADE_URL})
@@ -53,7 +55,7 @@ const flag = (/** @type {string} */ name) => {
 const days = () => Math.max(1, Number(flag('--days') ?? 7));
 
 // Interactive commands re-check a Polar license weekly; hooks (statusline, guard, drift --hook) never touch the network.
-if (['report', 'trim', 'saved', 'drift', 'doctor', 'license'].includes(cmd) && !args.includes('--hook')) {
+if (['report', 'trim', 'saved', 'results', 'drift', 'doctor', 'license'].includes(cmd) && !args.includes('--hook')) {
   await refreshPolar({ force: cmd === 'license' }).catch(() => null);
 }
 
@@ -178,6 +180,21 @@ if (cmd === 'status') {
   if (latest) recordOverhead(snapshot(latest));
   const s = loadOverhead();
   console.log(s ? savedSummary(s, await countInteractiveSince(claudeRoot(), s.first.at)) : 'Nothing measured yet. Run `limitcast trim` first.');
+} else if (cmd === 'results') {
+  // Free shows limits reached and how far ahead limitcast warned; the guard and savings sections are Pro.
+  const pro = isPro();
+  const since = now - days() * 86400_000;
+  let saved = `Pro tracks how much your starting context shrinks and what that saves: ${UPGRADE_URL}`;
+  if (pro) {
+    const latest = await latestInteractiveTranscript(claudeRoot());
+    if (latest) recordOverhead(snapshot(latest));
+    const s = loadOverhead();
+    saved = s
+      ? savedSummary(s, await countInteractiveSince(claudeRoot(), s.first.at))
+      : 'Run `limitcast trim` once to record your starting context, then check back here.';
+  }
+  const samples = [...load(since), ...(await readCodex(since))];
+  console.log(resultsReport({ now, days: days(), samples, blocks: pro ? loadBlocks(since) : null, saved }));
 } else if (cmd === 'activate') {
   // Signed offline keys start with LC1.; anything else is a Polar license key.
   const key = args[0] ?? '';

@@ -52,6 +52,7 @@ limitcast doctor
 | `limitcast report [--days N] [--out FILE]` | **Pro.** Tokens by tool, day, project, model and session; subagent share |
 | `limitcast trim [--days N] [--share]` | Measured starting context of your latest session and how much you haven't used in N days (default 7). **Pro** names each item. `--share`: totals only, no names, safe to post |
 | `limitcast saved` | **Pro.** How much the part of your starting context you control has dropped since limitcast first measured it, times your sessions since |
+| `limitcast results [--days N]` | Proof it works: each limit window that reached 100% and how far ahead limitcast warned. **Pro** adds every subagent the guard blocked and whether that window then ran out, plus your starting-context savings |
 | `install --alerts` | **Pro.** A SessionStart hook that tells you (never the model) when your starting context grew ~1k+ tokens, and what grew |
 | `limitcast activate <key>` | Unlock Pro: registers this computer with Polar (3 computers per key). Polar re-checks it weekly in the background; it keeps working up to 30 days offline |
 | `limitcast deactivate` | Free this computer so the key can be used on another one |

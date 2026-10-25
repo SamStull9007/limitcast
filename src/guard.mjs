@@ -1,5 +1,6 @@
 // @ts-check
 import { forecastAll, oneClaudeSession } from './forecast.mjs';
+import { logBlock } from './results.mjs';
 import { readCodex } from './sources.mjs';
 import { KEEP_MS, load } from './store.mjs';
 
@@ -29,19 +30,25 @@ export function spawnSource(tool) {
  * @param {number} minutes
  */
 export function guardDecision(tool, forecasts, now, minutes) {
+  const f = blockingForecast(tool, forecasts, now, minutes);
+  if (!f || f.wall === null) return null;
+  const left = Math.max(0, Math.round((f.wall - now) / 60_000));
+  return (
+    `limitcast: ${NAMES[/** @type {'claude'} */ (f.src)]} ${f.win} limit is ${f.pct}% used and on pace to run out in ~${left} min, before it resets. ` +
+    'Finish with the agents already running, or set LIMITCAST_ALLOW=1 to spawn anyway.'
+  );
+}
+
+/**
+ * The forecast that blocks this spawn, or undefined. See guardDecision.
+ * @param {string} tool
+ * @param {ReturnType<typeof import('./forecast.mjs').forecastAll>} forecasts
+ * @param {number} now epoch ms
+ * @param {number} minutes
+ */
+function blockingForecast(tool, forecasts, now, minutes) {
   const src = spawnSource(tool);
-  if (!src) return null;
-  for (const f of forecasts) {
-    if (f.src !== src) continue;
-    if (f.verdict === 'AT_RISK' && f.wall !== null && f.wall - now <= minutes * 60_000) {
-      const left = Math.max(0, Math.round((f.wall - now) / 60_000));
-      return (
-        `limitcast: ${NAMES[src]} ${f.win} limit is ${f.pct}% used and on pace to run out in ~${left} min, before it resets. ` +
-        'Finish with the agents already running, or set LIMITCAST_ALLOW=1 to spawn anyway.'
-      );
-    }
-  }
-  return null;
+  return forecasts.find((f) => f.src === src && f.verdict === 'AT_RISK' && f.wall !== null && f.wall - now <= minutes * 60_000);
 }
 
 /**
@@ -61,5 +68,16 @@ export async function runGuard(hook, now, minutes) {
       : src === 'codex'
         ? await readCodex(now - 2 * 3600_000)
         : [];
-  return guardDecision(tool, forecastAll(samples, now), now, minutes);
+  const forecasts = forecastAll(samples, now);
+  const reason = guardDecision(tool, forecasts, now, minutes);
+  const f = reason ? blockingForecast(tool, forecasts, now, minutes) : undefined;
+  if (f?.wall) {
+    const sid = f.src === 'claude' ? samples.find((s) => s.src === 'claude' && s.sid)?.sid : undefined;
+    try {
+      logBlock({ t: now, src: f.src, win: f.win, pct: f.pct, wall: f.wall, reset: f.reset, ...(sid ? { sid } : {}) });
+    } catch {
+      /* a failed log must not change the decision */
+    }
+  }
+  return reason;
 }
