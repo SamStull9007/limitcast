@@ -67,7 +67,7 @@ Each limit reading is saved to `~/.local/state/limitcast/samples.jsonl` when it 
 
 ## Pricing
 
-Free: runout forecast, status-line readout, and your starting-context total with how much you never use. Pro ($79/year, or $149 lifetime for the first 100 buyers): names what to cut, subagent guard, burn report, starting-context alerts. 14-day refund: email support@limitcast.dev. See https://limitcast.dev.
+Free: runout forecast, status-line readout, and your starting-context total with how much you never use. Pro ($79/year, or $149 lifetime): names what to cut, subagent guard, burn report, starting-context alerts. 14-day refund: email support@limitcast.dev. See https://limitcast.dev.
 
 ## License
 
