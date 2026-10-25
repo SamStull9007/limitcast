@@ -15,7 +15,7 @@ import { claudeUsage } from './usage.mjs';
 /** @typedef {{at:number, turns:number, savedPerTurn:number}} SessionValue  savedPerTurn: tokens below the first measured start */
 /** @typedef {{src:string, win:string, at:number, lead:number|null, unseen:boolean}} HitValue  lead: minutes of warning */
 /** @typedef {{t:number, src:string, win:string, shadow:boolean, outcome:string}} BlockValue */
-/** @typedef {{since:number, scanned:number, sessions:Record<string, SessionValue>, hits:Record<string, HitValue>, blocks:Record<string, BlockValue>}} Value */
+/** @typedef {{since:number, scanned:number, sessions:Record<string, SessionValue>, hits:Record<string, HitValue>, blocks:Record<string, BlockValue>, switches?:Record<string, {shadow:boolean}>}} Value */
 
 const file = () => join(stateDir(), 'value.json');
 const tok = (/** @type {number} */ chars) => Math.round(chars / 4);
@@ -74,7 +74,13 @@ export function foldEvents(v, { now, samples, blocks, start }) {
       unseen: prev ? prev.unseen && h.unseen : h.unseen,
     };
   }
-  for (const o of blockOutcomes(blocks, samples, now)) {
+  v.switches ??= {};
+  for (const b of blocks.filter((x) => x.kind === 'switch')) v.switches[String(b.t)] = { shadow: Boolean(b.shadow) };
+  for (const o of blockOutcomes(
+    blocks.filter((x) => x.kind !== 'switch'),
+    samples,
+    now,
+  )) {
     const prev = v.blocks[String(o.t)];
     if (prev && prev.outcome !== 'open') continue; // final once the window reset
     v.blocks[String(o.t)] = { t: o.t, src: o.src, win: o.win, shadow: Boolean(o.shadow), outcome: o.outcome };
@@ -146,6 +152,8 @@ export function valueTotals(v) {
     blocked: blocks.filter((b) => !b.shadow).length,
     previewed: blocks.filter((b) => b.shadow).length,
     confirmed: blocks.filter((b) => b.outcome === 'hit').length,
+    switched: Object.values(v.switches ?? {}).filter((s) => !s.shadow).length,
+    switchPreviewed: Object.values(v.switches ?? {}).filter((s) => s.shadow).length,
   };
 }
 
@@ -180,6 +188,11 @@ export function valueSection(t, { now, pro }) {
   } else if (t.previewed) {
     out.push(`- **Pro would have stopped ${t.previewed} subagent${t.previewed === 1 ? '' : 's'}** while a window was about to run out.`);
   }
+  const moved = pro ? t.switched : t.switchPreviewed;
+  if (moved)
+    out.push(
+      `- **${pro ? 'Ran' : 'Pro would have run'} ${moved} subagent${moved === 1 ? '' : 's'} on Sonnet** instead of your main model while a window was tight.`,
+    );
   return out.join('\n');
 }
 

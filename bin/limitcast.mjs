@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // @ts-check
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -15,11 +15,14 @@ import {
   transcriptCwd,
   undoTrim,
 } from '../src/apply.mjs';
-import { forecastAll, oneClaudeAccount } from '../src/forecast.mjs';
+import { forecastAll, oneClaudeAccount, resetTarget } from '../src/forecast.mjs';
 import { formatChecks } from '../src/formats.mjs';
 import { runGuard } from '../src/guard.mjs';
+import { accountForecasts, compactHint, headroom, lastCallTokens } from '../src/hints.mjs';
+import { htmlPage } from '../src/html.mjs';
 import { doctor, install, readSettings, settingsPath, uninstall } from '../src/install.mjs';
 import { activate, currentLicense, isPro, UPGRADE_URL } from '../src/license.mjs';
+import { notifyChanges, notifyEnabled, send, setNotify } from '../src/notify.mjs';
 import { driftMessage, loadOverhead, recordOverhead, savedPerSession, savedSummary, snapshot } from '../src/overhead.mjs';
 import { activatePolar, deactivatePolar, refreshDue, refreshPolar } from '../src/polar.mjs';
 import { burnReport } from '../src/report.mjs';
@@ -79,11 +82,19 @@ if (cmd === 'status') {
   if (args.includes('--json')) console.log(JSON.stringify(rows, null, 2));
   else {
     console.log(rows.length ? table(rows) : 'No data yet. Run `limitcast install`, then send a message in Claude Code, or run Codex once.');
+    // Pro: the other Claude accounts limitcast has current readings for (the table shows the latest one).
+    if (isPro())
+      for (const a of accountForecasts(load(now - KEEP_MS), now).slice(1))
+        console.log(
+          `other Claude account (last used ${clock(a.lastSeen)}): ${a.rows.map((f) => `${f.win} ${f.verdict === 'RESET' ? 0 : Math.round(f.pct)}%${f.verdict === 'OK' || f.verdict === 'RESET' ? '' : ` ${f.verdict}`}`).join(' · ')}`,
+        );
     if (existsSync(grokRoot())) console.log('grok: no limit readings (Grok keeps none on disk); its token use is in `limitcast report`');
   }
 } else if (cmd === 'statusline') {
   const input = readStdin();
   let sid;
+  /** @type {string[]} */
+  const hints = [];
   try {
     const feed = JSON.parse(input);
     sid = feed?.session_id;
@@ -93,6 +104,14 @@ if (cmd === 'status') {
     if (refreshDue(now)) spawn(process.execPath, [fileURLToPath(import.meta.url), 'license'], { detached: true, stdio: 'ignore' }).unref();
     // Readings are kept 8 days; the daily rollup folds what they showed into the long-term value record.
     if (dailyDue(now)) spawn(process.execPath, [fileURLToPath(import.meta.url), 'rollup'], { detached: true, stdio: 'ignore' }).unref();
+    if (isPro()) {
+      const samples = load(now - KEEP_MS);
+      if (notifyEnabled()) notifyChanges(forecastAll(oneClaudeAccount(samples, sid), now), clock);
+      const room = headroom(samples, sid, now);
+      if (room) hints.push(room);
+      const ctx = typeof feed?.transcript_path === 'string' ? compactHint(lastCallTokens(feed.transcript_path)) : null;
+      if (ctx) hints.push(ctx);
+    }
   } catch {
     /* never break the status line */
   }
@@ -100,17 +119,29 @@ if (cmd === 'status') {
   const wrapped = sep >= 0 ? args.slice(sep + 1) : [];
   if (wrapped.length) {
     const r = spawnSync(wrapped[0], wrapped.slice(1), { input, stdio: ['pipe', 'inherit', 'inherit'] });
+    // Your status line stays as it was; Pro adds a second line only when there is something to act on.
+    if (hints.length) console.log(`limitcast: ${hints.join(' · ')}`);
     process.exit(r.status ?? 1);
   }
-  console.log(oneLine(forecastAll(oneClaudeAccount(load(now - KEEP_MS), sid), now)));
+  console.log([oneLine(forecastAll(oneClaudeAccount(load(now - KEEP_MS), sid), now)), ...hints].join(' · '));
 } else if (cmd === 'guard') {
   // Blocking is Pro; without a valid license the guard only previews (logs what Pro would block) and allows everything.
   if (process.env.LIMITCAST_ALLOW === '1') process.exit(0);
   try {
-    const reason = await runGuard(JSON.parse(readStdin()), now, Number(process.env.LIMITCAST_GUARD_MINUTES ?? 30), { preview: !isPro() });
-    if (reason) {
+    const d = await runGuard(JSON.parse(readStdin()), now, Number(process.env.LIMITCAST_GUARD_MINUTES ?? 30), { preview: !isPro() });
+    if (typeof d === 'string') {
+      console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: d } }));
+    } else if (d) {
+      // Model switch: allow the spawn with the same input and model "sonnet" (updatedInput replaces the whole input).
       console.log(
-        JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }),
+        JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'allow',
+            permissionDecisionReason: d.reason,
+            updatedInput: d.updatedInput,
+          },
+        }),
       );
     }
   } catch (e) {
@@ -260,7 +291,80 @@ if (cmd === 'status') {
         notResent: totals.tokens,
       }),
     );
-  else console.log(resultsReport({ now, days: days(), samples, blocks, pro, saved, value: valueSection(totals, { now, pro }) }));
+  else if (args.includes('--html')) {
+    // Pro: results, the current windows and the burn report on one page, opened in the browser.
+    if (!pro) {
+      console.log(`The HTML dashboard is part of limitcast Pro: ${UPGRADE_URL}`);
+      process.exit(2);
+    }
+    const rows = forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS))]), now);
+    const burn = burnReport(await readUsage(since, {}), { since, now }).replace(/^(#{1,2}) /gm, '#$1 ');
+    const md = [
+      resultsReport({ now, days: days(), samples, blocks, pro, saved, value: valueSection(totals, { now, pro }) }),
+      '## Right now',
+      '```',
+      rows.length ? table(rows) : 'No readings yet.',
+      '```',
+      burn,
+    ].join('\n\n');
+    const out = flag('--out') ?? join(stateDir(), 'dashboard.html');
+    writeFileSync(out, htmlPage(md, { title: 'limitcast dashboard', generated: new Date(now).toLocaleString() }));
+    console.log(`Wrote ${out}`);
+    if (!args.includes('--no-open')) {
+      const opener = spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [out], { detached: true, stdio: 'ignore' });
+      opener.on('error', () => {});
+      opener.unref();
+    }
+  } else console.log(resultsReport({ now, days: days(), samples, blocks, pro, saved, value: valueSection(totals, { now, pro }) }));
+} else if (cmd === 'notify') {
+  // Desktop notifications from the status line (Pro, opt-in).
+  if (!isPro()) {
+    console.log(`Desktop notifications are part of limitcast Pro: ${UPGRADE_URL}`);
+    process.exit(2);
+  }
+  const what = args[0];
+  if (what === 'on' || what === 'off') setNotify(what === 'on');
+  if (what === 'test') send('limitcast notifications work.');
+  console.log(
+    what === 'test'
+      ? 'Sent a test notification. Nothing showed up? Allow notifications for Script Editor (macOS) or install notify-send (Linux).'
+      : `Notifications are ${notifyEnabled() ? 'on: you get one when a Claude window turns NEAR, AT_RISK or HIT, and when it resets after a HIT' : 'off'}. (limitcast notify on|off|test)`,
+  );
+} else if (cmd === 'after-reset') {
+  // Run a command once a window has reset: queue the heavy job instead of watching the clock.
+  if (!isPro()) {
+    console.log(`\`limitcast after-reset\` is part of limitcast Pro: ${UPGRADE_URL}`);
+    process.exit(2);
+  }
+  const sep = args.indexOf('--');
+  const command = sep >= 0 ? args.slice(sep + 1) : [];
+  const src = flag('--src') ?? 'claude';
+  const win = flag('--window') ?? '5h';
+  if (!command.length) {
+    console.log('Usage: limitcast after-reset [--src claude|codex] [--window 5h|7d] [--detach] -- <command...>');
+    process.exit(1);
+  }
+  const samples = src === 'codex' ? await readCodex(now - KEEP_MS) : oneClaudeAccount(load(now - KEEP_MS));
+  const f = forecastAll(samples, now).find((x) => x.src === src && x.win === win);
+  if (!f) {
+    console.log(`No ${src} ${win} readings yet, so the reset time is unknown.`);
+    process.exit(1);
+  }
+  const at = resetTarget(f, now);
+  if (args.includes('--detach')) {
+    mkdirSync(stateDir(), { recursive: true });
+    const log = join(stateDir(), `after-reset-${now}.log`);
+    const out = openSync(log, 'a');
+    const rest = args.filter((a) => a !== '--detach');
+    spawn(process.execPath, [fileURLToPath(import.meta.url), 'after-reset', ...rest], { detached: true, stdio: ['ignore', out, out] }).unref();
+    console.log(`Will run at ${clock(at)} (after the ${src} ${win} reset), in the background. Output: ${log}`);
+    process.exit(0);
+  }
+  if (at > now) console.log(`Waiting for the ${src} ${win} reset at ${clock(at)}…`);
+  // Short sleeps against the wall clock, so a laptop that sleeps through the reset still wakes on time.
+  while (Date.now() < at) await new Promise((r) => setTimeout(r, Math.min(60_000, at - Date.now())));
+  const r = spawnSync(command[0], command.slice(1), { stdio: 'inherit' });
+  process.exit(r.status ?? 1);
 } else if (cmd === 'rollup') {
   // Started daily in the background by the status line: keeps the value record current. Never prints.
   try {
@@ -380,9 +484,10 @@ function table(rows) {
     f.rate === null ? '-' : `${f.rate >= 0 ? '+' : ''}${f.rate.toFixed(1)}%/h`,
     f.verdict === 'AT_RISK' ? clock(f.wall) : '-',
     clock(f.reset),
+    f.today ? todayLabel(f.today) : '-',
     f.verdict,
   ]);
-  const head = ['window', 'used', 'burn', 'runs out', 'resets', 'status'];
+  const head = ['window', 'used', 'burn', 'runs out', 'resets', 'today', 'status'];
   const w = head.map((h, i) => Math.max(h.length, ...lines.map((l) => l[i].length)));
   return [head, ...lines]
     .map((l) =>
@@ -401,8 +506,18 @@ function oneLine(rows) {
       .filter((f) => f.src === 'claude')
       .map(
         (f) =>
-          `${f.win} ${Math.round(f.pct)}%${f.verdict === 'AT_RISK' ? ` ⚠ out ${clock(f.wall)}` : f.verdict === 'NEAR' ? ' ⚠ near limit' : f.verdict === 'HIT' ? ' ⛔' : ''}`,
+          `${f.win} ${Math.round(f.pct)}%${f.verdict === 'AT_RISK' ? ` ⚠ out ${clock(f.wall)}` : f.verdict === 'NEAR' ? ' ⚠ near limit' : f.verdict === 'HIT' ? ' ⛔' : ''}` +
+          (f.today && f.verdict !== 'HIT' ? ` · today ${todayLabel(f.today)}` : ''),
       )
       .join(' · ') || 'limitcast: waiting for data'
   );
+}
+
+/**
+ * "6% left" / "3% over" of today's even share of a weekly window.
+ * @param {{left:number}} t
+ */
+function todayLabel(t) {
+  const n = Math.round(Math.abs(t.left));
+  return t.left >= 0 ? `${n}% left` : `${n}% over`;
 }

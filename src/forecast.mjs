@@ -43,8 +43,37 @@ export function forecast(samples, now) {
     rate = (last.pct - then) / 24;
     wall = runout(rate);
   }
-  if (wall === null) return { ...base, rate, verdict: calm };
-  return { ...base, rate, wall, verdict: wall < resetMs ? 'AT_RISK' : calm };
+  const today = len >= DAY_MS ? allowance(window, last, now, resetMs - len) : null;
+  if (wall === null) return { ...base, rate, verdict: calm, today };
+  return { ...base, rate, wall, verdict: wall < resetMs ? 'AT_RISK' : calm, today };
+}
+
+/**
+ * When to run a job queued for after a window's reset: now if it already reset, else a minute after the reset
+ * (the provider's reset time and the first reading after it can differ by seconds).
+ * @param {{verdict:string, reset:number}} f
+ * @param {number} now
+ */
+export const resetTarget = (f, now) => (f.verdict === 'RESET' || f.reset <= now ? now : f.reset + 60_000);
+
+/**
+ * Daily allowance for a multi-day window: an even share of what was left at the start of today (local time)
+ * across the days until the reset, and how much of it today has used.
+ * @param {Sample[]} window readings of the current window, sorted
+ * @param {Sample} last
+ * @param {number} now epoch ms
+ * @param {number} start epoch ms the window began
+ */
+export function allowance(window, last, now, start) {
+  const midnight = new Date(now).setHours(0, 0, 0, 0);
+  const from = Math.max(midnight, start);
+  // Usage at the start of today: 0% if the window began today, else the last reading before midnight.
+  // shortcut: with no reading before midnight (limitcast installed today), today's first reading stands in.
+  const then = start >= midnight ? 0 : (window.filter((s) => s.t <= from).at(-1) ?? window[0]).pct;
+  const daysLeft = (last.reset * 1000 - from) / DAY_MS;
+  const budget = (100 - then) / Math.max(1, daysLeft);
+  const used = last.pct - then;
+  return { budget, used, left: budget - used };
 }
 
 /**

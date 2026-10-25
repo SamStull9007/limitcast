@@ -90,5 +90,38 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
       /* a failed log must not change the decision */
     }
   }
-  return preview ? null : reason;
+  if (reason) return preview ? null : reason;
+  // Not blocked, but a window is tight: run a new Claude subagent on Sonnet instead of the main (usually Opus) model.
+  const input = hook?.tool_input ?? hook?.toolInput;
+  const tight = forecasts.find((x) => x.src === 'claude' && (x.verdict === 'AT_RISK' || x.verdict === 'NEAR'));
+  if (src !== 'claude' || !tight || !switchable(input?.model)) return null;
+  try {
+    logBlock({
+      t: now,
+      kind: 'switch',
+      src: 'claude',
+      win: tight.win,
+      pct: tight.pct,
+      wall: tight.wall ?? tight.reset,
+      reset: tight.reset,
+      from: input?.model ?? 'default',
+      ...(preview ? { shadow: true } : {}),
+    });
+  } catch {
+    /* a failed log must not change the decision */
+  }
+  if (preview) return null;
+  return {
+    updatedInput: { ...input, model: SWITCH_TO },
+    reason: `limitcast: Claude ${tight.win} limit is ${Math.round(tight.pct)}% used${tight.verdict === 'AT_RISK' ? ' and on pace to run out before it resets' : ''}; this subagent runs on Sonnet. Set LIMITCAST_ALLOW=1 to keep the main model.`,
+  };
 }
+
+const SWITCH_TO = 'sonnet';
+
+/**
+ * Whether a subagent's model is worth switching: unset or "inherit" (the main model, usually Opus), or Opus/Fable.
+ * An explicit Sonnet or Haiku is left alone.
+ * @param {unknown} model
+ */
+export const switchable = (model) => model === undefined || model === null || model === 'inherit' || /opus|fable/i.test(String(model));
