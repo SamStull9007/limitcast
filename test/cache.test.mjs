@@ -23,15 +23,17 @@ test('usage cache: unchanged transcripts are not re-read; changed ones are', asy
     writeFileSync(file, `${line('a', 10)}\n`);
     const roots = { claude: root, codex: join(root, 'none'), grok: join(root, 'none') };
     const act = () => ({ skills: new Set(), mcp: new Set() });
+    // A whole-second mtime, so it can be restored exactly after the rewrite below.
+    const T = Math.floor(Date.now() / 1000);
+    utimesSync(file, T, T);
     const a1 = act();
     assert.deepEqual(
       (await readUsage(0, roots, a1)).map((u) => u.input),
       [10],
     );
     // Same size and mtime: served from the cache even though the bytes changed underneath.
-    const { mtime } = statSync(file);
     writeFileSync(file, `${line('b', 20)}\n`);
-    utimesSync(file, mtime, mtime);
+    utimesSync(file, T, T);
     const a2 = act();
     assert.deepEqual(
       (await readUsage(0, roots, a2)).map((u) => u.input),
