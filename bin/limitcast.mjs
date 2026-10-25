@@ -4,10 +4,21 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  applyTrim,
+  claudeJsonPath,
+  installedPlugins,
+  localSkillFolders,
+  planTrim,
+  projectMcpServers,
+  stillLoading,
+  transcriptCwd,
+  undoTrim,
+} from '../src/apply.mjs';
 import { forecastAll, oneClaudeAccount } from '../src/forecast.mjs';
 import { formatChecks } from '../src/formats.mjs';
 import { runGuard } from '../src/guard.mjs';
-import { doctor, install, uninstall } from '../src/install.mjs';
+import { doctor, install, readSettings, settingsPath, uninstall } from '../src/install.mjs';
 import { activate, currentLicense, isPro, UPGRADE_URL } from '../src/license.mjs';
 import { driftMessage, loadOverhead, recordOverhead, savedPerSession, savedSummary, snapshot } from '../src/overhead.mjs';
 import { activatePolar, deactivatePolar, refreshDue, refreshPolar } from '../src/polar.mjs';
@@ -16,26 +27,29 @@ import { loadBlocks, resultsReport, resultsShare, resultsStats, weeklyDue, weekl
 import { claudeSamples, readCodex } from '../src/sources.mjs';
 import { countInteractiveSince, latestInteractiveTranscript } from '../src/startup.mjs';
 import { KEEP_MS, load, record, stateDir } from '../src/store.mjs';
-import { baseline, contributors, shareSummary, startupReport, trimReport } from '../src/trim.mjs';
+import { baseline, contributors, measuredSavings, shareSummary, startupReport, trimReport } from '../src/trim.mjs';
 import { claudeRoot, grokRoot, readUsage } from '../src/usage.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
 
   limitcast install [--guard]        wire limitcast into Claude Code (and, with --guard, Codex); backs up settings
+                                     (without Pro the guard is a preview: it records what it would block, never blocks)
   limitcast uninstall                remove it and restore your original status line
   limitcast doctor                   check the setup
   limitcast status [--json]          used, burn rate, runout time and reset per limit window
   limitcast trim [--share]           tokens every session loads before you type, and how much you never use
-  limitcast results [--days N]       limits you reached and how far ahead limitcast warned (Pro adds guard blocks and savings)
+  limitcast results [--days N]       limits you reached, how far ahead limitcast warned, what the guard blocked
+                    [--share]        totals only, safe to post
   limitcast license                  show the license and re-check it with Polar
 
   Pro (${UPGRADE_URL})
   limitcast trim [--days N] [--share]        names what to cut and what each costs
                                              (--share: totals only, no names, safe to post)
+  limitcast trim --apply / --undo            hide those skills and turn off those MCP servers (backed up, reversible)
   limitcast saved                            tokens saved since limitcast first measured you
   limitcast install --guard                  block new subagents when a window is on pace to run out
-  limitcast install --alerts                 tell you when your starting context grows
+  limitcast install --alerts                 tell you when your starting context grows, plus a weekly summary
   limitcast report [--days N] [--out FILE]   tokens by tool, day, project, model and session
   limitcast activate <license-key>           unlock Pro on this computer (online once; then a weekly check, offline up to 30 days)
   limitcast deactivate                       free this computer's activation to use the key elsewhere
@@ -146,10 +160,26 @@ if (cmd === 'status') {
       console.log(`\`limitcast trim\` needs one Claude Code session first. Naming what to cut is Pro: ${UPGRADE_URL}`);
       process.exit(2);
     }
+    if (args.includes('--apply') || args.includes('--undo')) {
+      if (!pro) {
+        console.log(`\`limitcast trim --apply\` is part of limitcast Pro: ${UPGRADE_URL}\nAlready bought it? limitcast activate <license-key>`);
+        process.exit(2);
+      }
+      console.log(args.includes('--undo') ? undoMessage(undoTrim()) : applyMessage(latest, used));
+      process.exit(0);
+    }
     if (latest && (args.includes('--share') || !pro)) text = shareSummary(baseline(usage), latest, used, days());
     else text = latest ? startupReport(baseline(usage), latest, used, days()) : trimReport(baseline(usage), contributors(), used, days());
     if (!pro)
       text += `\n\nPro names each item and what it costs, so you can cut it: ${UPGRADE_URL}\nAlready bought it? limitcast activate <license-key>`;
+    else if (latest && !args.includes('--share')) {
+      const still = stillLoading(latest);
+      text += still.length
+        ? `\n\nStill loading after \`trim --apply\`: ${still.join(', ')}. A Claude Code session that was running may have rewritten ~/.claude.json; quit Claude Code and run \`limitcast trim --apply\` again.`
+        : measuredSavings(latest.pieces, used).tokens > 0
+          ? '\n\nApply these cuts: `limitcast trim --apply` (backed up; `limitcast trim --undo` reverses it).'
+          : '';
+    }
   }
   const out = flag('--out');
   if (out) {
@@ -230,6 +260,52 @@ if (cmd === 'status') {
 } else {
   console.log(HELP);
   process.exit(cmd && !['help', '--help', '-h'].includes(cmd) ? 1 : 0);
+}
+
+/**
+ * `trim --apply`: hide unused skills and turn off unused MCP servers for the project of the measured session.
+ * @param {Awaited<ReturnType<typeof latestInteractiveTranscript>>} latest
+ * @param {import('../src/trim.mjs').Activity} used
+ */
+function applyMessage(latest, used) {
+  if (!latest) return '`limitcast trim --apply` needs one Claude Code session first.';
+  const s = measuredSavings(latest.pieces, used);
+  const cwd = transcriptCwd(latest.file) ?? process.cwd();
+  const plan = planTrim({
+    skills: s.unusedSkills.map((k) => k.name),
+    mcp: s.unusedMcp.map((m) => m.name),
+    cwd,
+    settings: readSettings(settingsPath()),
+    claudeJson: readSettings(claudeJsonPath()),
+    plugins: installedPlugins(),
+    projectMcpJson: projectMcpServers(cwd),
+    localSkills: localSkillFolders(cwd),
+  });
+  const e = applyTrim(plan, { cwd, now });
+  const lines = [];
+  if (e.skills.length)
+    lines.push(`✓ Hid ${e.skills.length} skills from the model (\`/name\` still works): ${e.skills.map((k) => k.name).join(', ')}`);
+  if (e.mcp.length) lines.push(`✓ Turned off ${e.mcp.length} MCP servers for ${cwd}: ${e.mcp.join(', ')}`);
+  if (plan.pluginSkills.length) lines.push(`- Plugin skills can only be turned off with their plugin (\`/plugin\`): ${plan.pluginSkills.join(', ')}`);
+  if (plan.manualMcp.length) lines.push(`- Turn these off in \`/mcp\` (limitcast couldn't confirm their exact names): ${plan.manualMcp.join(', ')}`);
+  if (!e.skills.length && !e.mcp.length) lines.unshift('Nothing to change automatically.');
+  else
+    lines.push(
+      "Takes effect in your next Claude Code session; quit running sessions first so they don't write over ~/.claude.json. Undo: `limitcast trim --undo`",
+    );
+  return lines.join('\n');
+}
+
+/** @param {ReturnType<typeof undoTrim>} e */
+function undoMessage(e) {
+  if (!e) return 'Nothing to undo.';
+  return [
+    e.skills.length ? `✓ Skills visible to the model again: ${e.skills.map((k) => k.name).join(', ')}` : '',
+    e.mcp.length ? `✓ MCP servers back on for ${e.cwd}: ${e.mcp.join(', ')}` : '',
+    'Takes effect in your next Claude Code session.',
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 /**

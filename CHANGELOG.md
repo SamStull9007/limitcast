@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.0
+
+- Fix: Claude readings were forecast per session, and a short session rarely has 5 minutes of readings, so the forecast and the guard often had no burn rate. Sessions of the same account (same window reset times, usage only rising) now share one history. On the author's own data this turned a missed 7-day limit into a 40-minute warning.
+- New **NEAR** status at 95%+, even before there is a burn rate. The guard still blocks only on AT_RISK.
+- `limitcast trim --apply` (Pro): hides the unused skills from the model (`skillOverrides`, `/name` still works) and turns off the unused MCP servers for that project (the same list `/mcp` writes). Backs up both files; `limitcast trim --undo` reverses exactly what it changed. Plugin skills and servers whose exact name it can't confirm are listed for `/plugin` and `/mcp`. `trim` warns if something it turned off still loads.
+- Guard preview: without Pro, `install --guard` installs the guard in log-only mode. It never blocks; `limitcast results` shows what Pro would have blocked and whether those windows then ran out.
+- Weekly summary (Pro, with `--alerts`): once a week at session start, one line to you (never the model): limits reached, warning lead, subagents blocked, tokens saved.
+- `limitcast results --share`: totals only, safe to post.
+
 ## 0.7.0
 
 - `limitcast results [--days N]`: each limit window that reached 100% and how far ahead the forecast warned, replayed from your own readings. Pro adds every subagent the guard blocked and whether that window then ran out, plus starting-context savings.
