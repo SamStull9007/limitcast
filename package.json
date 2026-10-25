@@ -10,7 +10,7 @@
   "scripts": { "test": "node --test" },
   "keywords": ["claude-code", "codex", "rate-limit", "usage-limit", "tokens", "hooks", "status-line", "ai-agents"],
   "homepage": "https://limitcast.dev",
-  "repository": { "type": "git", "url": "git+https://github.com/Taste4458/limitcast.git" },
+  "repository": { "type": "git", "url": "git+https://github.com/SamStull9007/limitcast.git" },
   "author": "Sam Stull",
   "license": "Elastic-2.0"
 }
