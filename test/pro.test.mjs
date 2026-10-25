@@ -1,19 +1,19 @@
-import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPairSync } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { generateKeyPairSync } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { claudeActivity, claudeUsage, codexUsage, grokUsage, readUsage, total } from '../src/usage.mjs';
-import { guardDecision, runGuard, spawnSource } from '../src/guard.mjs';
 import { forecast } from '../src/forecast.mjs';
-import { burnReport } from '../src/report.mjs';
-import { baseline, contributors, measuredSavings, savings, skillListing, startupReport, trimReport } from '../src/trim.mjs';
-import { startupBreakdown } from '../src/startup.mjs';
-import { checkLicense, issueLicense } from '../src/license.mjs';
+import { guardDecision, runGuard, spawnSource } from '../src/guard.mjs';
 import { doctor, install, uninstall, wrappedCommand } from '../src/install.mjs';
+import { checkLicense, issueLicense } from '../src/license.mjs';
+import { burnReport } from '../src/report.mjs';
+import { startupBreakdown } from '../src/startup.mjs';
+import { baseline, contributors, measuredSavings, savings, skillListing, startupReport, trimReport } from '../src/trim.mjs';
+import { claudeActivity, claudeUsage, codexUsage, grokUsage, readUsage, total } from '../src/usage.mjs';
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
 // Never touch the real ~/.claude, ~/.codex or ~/.grok: every default path resolves into a temp dir.
@@ -236,6 +236,11 @@ test('doctor reports missing setup and stale data', () => {
   const checks = doctor({ path, samplesAgeMs: null, license: null });
   assert.ok(checks.some((c) => !c.ok && /recorder missing/.test(c.line)));
   assert.ok(checks.some((c) => /Free tier/.test(c.line)));
+  // A Polar key has no end date for Lifetime or a subscription, so doctor must not call it lifetime.
+  const polar = doctor({ path, samplesAgeMs: 0, license: { ok: true, claims: { e: 'b@x', p: 'polar', i: 0, x: 0 } } });
+  assert.ok(polar.some((c) => c.line === 'Pro: b@x, last checked with Polar 1970-01-01'));
+  const signed = doctor({ path, samplesAgeMs: 0, license: { ok: true, claims: { e: 'b@x', p: 'pro', i: 0, x: 0 } } });
+  assert.ok(signed.some((c) => c.line === 'Pro: b@x, lifetime'));
 });
 
 test('CLI: Pro commands are gated; version and help work', () => {
@@ -249,6 +254,34 @@ test('CLI: Pro commands are gated; version and help work', () => {
   assert.match(execFileSync('node', [bin, 'help'], { env }).toString(), /limitcast install/);
   const bad = spawnSync('node', [bin, 'activate', 'LC1.bad.key'], { env });
   assert.equal(bad.status, 1);
+  assert.match(execFileSync('node', [bin, 'help'], { env }).toString(), /limitcast license/);
+});
+
+test('CLI: free trim shows the measured totals without names, then the upgrade', () => {
+  const claudeDir = tmp('lc-free-trim-');
+  mkdirSync(join(claudeDir, 'projects', 'p'), { recursive: true });
+  const att = (attachment) => JSON.stringify({ type: 'attachment', attachment });
+  writeFileSync(
+    join(claudeDir, 'projects', 'p', 'sess.jsonl'),
+    [
+      att({ type: 'skill_listing', content: '- secret-skill: Never used\n- other: Also unused' }),
+      att({ type: 'mcp_instructions_delta', addedNames: ['private-mcp'], addedBlocks: ['p'.repeat(4000)] }),
+      JSON.stringify({ type: 'assistant', entrypoint: 'cli', timestamp: new Date().toISOString(), message: { usage: {} } }),
+    ].join('\n'),
+  );
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: claudeDir, LIMITCAST_STATE: tmp('lc-free-state-') };
+  delete env.LIMITCAST_LICENSE;
+  const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
+  const r = spawnSync('node', [bin, 'trim'], { env });
+  const out = r.stdout.toString();
+  assert.equal(r.status, 0, r.stderr.toString());
+  assert.match(out, /before I type/);
+  assert.match(out, /Pro names each item/);
+  assert.doesNotMatch(out, /secret-skill|private-mcp/);
+  // Without any session there is nothing to measure: say so, then the upgrade.
+  const none = spawnSync('node', [bin, 'trim'], { env: { ...env, CLAUDE_CONFIG_DIR: tmp('lc-empty-') } });
+  assert.equal(none.status, 2);
+  assert.match(none.stdout.toString(), /needs one Claude Code session/);
 });
 
 // ---- Codex and Grok ----

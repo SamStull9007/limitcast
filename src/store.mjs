@@ -1,7 +1,7 @@
 // @ts-check
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */
 
@@ -36,14 +36,14 @@ export function record(samples) {
   });
   if (!fresh.length) return;
   const file = join(dir, 'samples.jsonl');
-  appendFileSync(file, fresh.map((s) => JSON.stringify(s)).join('\n') + '\n');
+  appendFileSync(file, `${fresh.map((s) => JSON.stringify(s)).join('\n')}\n`);
   for (const s of fresh) last[key(s)] = { pct: s.pct, reset: s.reset };
   writeFileSync(lastPath, JSON.stringify(last));
   if (statSync(file).size > PRUNE_BYTES)
     writeFileSync(
       file,
       load(Date.now() - KEEP_MS)
-        .map((s) => JSON.stringify(s) + '\n')
+        .map((s) => `${JSON.stringify(s)}\n`)
         .join(''),
     );
 }

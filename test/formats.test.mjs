@@ -1,19 +1,20 @@
 // Log-format contract tests: fixtures mirror the field names Claude Code, Codex and Grok write (October 2026).
 // If one of those tools changes its format, update the fixture from a real log and these tests show what broke.
-import { test } from 'node:test';
+
 import assert from 'node:assert/strict';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { readUsage } from '../src/usage.mjs';
-import { claudeSamples, readCodex } from '../src/sources.mjs';
-import { latestInteractiveTranscript, countInteractiveSince } from '../src/startup.mjs';
 import { formatChecks } from '../src/formats.mjs';
-import { drift, driftMessage, recordOverhead, savedSummary, snapshot } from '../src/overhead.mjs';
-import { shareSummary } from '../src/trim.mjs';
 import { install, uninstall } from '../src/install.mjs';
+import { drift, driftMessage, recordOverhead, savedSummary, snapshot } from '../src/overhead.mjs';
+import { claudeSamples, readCodex } from '../src/sources.mjs';
+import { countInteractiveSince, latestInteractiveTranscript } from '../src/startup.mjs';
+import { shareSummary } from '../src/trim.mjs';
+import { readUsage } from '../src/usage.mjs';
 
 const FX = fileURLToPath(new URL('./fixtures/', import.meta.url));
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));

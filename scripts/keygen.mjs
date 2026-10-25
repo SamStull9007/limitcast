@@ -1,7 +1,8 @@
 // One-time: create the Ed25519 license-signing key pair.
 // The private key goes into the macOS Keychain only; the public key is printed for src/license.mjs.
-import { generateKeyPairSync } from 'node:crypto';
+
 import { execFileSync } from 'node:child_process';
+import { generateKeyPairSync } from 'node:crypto';
 
 const SERVICE = 'limitcast-license-signing';
 try {

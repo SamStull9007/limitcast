@@ -1,12 +1,12 @@
-import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { test } from 'node:test';
 import { forecast, oneClaudeSession, slopePerHour, windowName } from '../src/forecast.mjs';
-import { claudeSamples, codexSamples, readCodex } from '../src/sources.mjs';
 import { guardDecision, runGuard } from '../src/guard.mjs';
+import { claudeSamples, codexSamples, readCodex } from '../src/sources.mjs';
 
 const H = 3600_000;
 const now = Date.UTC(2026, 9, 24, 18, 0);
@@ -137,7 +137,7 @@ test('CLI end to end: statusline records, wraps the command; guard is Pro-gated 
 
   // Backdate the first sample so the slope spans > 5 minutes, then add a second.
   const file = join(state, 'samples.jsonl');
-  writeFileSync(file, JSON.stringify({ t: Date.now() - 30 * 60_000, src: 'claude', win: '5h', pct: 50, reset: r }) + '\n');
+  writeFileSync(file, `${JSON.stringify({ t: Date.now() - 30 * 60_000, src: 'claude', win: '5h', pct: 50, reset: r })}\n`);
   execFileSync('node', [bin, 'statusline'], { input: feed(90), env });
 
   const status = JSON.parse(execFileSync('node', [bin, 'status', '--json'], { env }).toString());

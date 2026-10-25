@@ -1,8 +1,8 @@
 // @ts-check
 import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
-import { createInterface } from 'node:readline';
-import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { createInterface } from 'node:readline';
 import { windowName } from './forecast.mjs';
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */

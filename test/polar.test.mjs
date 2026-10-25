@@ -1,10 +1,10 @@
-import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
-import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { activatePolar, deactivatePolar, loadPolar, POLAR_ORG_ID, polarStatus, refreshPolar } from '../src/polar.mjs';
+import { join } from 'node:path';
+import { test } from 'node:test';
 import { currentLicense } from '../src/license.mjs';
+import { activatePolar, deactivatePolar, loadPolar, POLAR_ORG_ID, polarStatus, refreshDue, refreshPolar } from '../src/polar.mjs';
 
 const fresh = () => {
   process.env.LIMITCAST_STATE = mkdtempSync(join(tmpdir(), 'lc-polar-'));
@@ -50,7 +50,22 @@ test('activate explains Polar refusals and network failures', async () => {
     /activation limit reached/,
   );
   assert.match((await activatePolar('X', { fetchImpl: fakeFetch({ activate: new Error('ENOTFOUND') }) })).reason, /could not reach Polar/);
+  assert.match((await activatePolar('X', { fetchImpl: fakeFetch({ activate: { status: 429, body: null } }) })).reason, /wait a minute/);
   assert.equal(loadPolar(), null);
+});
+
+test('refreshDue: only when the weekly check is due, at most one attempt an hour', async () => {
+  fresh();
+  assert.equal(refreshDue(10 * DAY), false); // no Polar license
+  await activatePolar('K', { fetchImpl: fakeFetch({ activate: activated }), now: 0 });
+  assert.equal(refreshDue(DAY), false); // checked yesterday
+  const t = 8 * DAY;
+  assert.equal(refreshDue(t), true);
+  assert.equal(refreshDue(t + 60_000), false); // just attempted
+  assert.equal(refreshDue(t + 2 * 3600_000), true);
+  // A rate-limited re-check keeps the stored license untouched.
+  await refreshPolar({ fetchImpl: fakeFetch({ validate: { status: 429, body: null } }), now: 8 * DAY });
+  assert.equal(loadPolar().checkedAt, 0);
 });
 
 test('status: expiry, revocation and the 30-day offline grace period', () => {
@@ -60,6 +75,7 @@ test('status: expiry, revocation and the 30-day offline grace period', () => {
   assert.match(polarStatus({ ...base, status: 'revoked' }, 1).reason, /revoked/);
   assert.match(polarStatus({ ...base, expiresAt: new Date(DAY).toISOString() }, 2 * DAY).reason, /expired/);
   assert.equal(polarStatus({ ...base, expiresAt: new Date(400 * DAY).toISOString() }, 2 * DAY).claims.x, 400 * 86400);
+  assert.equal(polarStatus(base, DAY).claims.p, 'polar');
 });
 
 test('refresh: weekly re-check updates status; offline keeps the license; not-found turns it off', async () => {

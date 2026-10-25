@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.1
+
+- Fix: a Pro license used only through hooks (guard, alerts) was never re-checked with Polar and switched off after 30 days. The status line now starts a detached weekly re-check (at most one attempt an hour) and never waits on the network.
+- Free `limitcast trim` shows your measured starting context and how much of it you haven't used (totals, no names); Pro names each item.
+- `doctor` no longer calls a Polar subscription "lifetime": it shows when the key was last checked with Polar.
+- Clear messages when Polar rate-limits activate or deactivate. `limitcast license` is in the help.
+- README states exactly what talks to Polar. Biome lint in CI.
+
 ## 0.6.0
 
 - Polar license keys: `limitcast activate LIMITCAST-…` registers this computer with Polar once (3 computers per key), then works offline. Interactive commands re-check weekly; hooks never touch the network. A key keeps working 30 days offline, and stops when Polar says it was revoked, refunded or expired.

@@ -41,7 +41,28 @@ export function polarStatus(l, now) {
   if (exp && exp < now) return { ok: false, reason: `expired ${new Date(exp).toISOString().slice(0, 10)}` };
   if (now - l.checkedAt > GRACE_MS)
     return { ok: false, reason: 'not checked with Polar for 30 days: connect to the internet and run `limitcast license`' };
-  return { ok: true, claims: { e: l.email, p: 'pro', i: Math.floor(l.checkedAt / 1000), x: exp ? Math.floor(exp / 1000) : 0 } };
+  // p 'polar': i is the last successful check, and x is 0 for both Lifetime and an active subscription.
+  return { ok: true, claims: { e: l.email, p: 'polar', i: Math.floor(l.checkedAt / 1000), x: exp ? Math.floor(exp / 1000) : 0 } };
+}
+
+/**
+ * Hooks never touch the network, so the status line asks this before starting a detached re-check.
+ * True when the weekly re-check is due and no attempt was made in the last hour (offline or rate-limited).
+ * @param {number} now
+ */
+export function refreshDue(now) {
+  const l = loadPolar();
+  if (!l || now - l.checkedAt < RECHECK_MS) return false;
+  const mark = join(stateDir(), 'polar-refresh.at');
+  let last = 0;
+  try {
+    last = Number(readFileSync(mark, 'utf8')) || 0;
+  } catch {
+    /* never attempted */
+  }
+  if (Math.abs(now - last) < 3600_000) return false;
+  writeFileSync(mark, String(now));
+  return true;
 }
 
 /**
@@ -66,6 +87,7 @@ async function post(path, body, fetchImpl) {
 
 /** @param {any} data */
 const detail = (data) => (typeof data?.detail === 'string' ? data.detail : '');
+const BUSY = 'Polar is rate-limiting requests: wait a minute and try again';
 
 /**
  * Register this machine with Polar and store the result for offline use.
@@ -81,6 +103,7 @@ export async function activatePolar(key, { fetchImpl = fetch, now = Date.now(), 
     return { ok: false, reason: `could not reach Polar (${e instanceof Error ? e.message : e}); activation needs the internet once` };
   }
   if (r.status === 404) return { ok: false, reason: 'Polar does not know this license key' };
+  if (r.status === 429) return { ok: false, reason: BUSY };
   if (r.status === 403)
     return {
       ok: false,
@@ -138,6 +161,7 @@ export async function deactivatePolar({ fetchImpl = fetch } = {}) {
   } catch (e) {
     return { ok: false, reason: `could not reach Polar (${e instanceof Error ? e.message : e})` };
   }
+  if (r.status === 429) return { ok: false, reason: BUSY };
   if (r.status !== 204 && r.status !== 200 && r.status !== 404)
     return { ok: false, reason: `Polar returned ${r.status}${detail(r.data) ? `: ${detail(r.data)}` : ''}` };
   if (existsSync(file())) rmSync(file());

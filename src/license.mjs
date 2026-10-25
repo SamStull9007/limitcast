@@ -1,9 +1,9 @@
 // @ts-check
-import { createPublicKey, createPrivateKey, sign, verify } from 'node:crypto';
+import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { stateDir } from './store.mjs';
 import { loadPolar, polarStatus } from './polar.mjs';
+import { stateDir } from './store.mjs';
 
 export const UPGRADE_URL = 'https://limitcast.dev/#pricing';
 const PUBLIC_KEY = 'MCowBQYDK2VwAyEAG+4c5uaNB7IAZiAxtcyyXBEmmRkmZfWvlEFyvhmDQvA=';
@@ -63,7 +63,7 @@ export function activate(key) {
   const res = checkLicense(key, Date.now());
   if (res.ok) {
     mkdirSync(stateDir(), { recursive: true });
-    writeFileSync(licenseFile(), key.trim() + '\n', { mode: 0o600 });
+    writeFileSync(licenseFile(), `${key.trim()}\n`, { mode: 0o600 });
   }
   return res;
 }

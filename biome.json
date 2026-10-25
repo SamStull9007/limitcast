@@ -1,5 +1,10 @@
 {
+  "files": { "includes": ["bin/**", "src/**", "scripts/**", "test/*.mjs"] },
   "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 150 },
   "javascript": { "formatter": { "quoteStyle": "single" } },
-  "html": { "formatter": { "enabled": true } }
+  "linter": {
+    "rules": {
+      "suspicious": { "noAssignInExpressions": "off", "noTemplateCurlyInString": "off" }
+    }
+  }
 }

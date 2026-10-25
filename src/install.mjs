@@ -1,7 +1,7 @@
 // @ts-check
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const settingsPath = () => join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'settings.json');
@@ -152,7 +152,7 @@ export function readSettings(path) {
 /** @param {string} path @param {any} cfg */
 function writeSettings(path, cfg) {
   mkdirSync(join(path, '..'), { recursive: true });
-  writeFileSync(path, JSON.stringify(cfg, null, 2) + '\n');
+  writeFileSync(path, `${JSON.stringify(cfg, null, 2)}\n`);
 }
 
 /** @param {string} path */
@@ -208,7 +208,7 @@ export function doctor({ path = settingsPath(), codexPath = codexHooksPath(), sa
   });
   const exe = sl.match(/^'([^']+)'|^(\S+)/);
   const exePath = exe?.[1] ?? exe?.[2];
-  if (sl.includes(MARK) && exePath && exePath.startsWith('/')) {
+  if (sl.includes(MARK) && exePath?.startsWith('/')) {
     out.push({
       ok: existsSync(exePath),
       line: existsSync(exePath) ? 'Node path in settings exists' : `Node path in settings is gone (${exePath}): run \`limitcast install\` again`,
@@ -227,12 +227,15 @@ export function doctor({ path = settingsPath(), codexPath = codexHooksPath(), sa
   );
   out.push({
     ok: license?.ok !== false,
-    line:
-      license === null
-        ? 'Free tier'
-        : license.ok
-          ? `Pro: ${license.claims.e}${license.claims.x ? `, renews ${new Date(license.claims.x * 1000).toISOString().slice(0, 10)}` : ', lifetime'}`
-          : `License problem: ${license.reason}`,
+    line: license === null ? 'Free tier' : license.ok ? `Pro: ${license.claims.e}${proTerm(license.claims)}` : `License problem: ${license.reason}`,
   });
   return out;
+}
+
+/** @param {{p:string, i:number, x:number}} c */
+function proTerm(c) {
+  const day = (/** @type {number} */ s) => new Date(s * 1000).toISOString().slice(0, 10);
+  if (c.x) return `, ${c.p === 'polar' ? 'valid until' : 'renews'} ${day(c.x)}`;
+  // A Polar key has no end date for Lifetime or an active subscription; the weekly check is what keeps it honest.
+  return c.p === 'polar' ? `, last checked with Polar ${day(c.i)}` : ', lifetime';
 }

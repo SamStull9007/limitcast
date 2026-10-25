@@ -1,8 +1,8 @@
 // @ts-check
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { createInterface } from 'node:readline';
-import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
+import { basename, join } from 'node:path';
+import { createInterface } from 'node:readline';
 
 /**
  * One model response's token usage.

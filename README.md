@@ -11,11 +11,11 @@ Every Claude Code session starts at 102.7k tokens before your first message.
 - Hide 66 skills from the model (~5.3k): dataviz, block-kit, ...
 ```
 
-- **Trim advisor (Pro):** measures your latest session's starting context from its transcript (SessionStart hook output, MCP server instructions and tool names, skills, agents, instruction files) and names what you haven't used, with what each costs.
+- **Trim advisor:** measures your latest session's starting context from its transcript (SessionStart hook output, MCP server instructions and tool names, skills, agents, instruction files). Free shows the total and how much of it you haven't used; Pro names each item and what it costs.
 - **Subagent guard (Pro)** for Claude Code and Codex: blocks a new subagent when that tool's own window is on pace to run out before it resets.
 - **Burn report (Pro):** Claude Code, Codex and Grok tokens by day, project, model and session.
 - **Runout forecast (free):** burn rate and the clock time each window runs out.
-- **Local only.** Reads the limit readings Claude Code passes to your status line and the logs Claude Code, Codex and Grok already write. No API calls, no logins, nothing leaves your machine.
+- **Local only.** Reads the limit readings Claude Code passes to your status line and the logs Claude Code, Codex and Grok already write. No logins, and your usage data never leaves your machine. The free tier makes no network calls; a Pro license key talks to Polar only to activate, to re-check weekly, and to deactivate (it sends the key and your computer's name).
 
 | | Claude Code | Codex | Grok |
 |---|---|---|---|
@@ -50,11 +50,12 @@ limitcast doctor
 | `limitcast install [--guard] [--alerts]` / `uninstall` | Wire into Claude Code / restore your settings |
 | `limitcast doctor` | Check the setup, data freshness, license, and that Claude Code, Codex and Grok logs are still in a format limitcast reads |
 | `limitcast report [--days N] [--out FILE]` | **Pro.** Tokens by tool, day, project, model and session; subagent share |
-| `limitcast trim [--days N] [--share]` | **Pro.** Measured starting context of your latest session and what you haven't used in N days (default 7). `--share`: totals only, no names, safe to post |
+| `limitcast trim [--days N] [--share]` | Measured starting context of your latest session and how much you haven't used in N days (default 7). **Pro** names each item. `--share`: totals only, no names, safe to post |
 | `limitcast saved` | **Pro.** How much the part of your starting context you control has dropped since limitcast first measured it, times your sessions since |
 | `install --alerts` | **Pro.** A SessionStart hook that tells you (never the model) when your starting context grew ~1k+ tokens, and what grew |
-| `limitcast activate <key>` | Unlock Pro: registers this computer with Polar once (3 computers per key), then works offline |
+| `limitcast activate <key>` | Unlock Pro: registers this computer with Polar (3 computers per key). Polar re-checks it weekly in the background; it keeps working up to 30 days offline |
 | `limitcast deactivate` | Free this computer so the key can be used on another one |
+| `limitcast license` | Show the license and re-check it with Polar now |
 
 ### Subagent guard (Pro)
 
@@ -66,7 +67,7 @@ Each limit reading is saved to `~/.local/state/limitcast/samples.jsonl` when it 
 
 ## Pricing
 
-Free: runout forecast and status-line readout. Pro ($79/year, or $149 lifetime for the first 100 buyers): trim advisor, subagent guard, burn report. See https://limitcast.dev.
+Free: runout forecast, status-line readout, and your starting-context total with how much you never use. Pro ($79/year, or $149 lifetime for the first 100 buyers): names what to cut, subagent guard, burn report, starting-context alerts. 14-day refund: email support@limitcast.dev. See https://limitcast.dev.
 
 ## License
 

@@ -1,7 +1,7 @@
 // @ts-check
 import { createReadStream, readdirSync, statSync } from 'node:fs';
-import { createInterface } from 'node:readline';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline';
 
 /**
  * One piece of the context Claude Code loads before your first message, measured from the transcript.

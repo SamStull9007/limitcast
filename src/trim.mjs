@@ -1,7 +1,7 @@
 // @ts-check
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { fmt } from './report.mjs';
 
 /** @typedef {import('./usage.mjs').Usage} Usage */

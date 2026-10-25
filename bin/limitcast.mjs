@@ -1,21 +1,22 @@
 #!/usr/bin/env node
 // @ts-check
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { forecastAll, oneClaudeSession } from '../src/forecast.mjs';
-import { claudeSamples, readCodex } from '../src/sources.mjs';
-import { KEEP_MS, load, record, stateDir } from '../src/store.mjs';
-import { runGuard } from '../src/guard.mjs';
-import { claudeRoot, grokRoot, readUsage } from '../src/usage.mjs';
-import { burnReport } from '../src/report.mjs';
-import { baseline, contributors, shareSummary, startupReport, trimReport } from '../src/trim.mjs';
-import { countInteractiveSince, latestInteractiveTranscript } from '../src/startup.mjs';
-import { driftMessage, loadOverhead, recordOverhead, savedSummary, snapshot } from '../src/overhead.mjs';
 import { formatChecks } from '../src/formats.mjs';
-import { activate, currentLicense, isPro, UPGRADE_URL } from '../src/license.mjs';
-import { activatePolar, deactivatePolar, refreshPolar } from '../src/polar.mjs';
+import { runGuard } from '../src/guard.mjs';
 import { doctor, install, uninstall } from '../src/install.mjs';
+import { activate, currentLicense, isPro, UPGRADE_URL } from '../src/license.mjs';
+import { driftMessage, loadOverhead, recordOverhead, savedSummary, snapshot } from '../src/overhead.mjs';
+import { activatePolar, deactivatePolar, refreshDue, refreshPolar } from '../src/polar.mjs';
+import { burnReport } from '../src/report.mjs';
+import { claudeSamples, readCodex } from '../src/sources.mjs';
+import { countInteractiveSince, latestInteractiveTranscript } from '../src/startup.mjs';
+import { KEEP_MS, load, record, stateDir } from '../src/store.mjs';
+import { baseline, contributors, shareSummary, startupReport, trimReport } from '../src/trim.mjs';
+import { claudeRoot, grokRoot, readUsage } from '../src/usage.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
@@ -24,15 +25,17 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
   limitcast uninstall                remove it and restore your original status line
   limitcast doctor                   check the setup
   limitcast status [--json]          used, burn rate, runout time and reset per limit window
+  limitcast trim [--share]           tokens every session loads before you type, and how much you never use
+  limitcast license                  show the license and re-check it with Polar
 
   Pro (${UPGRADE_URL})
-  limitcast trim [--days N] [--share]        tokens every session loads before you type, and what to cut
+  limitcast trim [--days N] [--share]        names what to cut and what each costs
                                              (--share: totals only, no names, safe to post)
   limitcast saved                            tokens saved since limitcast first measured you
   limitcast install --guard                  block new subagents when a window is on pace to run out
   limitcast install --alerts                 tell you when your starting context grows
   limitcast report [--days N] [--out FILE]   tokens by tool, day, project, model and session
-  limitcast activate <license-key>           unlock Pro on this computer (once online, then works offline)
+  limitcast activate <license-key>           unlock Pro on this computer (online once; then a weekly check, offline up to 30 days)
   limitcast deactivate                       free this computer's activation to use the key elsewhere
 
   Used by Claude Code and Codex (set up by install)
@@ -69,6 +72,8 @@ if (cmd === 'status') {
     sid = feed?.session_id;
     record(claudeSamples(feed, now));
     saveFeedShape(feed);
+    // Hook-only Pro users never run an interactive command, so the weekly Polar check starts here, detached.
+    if (refreshDue(now)) spawn(process.execPath, [fileURLToPath(import.meta.url), 'license'], { detached: true, stdio: 'ignore' }).unref();
   } catch {
     /* never break the status line */
   }
@@ -116,7 +121,8 @@ if (cmd === 'status') {
   for (const c of checks) console.log(`${c.ok ? '✓' : '✗'} ${c.line}`);
   process.exit(checks.every((c) => c.ok) ? 0 : 1);
 } else if (cmd === 'report' || cmd === 'trim') {
-  if (!isPro()) {
+  const pro = isPro();
+  if (!pro && cmd === 'report') {
     console.log(`\`limitcast ${cmd}\` is part of limitcast Pro: ${UPGRADE_URL}\nAlready bought it? limitcast activate <license-key>`);
     process.exit(2);
   }
@@ -130,12 +136,19 @@ if (cmd === 'status') {
     // Prefer the measured starting context of the latest interactive session; older Claude Code logs fall back to estimates.
     const latest = await latestInteractiveTranscript(claudeRoot());
     if (latest) recordOverhead(snapshot(latest));
-    if (latest && args.includes('--share')) text = shareSummary(baseline(usage), latest, used, days());
+    // Free: the measured totals without names (the --share view); Pro names what to cut.
+    if (!pro && !latest) {
+      console.log(`\`limitcast trim\` needs one Claude Code session first. Naming what to cut is Pro: ${UPGRADE_URL}`);
+      process.exit(2);
+    }
+    if (latest && (args.includes('--share') || !pro)) text = shareSummary(baseline(usage), latest, used, days());
     else text = latest ? startupReport(baseline(usage), latest, used, days()) : trimReport(baseline(usage), contributors(), used, days());
+    if (!pro)
+      text += `\n\nPro names each item and what it costs, so you can cut it: ${UPGRADE_URL}\nAlready bought it? limitcast activate <license-key>`;
   }
   const out = flag('--out');
   if (out) {
-    writeFileSync(out, text + '\n');
+    writeFileSync(out, `${text}\n`);
     console.log(`Wrote ${out}`);
   } else console.log(text);
 } else if (cmd === 'drift') {
