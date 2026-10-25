@@ -23,7 +23,7 @@ export function claudeSamples(input, now) {
     const pct = Number(w?.used_percentage);
     const reset = Number(w?.resets_at);
     if (Number.isFinite(pct) && Number.isFinite(reset) && reset > 0) {
-      out.push({ t: now, src: 'claude', win, pct, reset });
+      out.push({ t: now, src: 'claude', win, pct, reset, ...(input.session_id ? { sid: String(input.session_id) } : {}) });
     }
   }
   return out;

@@ -3,7 +3,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { forecastAll } from '../src/forecast.mjs';
+import { forecastAll, oneClaudeSession } from '../src/forecast.mjs';
 import { claudeSamples, readCodex } from '../src/sources.mjs';
 import { KEEP_MS, load, record, stateDir } from '../src/store.mjs';
 import { guardDecision } from '../src/guard.mjs';
@@ -21,7 +21,7 @@ const [cmd, ...args] = process.argv.slice(2);
 const now = Date.now();
 
 if (cmd === 'status') {
-  const rows = forecastAll([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS))], now);
+  const rows = forecastAll(oneClaudeSession([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS))]), now);
   if (args.includes('--json')) console.log(JSON.stringify(rows, null, 2));
   else console.log(rows.length ? table(rows) : 'No data yet. Add `limitcast statusline` to Claude Code, or run Codex once.');
 } else if (cmd === 'statusline') {
@@ -37,13 +37,16 @@ if (cmd === 'status') {
     const r = spawnSync(wrapped[0], wrapped.slice(1), { input, stdio: ['pipe', 'inherit', 'inherit'] });
     process.exit(r.status ?? 1);
   }
-  console.log(oneLine(forecastAll(load(now - KEEP_MS), now)));
+  let sid;
+  try { sid = JSON.parse(input).session_id; } catch { /* no session: use the latest */ }
+  console.log(oneLine(forecastAll(oneClaudeSession(load(now - KEEP_MS), sid), now)));
 } else if (cmd === 'guard') {
   if (process.env.LIMITCAST_ALLOW === '1') process.exit(0);
   try {
     const hook = JSON.parse(readStdin());
     const minutes = Number(process.env.LIMITCAST_GUARD_MINUTES ?? 30);
-    const reason = guardDecision(hook.tool_name, forecastAll(load(now - KEEP_MS), now), now, minutes);
+    const samples = oneClaudeSession(load(now - KEEP_MS), hook.session_id);
+    const reason = guardDecision(hook.tool_name, forecastAll(samples, now), now, minutes);
     if (reason) {
       console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }));
     }

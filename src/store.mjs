@@ -25,14 +25,15 @@ export function record(samples) {
   /** @type {Record<string, {pct:number, reset:number}>} */
   let last = {};
   try { last = JSON.parse(readFileSync(lastPath, 'utf8')); } catch { /* first run or corrupt: start fresh */ }
+  const key = (/** @type {Sample} */ s) => `${s.src}:${s.win}:${s.sid ?? ''}`;
   const fresh = samples.filter((s) => {
-    const prev = last[`${s.src}:${s.win}`];
+    const prev = last[key(s)];
     return !prev || prev.pct !== s.pct || prev.reset !== s.reset;
   });
   if (!fresh.length) return;
   const file = join(dir, 'samples.jsonl');
   appendFileSync(file, fresh.map((s) => JSON.stringify(s)).join('\n') + '\n');
-  for (const s of fresh) last[`${s.src}:${s.win}`] = { pct: s.pct, reset: s.reset };
+  for (const s of fresh) last[key(s)] = { pct: s.pct, reset: s.reset };
   writeFileSync(lastPath, JSON.stringify(last));
   if (statSync(file).size > PRUNE_BYTES) writeFileSync(file, load(Date.now() - KEEP_MS).map((s) => JSON.stringify(s) + '\n').join(''));
 }

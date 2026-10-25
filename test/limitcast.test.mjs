@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { forecast, slopePerHour, windowName } from '../src/forecast.mjs';
+import { forecast, oneClaudeSession, slopePerHour, windowName } from '../src/forecast.mjs';
 import { claudeSamples, codexSamples, readCodex } from '../src/sources.mjs';
 import { guardDecision } from '../src/guard.mjs';
 
@@ -43,6 +43,17 @@ test('samples from the previous window are ignored', () => {
   const old = reset - 5 * 3600;
   const f = forecast([s(200, 95, old), s(60, 10), s(0, 20)], now);
   assert.equal(Math.round(f.rate), 10);
+});
+
+test('two accounts in parallel: each session forecasts only its own readings', () => {
+  const a = (minsAgo, pct) => ({ ...s(minsAgo, pct), win: '7d', sid: 'A' });
+  const b = (minsAgo, pct) => ({ ...s(minsAgo, pct), win: '7d', sid: 'B' });
+  const mixed = [a(60, 90), b(50, 10), a(30, 94), b(1, 13), a(0, 98)];
+  assert.deepEqual(oneClaudeSession(mixed, 'B').map((x) => x.pct), [10, 13]);
+  assert.deepEqual(oneClaudeSession(mixed).map((x) => x.pct), [90, 94, 98]); // latest is A
+  assert.deepEqual(oneClaudeSession(mixed, 'unknown').map((x) => x.pct), [90, 94, 98]);
+  const codex = { t: now, src: 'codex', win: '7d', pct: 10, reset };
+  assert.ok(oneClaudeSession([...mixed, codex], 'B').includes(codex));
 });
 
 test('window names', () => {

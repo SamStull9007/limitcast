@@ -1,6 +1,6 @@
 // @ts-check
 
-/** @typedef {{t:number, src:string, win:string, pct:number, reset:number}} Sample  t: epoch ms, reset: epoch s */
+/** @typedef {{t:number, src:string, win:string, pct:number, reset:number, sid?:string}} Sample  t: epoch ms, reset: epoch s, sid: Claude session */
 
 const RESET_JITTER_S = 120; // Codex resets_at drifts by seconds between events
 const RECENT_MS = 60 * 60 * 1000;
@@ -64,6 +64,19 @@ export function forecastAll(samples, now) {
     groups.get(k)?.push(s);
   }
   return [...groups.values()].map((g) => forecast(g, now)).filter((f) => f !== null);
+}
+
+/**
+ * Claude sessions can belong to different accounts with different limits, and the feed has no account id.
+ * Keep Claude samples from one session: `sid` if it has any, else the most recently active one. Codex is untouched.
+ * @param {Sample[]} samples
+ * @param {string} [sid]
+ */
+export function oneClaudeSession(samples, sid) {
+  const claude = samples.filter((s) => s.src === 'claude' && s.sid);
+  if (!claude.length) return samples;
+  const pick = sid && claude.some((s) => s.sid === sid) ? sid : claude.reduce((a, b) => (b.t > a.t ? b : a)).sid;
+  return samples.filter((s) => s.src !== 'claude' || !s.sid || s.sid === pick);
 }
 
 /** @param {number} minutes */
