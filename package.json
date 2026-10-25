@@ -1,0 +1,12 @@
+{
+  "name": "limitcast",
+  "version": "0.1.0",
+  "description": "Forecast when Claude Code and Codex hit their usage limits, and stop new subagents before you do.",
+  "type": "module",
+  "bin": { "limitcast": "bin/limitcast.mjs" },
+  "files": ["bin", "src"],
+  "engines": { "node": ">=20" },
+  "scripts": { "test": "node --test" },
+  "keywords": ["claude-code", "codex", "rate-limit", "usage", "tokens", "hooks"],
+  "license": "MIT"
+}
