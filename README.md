@@ -76,7 +76,7 @@ Each limit reading is saved to `~/.local/state/limitcast/samples.jsonl` when it 
 
 ## Pricing
 
-Free: runout forecast with NEAR warnings and the daily allowance, status-line readout, your starting-context total with how much you never use (Claude Code and Codex), `results`, and a preview of the guard. Pro ($79/year, or $149 lifetime): names what to cut and cuts it (`trim --apply`, also for Codex), a subagent guard that blocks and switches to Sonnet, burn report, alerts, a weekly summary, notifications, after-reset jobs, account headroom, the `/compact` nudge and the HTML dashboard. 14-day refund: email support@limitcast.dev. See https://limitcast.dev.
+Free: runout forecast with NEAR warnings and the daily allowance, status-line readout, your starting-context total with how much you never use (Claude Code and Codex), `results`, and a preview of the guard. Pro ($79/year or $9/month, 14 days free): names what to cut and cuts it (`trim --apply`, also for Codex), a subagent guard that blocks and switches to Sonnet, burn report, alerts, a weekly summary, notifications, after-reset jobs, account headroom, the `/compact` nudge and the HTML dashboard. Cancel anytime; 14-day refund on any charge: email support@limitcast.dev. See https://limitcast.dev.
 
 ## License
 
