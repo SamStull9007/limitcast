@@ -14,6 +14,7 @@ import { countInteractiveSince, latestInteractiveTranscript } from '../src/start
 import { driftMessage, loadOverhead, recordOverhead, savedSummary, snapshot } from '../src/overhead.mjs';
 import { formatChecks } from '../src/formats.mjs';
 import { activate, currentLicense, isPro, UPGRADE_URL } from '../src/license.mjs';
+import { activatePolar, deactivatePolar, refreshPolar } from '../src/polar.mjs';
 import { doctor, install, uninstall } from '../src/install.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -31,7 +32,8 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
   limitcast install --guard                  block new subagents when a window is on pace to run out
   limitcast install --alerts                 tell you when your starting context grows
   limitcast report [--days N] [--out FILE]   tokens by tool, day, project, model and session
-  limitcast activate <license-key>           unlock Pro
+  limitcast activate <license-key>           unlock Pro on this computer (once online, then works offline)
+  limitcast deactivate                       free this computer's activation to use the key elsewhere
 
   Used by Claude Code and Codex (set up by install)
   limitcast statusline [-- <cmd...>]  record limit readings, then run your status-line command
@@ -46,6 +48,11 @@ const flag = (/** @type {string} */ name) => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 const days = () => Math.max(1, Number(flag('--days') ?? 7));
+
+// Interactive commands re-check a Polar license weekly; hooks (statusline, guard, drift --hook) never touch the network.
+if (['report', 'trim', 'saved', 'drift', 'doctor', 'license'].includes(cmd) && !args.includes('--hook')) {
+  await refreshPolar({ force: cmd === 'license' }).catch(() => null);
+}
 
 if (cmd === 'status') {
   const rows = forecastAll(oneClaudeSession([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS))]), now);
@@ -159,8 +166,14 @@ if (cmd === 'status') {
   const s = loadOverhead();
   console.log(s ? savedSummary(s, await countInteractiveSince(claudeRoot(), s.first.at)) : 'Nothing measured yet. Run `limitcast trim` first.');
 } else if (cmd === 'activate') {
-  const res = activate(args[0] ?? '');
-  console.log(res.ok ? `✓ limitcast Pro activated for ${res.claims.e}` : `✗ ${res.reason}`);
+  // Signed offline keys start with LC1.; anything else is a Polar license key.
+  const key = args[0] ?? '';
+  const res = key.startsWith('LC1.') ? activate(key) : await activatePolar(key);
+  console.log(res.ok ? `✓ limitcast Pro activated${res.claims.e ? ` for ${res.claims.e}` : ''}` : `✗ ${res.reason}`);
+  process.exit(res.ok ? 0 : 1);
+} else if (cmd === 'deactivate') {
+  const res = await deactivatePolar();
+  console.log(res.ok ? '✓ This machine is deactivated; the key can be used on another computer.' : `✗ ${res.reason}`);
   process.exit(res.ok ? 0 : 1);
 } else if (cmd === 'license') {
   const l = currentLicense();

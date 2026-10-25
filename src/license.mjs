@@ -3,6 +3,7 @@ import { createPublicKey, createPrivateKey, sign, verify } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stateDir } from './store.mjs';
+import { loadPolar, polarStatus } from './polar.mjs';
 
 export const UPGRADE_URL = 'https://limitcast.dev/#pricing';
 const PUBLIC_KEY = 'MCowBQYDK2VwAyEAG+4c5uaNB7IAZiAxtcyyXBEmmRkmZfWvlEFyvhmDQvA=';
@@ -46,10 +47,15 @@ export function issueLicense(claims, privatePem) {
 
 const licenseFile = () => join(stateDir(), 'license.key');
 
-/** The active license: LIMITCAST_LICENSE env var, else the activated key file. */
+/**
+ * The active license: LIMITCAST_LICENSE env var, else an activated signed key, else a Polar activation.
+ * Never touches the network (hooks call it on every tool use).
+ */
 export function currentLicense(now = Date.now()) {
   const key = process.env.LIMITCAST_LICENSE ?? (existsSync(licenseFile()) ? readFileSync(licenseFile(), 'utf8') : '');
-  return key ? checkLicense(key, now) : null;
+  if (key) return checkLicense(key, now);
+  const polar = loadPolar();
+  return polar ? polarStatus(polar, now) : null;
 }
 
 /** @param {string} key */

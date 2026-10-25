@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0
+
+- Polar license keys: `limitcast activate LIMITCAST-…` registers this computer with Polar once (3 computers per key), then works offline. Interactive commands re-check weekly; hooks never touch the network. A key keeps working 30 days offline, and stops when Polar says it was revoked, refunded or expired.
+- `limitcast deactivate` frees this computer so the key can move to another one.
+- Signed offline keys (`LC1.…`) still work.
+
 ## 0.5.0
 
 - `install --alerts` (Pro): a SessionStart hook that tells you, as a message the model never sees, when your starting context grew ~1k+ tokens since the last session, naming what grew. Runs in ~0.3 s.
