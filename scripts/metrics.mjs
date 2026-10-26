@@ -88,7 +88,10 @@ await section('Polar', async () => {
   if (!token) throw new Error('add a Polar organization access token to the Keychain as "limitcast-polar-oat"');
   const auth = { authorization: `Bearer ${token}` };
   const subs = await json(`https://api.polar.sh/v1/subscriptions/?organization_id=${POLAR_ORG_ID}&limit=100`, auth);
-  const count = (/** @type {string} */ s) => (subs.items ?? []).filter((/** @type {any} */ x) => x.status === s).length;
+  // Our own test checkouts stay in Polar after the customer is deleted, so leave them out of the counts.
+  const internal = new Set(['support@limitcast.dev', 'sam.stull73@gmail.com']);
+  const real = (subs.items ?? []).filter((/** @type {any} */ x) => !internal.has(String(x.customer?.email ?? '').toLowerCase()));
+  const count = (/** @type {string} */ s) => real.filter((/** @type {any} */ x) => x.status === s).length;
   row.trialing = count('trialing');
   row.active = count('active');
   row.canceled = count('canceled');
