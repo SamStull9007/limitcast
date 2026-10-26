@@ -456,9 +456,9 @@ test('launcher: runs this copy, falls back to limitcast on PATH, then to your ow
     assert.match(execFileSync('/bin/sh', [sh, '--version'], { env }).toString(), /^\d+\.\d+\.\d+/);
     // Node moved (an upgrade) and no limitcast on PATH: the status line still runs the wrapped command.
     writeLauncher('/gone/node', '/gone/limitcast.mjs');
-    const out = execFileSync('/bin/sh', [sh, 'statusline', '--', 'sh', '-c', 'echo mine'], { env, input: '{}' }).toString();
+    const out = execFileSync('/bin/sh', [sh, 'statusline', '--', 'sh', '-c', 'cat >/dev/null; echo mine'], { env, input: '{}' }).toString();
     assert.equal(out, 'mine\n');
-    assert.equal(execFileSync('/bin/sh', [sh, 'guard'], { env, input: '{}' }).toString(), ''); // allows
+    assert.equal(execFileSync('/bin/sh', [sh, 'guard'], { env, stdio: ['ignore', 'pipe', 'pipe'] }).toString(), ''); // allows
   } finally {
     process.env.LIMITCAST_STATE = prev;
   }
