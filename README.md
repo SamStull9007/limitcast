@@ -46,7 +46,7 @@ limitcast doctor
 
 In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast:results` and `/limitcast:trim`: `/plugin marketplace add SamStull9007/limitcast`, then `/plugin install limitcast@limitcast`. The status-line recorder still comes from `limitcast install`.
 
-`install` backs up `~/.claude/settings.json` and wraps your existing status line (it looks exactly the same). `--guard` adds the subagent guard (without Pro it only records what it would block). Restart Claude Code to load it. `limitcast uninstall` puts everything back.
+`install` backs up `~/.claude/settings.json` and wraps your existing status line: it looks exactly the same, and the limitcast line (for example `limitcast: 5h 14% · 7d 18% · today 9% left`) goes on the line under it. `--guard` adds the subagent guard (without Pro it only records what it would block). Restart Claude Code to load it. `limitcast uninstall` puts everything back.
 
 **Codex:** forecasts and reports need no setup (`~/.codex/sessions`, or `$CODEX_HOME/sessions`). With `--guard`, `install` also appends the guard to `~/.codex/hooks.json`, after your existing hooks so the ones you've already trusted keep their trust. Codex runs a new hook only once you approve it: start Codex and accept it. `limitcast doctor` shows whether it's trusted.
 

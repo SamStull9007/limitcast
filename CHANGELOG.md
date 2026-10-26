@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.3
+
+- If you wrap your own status line, the limitcast line (`5h 14% · 7d 18% · today 9% left`, plus any warning) now always shows on the line under it. Before, it appeared only when there was something to act on, so the runout forecast was invisible to anyone with their own status line.
+- A status-line script that prints without a trailing newline no longer gets the limitcast line glued onto its end.
+
 ## 0.11.2
 
 - When a Polar license stops working because the subscription ended or the key was revoked, `limitcast license` now says so and links to pricing, instead of "license not found at Polar".

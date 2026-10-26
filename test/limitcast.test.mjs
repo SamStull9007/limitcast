@@ -185,7 +185,9 @@ test('CLI end to end: statusline records, wraps the command; guard is Pro-gated 
     input: feed(50),
     env,
   }).toString();
-  assert.equal(JSON.parse(out).rate_limits.five_hour.used_percentage, 50);
+  const [passed, ours] = out.trimEnd().split('\n');
+  assert.equal(JSON.parse(passed).rate_limits.five_hour.used_percentage, 50);
+  assert.match(ours, /^limitcast: 5h 50%/);
 
   // Backdate the first sample so the slope spans > 5 minutes, then add a second.
   const file = join(state, 'samples.jsonl');

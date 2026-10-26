@@ -152,8 +152,8 @@ test('CLI: Pro gates and the status line hint when wrapping a status line', () =
       args.join(' '),
     );
   }
-  // Free: the wrapped status line is passed through untouched, with no extra line.
+  // Free: the wrapped status line is passed through untouched, with limitcast's line under it.
   const out = execFileSync('node', [bin, 'statusline', '--', 'echo', 'mine'], { input: '{}', env }).toString();
-  assert.equal(out, 'mine\n');
+  assert.equal(out, 'mine\nlimitcast: waiting for data\n');
   assert.equal(readFileSync(join(state, 'last-feed.json'), 'utf8').includes('"keys"'), true);
 });

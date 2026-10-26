@@ -146,9 +146,17 @@ if (cmd === 'status') {
   const sep = args.indexOf('--');
   const wrapped = sep >= 0 ? args.slice(sep + 1) : [];
   if (wrapped.length) {
-    const r = spawnSync(wrapped[0], wrapped.slice(1), { input, stdio: ['pipe', 'inherit', 'inherit'] });
-    // Your status line stays as it was; limitcast adds a second line only when there is something to act on.
-    if (hints.length) console.log(`limitcast: ${hints.join(' · ')}`);
+    const r = spawnSync(wrapped[0], wrapped.slice(1), { input, stdio: ['pipe', 'pipe', 'inherit'] });
+    // Your status line stays as it was; limitcast adds its own line under it (status scripts often printf without a newline).
+    const yours = r.stdout?.toString() ?? '';
+    process.stdout.write(yours && !yours.endsWith('\n') ? `${yours}\n` : yours);
+    let line = 'waiting for data';
+    try {
+      line = oneLine(forecastAll(oneClaudeAccount(load(now - KEEP_MS), sid), now)).replace(/^limitcast: /, '');
+    } catch {
+      /* never break the status line */
+    }
+    console.log(`limitcast: ${[line, ...hints].join(' · ')}`);
     process.exit(r.status ?? 1);
   }
   console.log([oneLine(forecastAll(oneClaudeAccount(load(now - KEEP_MS), sid), now)), ...hints].join(' · '));
