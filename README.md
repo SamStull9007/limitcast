@@ -37,7 +37,7 @@ Requires Node 20+ on macOS or Linux.
 ## Install
 
 ```sh
-npm install -g limitcast     # or: brew install samstull9007/limitcast/limitcast
+npm install -g limitcast     # or: brew trust samstull9007/limitcast && brew install samstull9007/limitcast/limitcast
 limitcast install            # free: status-line recorder
 limitcast trial              # Pro free for 7 days, no card (or: limitcast activate <key>)
 limitcast install --guard    # also the subagent guard (free: preview only)
