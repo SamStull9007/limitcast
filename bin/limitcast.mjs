@@ -16,23 +16,25 @@ import {
   transcriptCwd,
   undoTrim,
 } from '../src/apply.mjs';
-import { calibrate } from '../src/calibrate.mjs';
+import { calibrate, limitChange, limitChangeMessage, windowPct } from '../src/calibrate.mjs';
 import { applyCodexTrim, codexConfigPath, codexServers, codexStartup, codexTrimReport, codexUsedServers, undoCodexTrim } from '../src/codex.mjs';
+import { coldCost, coldMessage, firstWarning } from '../src/cold.mjs';
 import { forecastAll, oneClaudeAccount, resetTarget } from '../src/forecast.mjs';
 import { formatChecks } from '../src/formats.mjs';
 import { runGuard } from '../src/guard.mjs';
-import { accountForecasts, compactHint, headroom, lastCallTokens } from '../src/hints.mjs';
+import { accountForecasts, compactHint, headroom, lastCall, lastCallTokens } from '../src/hints.mjs';
 import { htmlPage } from '../src/html.mjs';
 import { doctor, install, installedFeatures, readSettings, settingsPath, uninstall } from '../src/install.mjs';
 import { activate, currentLicense, isPro, startTrial, trialStatus, UPGRADE_URL } from '../src/license.mjs';
-import { buildNotifierApp, notifierApp, notifyChanges, notifyEnabled, send, setNotify } from '../src/notify.mjs';
+import { buildNotifierApp, loadChannels, notifierApp, notifyChanges, notifyEnabled, send, setChannel, setNotify } from '../src/notify.mjs';
 import { driftMessage, loadOverhead, recordOverhead, savedPerSession, savedSummary, snapshot } from '../src/overhead.mjs';
 import { activatePolar, deactivatePolar, refreshDue, refreshPolar } from '../src/polar.mjs';
 import { burnReport } from '../src/report.mjs';
-import { loadBlocks, resultsReport, resultsShare, resultsStats, weeklyDue, weeklyLine } from '../src/results.mjs';
+import { loadBlocks, logBlock, resultsReport, resultsShare, resultsStats, weeklyDue, weeklyLine } from '../src/results.mjs';
 import { claudeSamples, readCodex } from '../src/sources.mjs';
 import { countInteractiveSince, latestInteractiveTranscript } from '../src/startup.mjs';
 import { KEEP_MS, load, record, stateDir } from '../src/store.mjs';
+import { budgetSpent, getBudget, loadSubagents, logSubagent, receiptMessage, setBudget, subagentUsage, windowStart } from '../src/subagents.mjs';
 import { forTerminal } from '../src/term.mjs';
 import { baseline, contributors, measuredSavings, shareSummary, startupReport, trimReport } from '../src/trim.mjs';
 import { claudeRoot, grokRoot, readUsage } from '../src/usage.mjs';
@@ -60,9 +62,15 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
   limitcast trim --codex --apply / --undo    turn off unused Codex MCP servers (enabled = false; reversible)
   limitcast saved                            tokens saved since limitcast first measured you
   limitcast install --guard                  block new subagents when a window is on pace to run out, and run
-                                             them on Sonnet while a window is tight (NEAR or AT_RISK)
+                                             them on Sonnet while a window is tight (NEAR or AT_RISK); show what
+                                             each finished subagent cost; hold the first message after the prompt
+                                             cache expired (idle over 60 min, LIMITCAST_CACHE_MINUTES) and say what it costs
+  limitcast budget subagents <percent>|off   hold new subagents once they used that much of the 5-hour window
   limitcast install --alerts                 tell you when your starting context grows, plus a weekly summary
-  limitcast notify on|off|test               desktop notification when a window turns NEAR, AT_RISK or HIT, or resets
+  limitcast notify on|off|test               desktop notification when a window turns NEAR, AT_RISK or HIT, or resets,
+                                             and when your Claude limit itself changes
+  limitcast notify ntfy <topic|url>|off      also send them to your phone (ntfy.sh)
+  limitcast notify webhook <url>|off         also send them to a Slack or Discord webhook
   limitcast after-reset [--src claude|codex] [--window 5h|7d] [--detach] -- <command>
                                              run a heavy job once the window has reset
   limitcast results --html [--out FILE]      results, current windows and the burn report as one page
@@ -74,6 +82,8 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
   Used by Claude Code and Codex (set up by install)
   limitcast statusline [-- <cmd...>]  record limit readings, then run your status-line command
   limitcast guard                     PreToolUse hook (Pro)
+  limitcast prompt-check              UserPromptSubmit hook: the cold-cache warning (Pro)
+  limitcast subagent-receipt          SubagentStop hook: what the subagent cost (Pro)
   limitcast drift [--hook]            SessionStart hook: compare starting context with the last session (Pro)
 `;
 
@@ -166,6 +176,85 @@ if (cmd === 'status') {
     // Fail open: a broken governor must not stop the agent.
     console.error(`limitcast guard skipped: ${e instanceof Error ? e.message : e}`);
   }
+} else if (cmd === 'prompt-check') {
+  // UserPromptSubmit hook: hold the first message after the prompt cache expired, once, with its cost.
+  // Pro blocks; free only records what Pro would have held. Fails open.
+  try {
+    const hook = JSON.parse(readStdin());
+    const path = hook?.transcript_path;
+    const last = process.env.LIMITCAST_ALLOW !== '1' && typeof path === 'string' && existsSync(path) ? lastCall(path) : null;
+    const c = coldCost(hook?.prompt, last, now, { minutes: Number(process.env.LIMITCAST_CACHE_MINUTES ?? 60), calib: loadValue().calib });
+    if (c && last && firstWarning(String(hook.session_id), last.t)) {
+      const pro = isPro();
+      logBlock({
+        t: now,
+        kind: 'cold',
+        src: 'claude',
+        win: '5h',
+        pct: c.pct ?? 0,
+        wall: now,
+        reset: now,
+        tokens: c.tokens,
+        sid: hook.session_id,
+        ...(pro ? {} : { shadow: true }),
+      });
+      if (pro) console.log(JSON.stringify({ decision: 'block', reason: coldMessage(c) }));
+    }
+  } catch {
+    /* a hook must never stop a prompt by failing */
+  }
+} else if (cmd === 'subagent-receipt') {
+  // SubagentStop hook: price the finished subagent against the 5-hour window and log it (for budgets and results).
+  // Pro shows the receipt to the user (systemMessage, never the model). Internal agents (empty type) are skipped.
+  try {
+    const hook = JSON.parse(readStdin());
+    const path = hook?.agent_transcript_path;
+    if (hook?.agent_type && typeof path === 'string') {
+      const u = subagentUsage(path);
+      const calib = loadValue().calib;
+      const pct = calib ? windowPct(calib, { writes: u.fresh, reads: u.read }) : null;
+      if (u.calls) {
+        logSubagent({
+          t: now,
+          id: hook.agent_id,
+          sid: hook.session_id,
+          type: hook.agent_type,
+          calls: u.calls,
+          fresh: u.fresh,
+          read: u.read,
+          ...(pct === null ? {} : { pct }),
+        });
+        if (isPro()) console.log(JSON.stringify({ systemMessage: receiptMessage(hook.agent_type, u, pct) }));
+      }
+    }
+  } catch {
+    /* a hook must never break the session */
+  }
+} else if (cmd === 'budget') {
+  if (!isPro()) {
+    console.log(`Subagent budgets are part of limitcast Pro: ${UPGRADE_URL}`);
+    process.exit(2);
+  }
+  const value = args[1];
+  if (args[0] !== 'subagents' || (value !== undefined && value !== 'off' && !(Number(value) > 0 && Number(value) <= 100))) {
+    console.log('Usage: limitcast budget subagents <percent of the 5-hour window, 1-100>|off');
+    process.exit(1);
+  }
+  if (value !== undefined) setBudget(value === 'off' ? null : Number(value));
+  const budget = getBudget();
+  const samples = oneClaudeAccount(load(now - KEEP_MS));
+  const start = windowStart(forecastAll(samples, now), now);
+  const spent = budgetSpent(loadSubagents(start), new Set(samples.map((s) => s.sid)), new Set(load(now - KEEP_MS).map((s) => s.sid)));
+  console.log(
+    budget
+      ? `Subagent budget: ${budget}% of each 5-hour window. Used this window so far: ≈${spent.toFixed(1)}%. Once it's spent, the guard holds new subagents until the window resets.`
+      : `No subagent budget. Subagents used ≈${spent.toFixed(1)}% of this 5-hour window so far. Set one: limitcast budget subagents 15`,
+  );
+  if (budget && !installedFeatures().guard) console.log('The budget is enforced by the guard: limitcast install --guard');
+  if (budget && !loadValue().calib)
+    console.log(
+      'limitcast prices subagents from your own limit readings, which takes about a day of use; until then nothing counts against the budget.',
+    );
 } else if (cmd === 'install') {
   const wantGuard = args.includes('--guard');
   const wantAlerts = args.includes('--alerts');
@@ -388,7 +477,7 @@ if (cmd === 'status') {
     const rows = forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS))]), now);
     const burn = burnReport(await readUsage(since, {}), { since, now }).replace(/^(#{1,2}) /gm, '#$1 ');
     const md = [
-      resultsReport({ now, days: days(), samples, blocks, pro, saved, value: valueSection(totals, { now, pro }) }),
+      resultsReport({ now, days: days(), samples, blocks, pro, saved, value: valueSection(totals, { now, pro }), subagents: loadSubagents(since) }),
       '## Right now',
       '```',
       rows.length ? table(rows) : 'No readings yet.',
@@ -403,7 +492,12 @@ if (cmd === 'status') {
       opener.on('error', () => {});
       opener.unref();
     }
-  } else console.log(forTerminal(resultsReport({ now, days: days(), samples, blocks, pro, saved, value: valueSection(totals, { now, pro }) })));
+  } else
+    console.log(
+      forTerminal(
+        resultsReport({ now, days: days(), samples, blocks, pro, saved, value: valueSection(totals, { now, pro }), subagents: loadSubagents(since) }),
+      ),
+    );
 } else if (cmd === 'notify') {
   // Desktop notifications from the status line (Pro, opt-in).
   if (!isPro()) {
@@ -411,6 +505,25 @@ if (cmd === 'status') {
     process.exit(2);
   }
   const what = args[0];
+  if (what === 'ntfy' || what === 'webhook') {
+    // Phone (ntfy) or Slack/Discord: every notification also goes there; setting one turns notifications on.
+    const err = args[1] ? setChannel(what, args[1]) : 'Usage: limitcast notify ntfy <topic|https-url>|off, or notify webhook <https-url>|off';
+    if (err) {
+      console.log(err);
+      process.exit(1);
+    }
+    if (args[1] !== 'off') {
+      setNotify(true);
+      send('limitcast notifications work.');
+    }
+    const ch = loadChannels();
+    console.log(
+      args[1] === 'off'
+        ? `Stopped sending to ${what === 'ntfy' ? 'ntfy' : 'the webhook'}.`
+        : `Sent a test to ${what === 'ntfy' ? `${ch.ntfy} (subscribe to that topic in the ntfy app)` : 'the webhook'}. Notifications are on. limitcast sends only the notification text there.`,
+    );
+    process.exit(0);
+  }
   if (what === 'on' || what === 'off') setNotify(what === 'on');
   // macOS: limitcast's own notifier app, so it shows up as "limitcast" in System Settings → Notifications.
   const mac = process.platform === 'darwin';
@@ -576,10 +689,15 @@ function freeWeeklyHint(t) {
   }
   if (t < from) return null;
   const preview = loadBlocks(t - WEEK).filter((b) => b.shadow);
-  const stopped = preview.filter((b) => b.kind !== 'switch').length;
-  const moved = preview.length - stopped;
-  if (!stopped && !moved) return null;
-  const parts = [stopped ? `stopped ${stopped} subagent${stopped === 1 ? '' : 's'}` : '', moved ? `moved ${moved} to Sonnet` : ''].filter(Boolean);
+  const stopped = preview.filter((b) => !b.kind || b.kind === 'budget').length;
+  const moved = preview.filter((b) => b.kind === 'switch').length;
+  const cold = preview.filter((b) => b.kind === 'cold').length;
+  if (!stopped && !moved && !cold) return null;
+  const parts = [
+    stopped ? `stopped ${stopped} subagent${stopped === 1 ? '' : 's'}` : '',
+    moved ? `moved ${moved} to Sonnet` : '',
+    cold ? `caught ${cold} cold-cache message${cold === 1 ? '' : 's'}` : '',
+  ].filter(Boolean);
   return `this week Pro would have ${parts.join(' and ')} · limitcast trial`;
 }
 
@@ -612,8 +730,24 @@ async function refreshValue() {
   const v = foldEvents(loadValue(), { now, samples: [...claude, ...(await readCodex(since))], blocks: loadBlocks(since), start });
   await scanSessions(v, { root: claudeRoot(), baseline: o ? { at: o.first.at, chars: o.first.chars } : null, now });
   // Recalibrate from the last 8 days when there is enough data; keep the last good calibration otherwise.
-  const c = calibrate(claude, await readUsage(since, {}));
+  const usage = await readUsage(since, {});
+  const c = calibrate(claude, usage);
   if (c) v.calib = { ...c, at: now };
+  // Once a day, the last 3 days on their own: a lasting shift against earlier days means the limit itself changed.
+  const cut = now - 3 * 86400_000;
+  const history = v.calibHistory ?? [];
+  if (!history.length || now - /** @type {number} */ (history.at(-1)?.at) >= 20 * 3600_000) {
+    const recent = calibrate(
+      claude.filter((s) => s.t >= cut),
+      usage.filter((u) => u.t >= cut),
+    );
+    if (recent) v.calibHistory = [...history, { ...recent, at: now }].slice(-60);
+  }
+  const change = limitChange(v.calibHistory ?? []);
+  if (change && (!v.limitChange || now - v.limitChange.at > 7 * 86400_000)) {
+    v.limitChange = { ...change, at: now };
+    if (isPro() && notifyEnabled()) send(limitChangeMessage(change));
+  }
   saveValue(v);
   return v;
 }

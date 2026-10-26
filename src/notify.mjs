@@ -2,9 +2,11 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isPro } from './license.mjs';
 import { stateDir } from './store.mjs';
 
 // Desktop notifications (Pro, opt-in): one per change of state, raised from the status line.
+// Optionally also sent to a phone (ntfy) or a Slack/Discord webhook.
 
 const flag = () => join(stateDir(), 'notify.on');
 const stateFile = () => join(stateDir(), 'notified.json');
@@ -80,6 +82,12 @@ export function notifyChanges(rows, clock) {
  * @param {string} message
  */
 export function send(message) {
+  // Pro: the same message to the phone (ntfy) or a chat webhook, by a detached curl so no hook waits on the network.
+  try {
+    if (isPro()) for (const a of remoteArgs(loadChannels(), message)) run('curl', a);
+  } catch {
+    /* a broken channel config must not stop the desktop notification */
+  }
   if (process.platform === 'darwin' && existsSync(notifierApp())) {
     appendFileSync(queueFile(), `${message.replace(/\n/g, ' ')}\n`);
     run('open', ['-g', '-a', notifierApp()]);
@@ -87,6 +95,52 @@ export function send(message) {
   }
   if (process.platform === 'darwin') run('osascript', ['-e', `display notification ${JSON.stringify(message)} with title "limitcast"`]);
   else run('notify-send', ['limitcast', message]);
+}
+
+const channelsFile = () => join(stateDir(), 'notify.json');
+
+/** @returns {{ntfy?:string, webhook?:string}} */
+export function loadChannels() {
+  try {
+    return JSON.parse(readFileSync(channelsFile(), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Set or remove ("off") a remote channel. An ntfy topic becomes https://ntfy.sh/<topic>; URLs must be https.
+ * @param {'ntfy'|'webhook'} kind
+ * @param {string} value
+ * @returns {string|null} the error, if the value is not usable
+ */
+export function setChannel(kind, value) {
+  const channels = loadChannels();
+  if (value === 'off') delete channels[kind];
+  else {
+    const url = kind === 'ntfy' && /^[\w-]{1,64}$/.test(value) ? `https://ntfy.sh/${value}` : value;
+    if (!/^https:\/\/[^\s/]+/.test(url))
+      return kind === 'ntfy' ? 'Give an ntfy topic (letters, digits, - and _) or an https:// URL.' : 'Give an https:// webhook URL.';
+    channels[kind] = url;
+  }
+  mkdirSync(stateDir(), { recursive: true });
+  writeFileSync(channelsFile(), JSON.stringify(channels), { mode: 0o600 }); // a webhook URL is a secret
+  return null;
+}
+
+/**
+ * curl arguments for each configured channel. Webhooks get {text, content}: Slack reads text, Discord content.
+ * --data-raw, so a message starting with @ is never read as a file name.
+ * @param {{ntfy?:string, webhook?:string}} channels
+ * @param {string} message
+ */
+export function remoteArgs(channels, message) {
+  const base = ['-s', '-m', '10', '-o', '/dev/null'];
+  const out = [];
+  if (channels.ntfy) out.push([...base, '-H', 'Title: limitcast', '--data-raw', message, channels.ntfy]);
+  if (channels.webhook)
+    out.push([...base, '-H', 'Content-Type: application/json', '--data-raw', JSON.stringify({ text: message, content: message }), channels.webhook]);
+  return out;
 }
 
 /** @param {string} cmd @param {string[]} args */

@@ -3,6 +3,7 @@ import { forecastAll, oneClaudeAccount } from './forecast.mjs';
 import { logBlock } from './results.mjs';
 import { readCodex } from './sources.mjs';
 import { KEEP_MS, load } from './store.mjs';
+import { budgetMessage, budgetSpent, getBudget, loadSubagents, windowStart } from './subagents.mjs';
 
 const NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok' };
 
@@ -91,6 +92,32 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
     }
   }
   if (reason) return preview ? null : reason;
+  // Pro: hold new Claude subagents once those of this account have used their budget of the current 5-hour window.
+  const budget = src === 'claude' ? getBudget() : null;
+  if (budget) {
+    const start = windowStart(forecasts, now);
+    const sid = hook.session_id ?? hook.sessionId;
+    const known = new Set(load(now - KEEP_MS).map((s) => s.sid));
+    const spent = budgetSpent(loadSubagents(start), new Set([...samples.map((s) => s.sid), sid]), known);
+    if (spent >= budget) {
+      try {
+        logBlock({
+          t: now,
+          kind: 'budget',
+          src: 'claude',
+          win: '5h',
+          pct: spent,
+          wall: now,
+          reset: start + 5 * 3600_000,
+          sid,
+          ...(preview ? { shadow: true } : {}),
+        });
+      } catch {
+        /* a failed log must not change the decision */
+      }
+      if (!preview) return budgetMessage(spent, budget);
+    }
+  }
   // Not blocked, but a window is tight: run a new Claude subagent on Sonnet instead of the main (usually Opus) model.
   const input = hook?.tool_input ?? hook?.toolInput;
   const tight = forecasts.find((x) => x.src === 'claude' && (x.verdict === 'AT_RISK' || x.verdict === 'NEAR'));

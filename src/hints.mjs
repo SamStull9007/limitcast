@@ -46,10 +46,17 @@ const COMPACT_AT = 150_000; // tokens re-sent per model call worth a /compact
 
 /**
  * Tokens the latest main-thread model call of a session sent (input + cache), from the transcript's tail.
- * Reads at most the last 256 KB, so it stays cheap on multi-megabyte transcripts.
  * @param {string} path
  */
-export function lastCallTokens(path) {
+export const lastCallTokens = (path) => lastCall(path)?.tokens ?? null;
+
+/**
+ * The latest main-thread model call of a session: tokens it sent (input + cache) and when (epoch ms; 0 if unknown).
+ * Reads at most the last 256 KB, so it stays cheap on multi-megabyte transcripts.
+ * @param {string} path
+ * @returns {{tokens:number, t:number}|null}
+ */
+export function lastCall(path) {
   const size = statSync(path).size;
   const len = Math.min(size, 256 * 1024);
   const buf = Buffer.alloc(len);
@@ -60,8 +67,13 @@ export function lastCallTokens(path) {
   for (const line of lines) {
     if (!line.includes('"usage"') || line.includes('"isSidechain":true')) continue;
     try {
-      const u = JSON.parse(line)?.message?.usage;
-      if (u) return (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+      const e = JSON.parse(line);
+      const u = e?.message?.usage;
+      if (u)
+        return {
+          tokens: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
+          t: Date.parse(e.timestamp) || 0,
+        };
     } catch {
       /* a torn first line of the tail */
     }

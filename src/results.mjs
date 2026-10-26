@@ -5,7 +5,7 @@ import { claudeAccounts, forecast } from './forecast.mjs';
 import { stateDir } from './store.mjs';
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */
-/** @typedef {{t:number, src:string, win:string, pct:number, wall:number, reset:number, sid?:string, shadow?:boolean, kind?:string, from?:string}} Block  t, wall, reset: epoch ms; shadow: a free install's preview, not acted on; kind "switch": a subagent moved to Sonnet instead of blocked */
+/** @typedef {{t:number, src:string, win:string, pct:number, wall:number, reset:number, sid?:string, shadow?:boolean, kind?:string, from?:string, tokens?:number}} Block  t, wall, reset: epoch ms; shadow: a free install's preview, not acted on; kind "switch": a subagent moved to Sonnet instead of blocked, "budget": a subagent held over the budget, "cold": a message held after the prompt cache expired (pct: its cost, tokens: context re-sent); no kind: a forecast block */
 
 const JITTER_MS = 120_000; // Codex resets_at drifts by seconds between events
 const NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok' };
@@ -123,12 +123,24 @@ export function resultsStats({ now, days, samples, blocks, pro }) {
   const leads = hits.flatMap((h) => (h.warnedAt === null ? [] : [Math.round((h.at - h.warnedAt) / 60_000)]));
   const mine = blocks.filter((b) => b.t >= since && Boolean(b.shadow) === !pro);
   const outcomes = blockOutcomes(
-    mine.filter((b) => b.kind !== 'switch'),
+    mine.filter((b) => !b.kind),
     samples,
     now,
   );
   const switches = mine.filter((b) => b.kind === 'switch').length;
-  return { readings, hits, watched: watched.length, leads, outcomes, switches };
+  const colds = mine.filter((b) => b.kind === 'cold');
+  const budgets = mine.filter((b) => b.kind === 'budget').length;
+  return {
+    readings,
+    hits,
+    watched: watched.length,
+    leads,
+    outcomes,
+    switches,
+    colds: colds.length,
+    coldPct: colds.reduce((a, b) => a + b.pct, 0),
+    budgets,
+  };
 }
 
 /**
@@ -160,6 +172,8 @@ export function weeklyLine(st, savedPerSession, notResent = 0) {
   if (st.leads.length) parts.push(`warned ahead on ${st.leads.length} (avg ${avg(st.leads)} min)`);
   parts.push(`guard blocked ${st.outcomes.length} subagent${st.outcomes.length === 1 ? '' : 's'}`);
   if (st.switches) parts.push(`moved ${st.switches} to Sonnet`);
+  if (st.budgets) parts.push(`held ${st.budgets} over budget`);
+  if (st.colds) parts.push(`caught ${st.colds} cold-cache message${st.colds === 1 ? '' : 's'}`);
   if (savedPerSession && savedPerSession > 0) parts.push(`starting context ${fmtK(savedPerSession)} tokens smaller`);
   if (notResent > 0) parts.push(`${fmtK(notResent)} tokens not re-sent`);
   return `limitcast this week: ${parts.join(', ')}. Details: limitcast results`;
@@ -183,15 +197,16 @@ export function weeklyDue(now) {
   return last !== null;
 }
 
+const pctText = (/** @type {number} */ x) => `${x < 1 ? x.toFixed(2) : x.toFixed(1)}%`;
 const avg = (/** @type {number[]} */ xs) => Math.round(xs.reduce((a, b) => a + b, 0) / xs.length);
 const fmtK = (/** @type {number} */ n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
 
 /**
- * @param {{now:number, days:number, samples:Sample[], blocks:Block[], pro:boolean, saved:string|null, value?:string}} r
+ * @param {{now:number, days:number, samples:Sample[], blocks:Block[], pro:boolean, saved:string|null, value?:string, subagents?:import('./subagents.mjs').SubagentEntry[]}} r
  *   blocks: every logged block (Pro blocks and free previews); saved: the starting-context text, if any;
- *   value: the "since you installed" section, shown first
+ *   value: the "since you installed" section, shown first; subagents: the finished-subagent ledger
  */
-export function resultsReport({ now, days, samples, blocks, pro, saved, value = '' }) {
+export function resultsReport({ now, days, samples, blocks, pro, saved, value = '', subagents = [] }) {
   const when = (/** @type {number} */ ms) =>
     new Date(ms).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
   const name = (/** @type {{src:string, win:string}} */ x) => `${NAMES[/** @type {'claude'} */ (x.src)] ?? x.src} ${x.win}`;
@@ -252,6 +267,25 @@ export function resultsReport({ now, days, samples, blocks, pro, saved, value = 
     out.push(
       `${pro ? 'Ran' : 'Pro would have run'} ${st.switches} subagent${st.switches === 1 ? '' : 's'} on Sonnet instead of your main model while a window was tight.`,
     );
+  if (st.budgets) out.push(`Held ${st.budgets} subagent${st.budgets === 1 ? '' : 's'} once subagents had used their budget of the 5-hour window.`);
+
+  const recent = subagents.filter((e) => e.t >= now - days * 86400_000);
+  if (recent.length || st.colds) {
+    out.push('', '## Subagents and cold caches');
+    const priced = recent.filter((e) => e.pct !== undefined).map((e) => /** @type {number} */ (e.pct));
+    if (recent.length)
+      out.push(
+        `${recent.length} subagent${recent.length === 1 ? '' : 's'} finished` +
+          (priced.length
+            ? `, ≈${pctText(priced.reduce((a, b) => a + b, 0))} of a 5-hour window in all; the biggest ≈${pctText(Math.max(...priced))}.${pro ? '' : " Pro shows each one's cost when it finishes and can cap them per window."}`
+            : '.'),
+      );
+    if (st.colds)
+      out.push(
+        `${pro ? 'Held' : 'Pro would have held'} ${st.colds} message${st.colds === 1 ? '' : 's'} sent after the prompt cache had expired` +
+          (st.coldPct ? `, each re-sending the whole context (≈${pctText(st.coldPct)} of a 5-hour window in all).` : '.'),
+      );
+  }
 
   out.push('', '## Starting context');
   out.push(saved ?? 'Run `limitcast trim` once to record your starting context, then check back here.');

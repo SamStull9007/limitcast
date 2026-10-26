@@ -15,12 +15,15 @@ Every Claude Code session starts at 102.7k tokens before your first message.
 
 - **Trim advisor:** measures your latest session's starting context from its transcript (SessionStart hook output, MCP server instructions and tool names, skills, agents, instruction files). Free shows the total and how much of it you haven't used; Pro names each item and what it costs, and `trim --apply` makes the cuts for you (reversible). `trim --codex` does the same for Codex (AGENTS.md, MCP servers).
 - **Subagent guard (Pro)** for Claude Code and Codex: blocks a new subagent when that tool's own window is on pace to run out before it resets, and while a Claude window is tight runs new subagents on Sonnet instead of your main model. Free installs get a preview that never acts and shows what it would have done.
+- **Subagent receipts and budgets (Pro):** when a subagent finishes you see what it cost: "that Explore subagent used ≈2.1% of your 5-hour window (34 calls)". `limitcast budget subagents 15` holds new subagents once they have used 15% of the current window.
+- **Cold-cache warning (Pro):** after a long pause (60 min, `LIMITCAST_CACHE_MINUTES`) the prompt cache has expired and your next message re-sends the whole context as new tokens. limitcast holds that first message once and tells you what it will cost; send it again to go ahead, or `/compact` first.
+- **Limit-change alert (Pro):** limitcast re-measures how many tokens move your meter by 1% every day and notifies you when that shifts by 15% or more, so you know when the limit itself changed.
 - **Daily allowance (free):** today's even share of each weekly window, so you can pace the week: `7d 41% · today 6% left`.
-- **Pro extras:** desktop notifications (`limitcast notify on`), run a job after the reset (`limitcast after-reset -- …`), a pointer to your other account when this one is near its limit, a `/compact` nudge in long sessions, and an HTML dashboard (`limitcast results --html`).
+- **Pro extras:** desktop notifications (`limitcast notify on`), also to your phone (`notify ntfy <topic>`) or a Slack/Discord webhook (`notify webhook <url>`), run a job after the reset (`limitcast after-reset -- …`), a pointer to your other account when this one is near its limit, a `/compact` nudge in long sessions, and an HTML dashboard (`limitcast results --html`).
 - **Results:** `limitcast results` shows the value since you installed it (tokens not re-sent, limits it warned you about and how far ahead, subagents stopped), then checks the last week against what actually happened.
 - **Burn report (Pro):** Claude Code, Codex and Grok tokens by day, project, model and session.
 - **Runout forecast (free):** burn rate and the clock time each window runs out.
-- **Local only.** Reads the limit readings Claude Code passes to your status line and the logs Claude Code, Codex and Grok already write. No logins, and your usage data never leaves your machine. The free tier makes no network calls; a Pro license key talks to Polar only to activate, to re-check weekly, and to deactivate (it sends the key and your computer's name).
+- **Local only.** Reads the limit readings Claude Code passes to your status line and the logs Claude Code, Codex and Grok already write. No logins, and your usage data never leaves your machine. The free tier makes no network calls; a Pro license key talks to Polar only to activate, to re-check weekly, and to deactivate (it sends the key and your computer's name). If you turn on phone or webhook notifications (Pro, off by default), each notification's text goes to the service you chose (ntfy.sh or your webhook) and nothing else.
 
 | | Claude Code | Codex | Grok |
 |---|---|---|---|
@@ -56,6 +59,8 @@ In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast
 | `limitcast status [--json]` | Used, burn rate, runout time and reset for each window, and today's share of each weekly one. **Pro** also lists your other Claude accounts |
 | `limitcast trim --codex [--apply / --undo]` | Codex: AGENTS.md size and MCP servers in `~/.codex/config.toml` you haven't used. **Pro** names them and turns them off (`enabled = false`; `--undo` restores the file exactly) |
 | `limitcast notify on/off/test` | **Pro.** A desktop notification when a Claude window turns NEAR, AT_RISK or HIT, and when it resets after a HIT. On macOS they come from a tiny limitcast notifier app, listed as "limitcast" in System Settings → Notifications |
+| `limitcast notify ntfy <topic or https URL>` / `notify webhook <https URL>` | **Pro.** Also send every notification to your phone through [ntfy](https://ntfy.sh) (install the app, subscribe to the topic) or to a Slack or Discord incoming webhook. `off` removes it. Sent in the background, so no hook waits on the network |
+| `limitcast budget subagents <percent>` / `off` | **Pro.** Once subagents have used that share of the current 5-hour window, the guard holds new ones until it resets. Priced from your own readings (needs about a day of use first) |
 | `limitcast after-reset [--src claude/codex] [--window 5h/7d] [--detach] -- <cmd>` | **Pro.** Wait for the window to reset, then run the command |
 | `limitcast results --html [--out FILE]` | **Pro.** Results, current windows and the burn report on one page, opened in your browser |
 | `limitcast install [--guard] [--alerts]` / `uninstall` | Wire into Claude Code / restore your settings |
@@ -75,13 +80,15 @@ In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast
 
 Without a valid license the guard runs as a preview: it allows everything and records what it would have blocked (`limitcast results` shows it), so an expired license never blocks your work. Blocks a new subagent only when the spawning tool's window is on pace to run out before it resets, within 30 minutes (`LIMITCAST_GUARD_MINUTES`). A window already at 100% is left to Claude Code, so extra usage keeps working. `LIMITCAST_ALLOW=1` overrides. If the guard itself fails, it allows the call.
 
+`install --guard` also adds two more hooks. A SubagentStop hook prices each finished subagent from its own transcript and, with Pro, shows you the receipt (never the model); `limitcast budget` and `results` use the same record. A UserPromptSubmit hook holds the first message after the prompt cache expired, once per pause, when the session re-sends 100k+ tokens; messages from background agents and `/compact` or `/clear` are never held. Installed `--guard` before 0.11? Run `limitcast doctor --fix` to add them.
+
 ## How the forecast works
 
 Each limit reading is saved to `~/.local/state/limitcast/samples.jsonl` when it changes (kept 8 days). The burn rate is the least-squares slope of percent used over the last hour of the current window, and the runout time is where that line reaches 100%. Windows of a day or more (the weekly one) use the average pace over the last full day, idle time included, unless the last hour's pace runs them out within the hour. **AT_RISK** means that happens before the reset; **NEAR** means 95% or more is used. Claude sessions of the same account share one history (matched by window reset times, and usage that only rises), so two accounts used in parallel never mix.
 
 ## Pricing
 
-Free: runout forecast with NEAR warnings and the daily allowance, status-line readout, your starting-context total with how much you never use (Claude Code and Codex), `results`, and a preview of the guard. Pro ($79/year or $9/month, 14 days free; or `limitcast trial` for 7 days, no card; Team $69/seat/year, 3 seats minimum): names what to cut and cuts it (`trim --apply`, also for Codex), a subagent guard that blocks and switches to Sonnet, burn report, alerts, a weekly summary, notifications, after-reset jobs, account headroom, the `/compact` nudge and the HTML dashboard. Cancel anytime; 14-day refund on any charge: email support@limitcast.dev. See https://limitcast.dev.
+Free: runout forecast with NEAR warnings and the daily allowance, status-line readout, your starting-context total with how much you never use (Claude Code and Codex), `results`, and a preview of the guard. Pro ($79/year or $9/month, 14 days free; or `limitcast trial` for 7 days, no card; Team $69/seat/year, 3 seats minimum): names what to cut and cuts it (`trim --apply`, also for Codex), a subagent guard that blocks and switches to Sonnet, subagent receipts and budgets, the cold-cache warning, limit-change alerts, burn report, alerts, a weekly summary, notifications (desktop, phone or webhook), after-reset jobs, account headroom, the `/compact` nudge and the HTML dashboard. Cancel anytime; 14-day refund on any charge: email support@limitcast.dev. See https://limitcast.dev.
 
 ## License
 

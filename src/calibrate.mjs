@@ -60,6 +60,31 @@ export function calibrate(samples, usage) {
   return { fresh, read, n: obs.length };
 }
 
+const DAY = 86400_000;
+
+/**
+ * Has the limit itself changed? Compares the newest 3-day calibration with the median of those from 3 to 30 days
+ * before it. Returns new tokens per 1% of the 5-hour window then and now, when they differ by 15% or more.
+ * @param {{fresh:number, at:number}[]} history one calibration of the last 3 days per day, oldest first
+ * @returns {{from:number, to:number}|null}
+ */
+export function limitChange(history) {
+  const last = history.at(-1);
+  if (!last) return null;
+  const before = history
+    .filter((h) => h.at <= last.at - 3 * DAY && h.at >= last.at - 30 * DAY)
+    .map((h) => h.fresh)
+    .sort((a, b) => a - b);
+  if (before.length < 3) return null;
+  const from = Math.round(1e6 / before[Math.floor(before.length / 2)]);
+  const to = Math.round(1e6 / last.fresh);
+  return Math.abs(to / from - 1) >= 0.15 ? { from, to } : null;
+}
+
+/** @param {{from:number, to:number}} c */
+export const limitChangeMessage = (c) =>
+  `Your Claude limit looks ${c.to < c.from ? 'smaller' : 'bigger'}: 1% of the 5-hour window now takes ~${Math.round(c.to / 1000)}k new tokens, ${c.to < c.from ? 'down' : 'up'} from ~${Math.round(c.from / 1000)}k.`;
+
 /**
  * What a smaller starting context was worth against the 5-hour limit, in % of one window: each session writes its
  * starting context once (new tokens) and re-reads it on every call (cached tokens).

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.0
+
+Four new Pro features, each priced from your own measured tokens-per-percent:
+- **Cold-cache warning:** after a pause longer than the prompt cache lives (60 min; `LIMITCAST_CACHE_MINUTES`), the next message re-sends the whole context as new tokens. A UserPromptSubmit hook holds that first message once, when the context is 100k+ tokens, and says what it costs ("≈1.5% of your 5-hour window, ≈0.02% if the cache were still warm"). Send it again to go ahead, or `/compact` first. Background-agent reports and `/compact`/`/clear` are never held. Free installs record what it would have held.
+- **Subagent receipts and budgets:** a SubagentStop hook shows what each finished subagent cost ("that Explore subagent used ≈2.1% of your 5-hour window (34 calls, 180k new tokens)"). `limitcast budget subagents <percent>` makes the guard hold new subagents once they have used that share of the current window.
+- **Limit-change alert:** the daily rollup keeps a 3-day calibration per day and notifies you when the new tokens per 1% of your window moves by 15% or more against the weeks before ("Your Claude limit looks smaller: 1% now takes ~139k new tokens, down from ~167k"). `results` shows it for two weeks.
+- **Phone and webhook notifications:** `limitcast notify ntfy <topic>` and `limitcast notify webhook <url>` (Slack and Discord) send every notification there too, by a detached `curl`, so no hook waits on the network. Only the notification text is sent.
+
+Also: `results` has a "Subagents and cold caches" section; the weekly summary and the free weekly hint count cold-cache holds and budget holds. `install --guard` adds the two new hooks and `uninstall` removes them, leaving your own hooks alone; `limitcast doctor` tells Pro users who installed `--guard` before 0.11 to run `limitcast doctor --fix`.
+
 ## 0.10.1
 
 - `results`, `trim`, `report`, `saved` and `drift` print headings and highlights in bold in a terminal instead of showing raw Markdown (`##`, `**`). Piped output and `--out` files are still Markdown; `NO_COLOR` gives plain text without the markers.

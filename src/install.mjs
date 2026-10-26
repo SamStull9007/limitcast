@@ -97,15 +97,12 @@ export function install({ guard, alerts = false, path = settingsPath(), codexPat
   }
   if (guard) {
     upsertGuard(cfg, { matcher: 'Task|Agent', hooks: [{ type: 'command', command: `${self} guard`, timeout: 10 }] });
-    changes.push('added the Claude Code subagent guard');
+    upsertHook(cfg, 'UserPromptSubmit', { hooks: [{ type: 'command', command: `${self} prompt-check`, timeout: 10 }] }, isPromptCheck);
+    upsertHook(cfg, 'SubagentStop', { matcher: '', hooks: [{ type: 'command', command: `${self} subagent-receipt`, timeout: 15 }] }, isReceipt);
+    changes.push('added the Claude Code subagent guard, subagent receipts and the cold-cache warning');
   }
   if (alerts) {
-    cfg.hooks ??= {};
-    const list = (cfg.hooks.SessionStart ??= []);
-    const entry = { matcher: '', hooks: [{ type: 'command', command: `${self} drift --hook`, timeout: 15 }] };
-    const i = list.findIndex(isAlert);
-    if (i >= 0) list[i] = entry;
-    else list.push(entry);
+    upsertHook(cfg, 'SessionStart', { matcher: '', hooks: [{ type: 'command', command: `${self} drift --hook`, timeout: 15 }] }, isAlert);
     changes.push('added the starting-context alert');
   }
   writeSettings(path, cfg);
@@ -126,9 +123,20 @@ export function install({ guard, alerts = false, path = settingsPath(), codexPat
  * @param {any} entry
  */
 function upsertGuard(cfg, entry) {
+  upsertHook(cfg, 'PreToolUse', entry, isGuard);
+}
+
+/**
+ * Put limitcast's entry in one hook event: update it where it is, else append.
+ * @param {any} cfg
+ * @param {string} event
+ * @param {any} entry
+ * @param {(h:any)=>boolean} mine
+ */
+function upsertHook(cfg, event, entry, mine) {
   cfg.hooks ??= {};
-  const list = (cfg.hooks.PreToolUse ??= []);
-  const i = list.findIndex(isGuard);
+  const list = (cfg.hooks[event] ??= []);
+  const i = list.findIndex(mine);
   if (i >= 0) list[i] = entry;
   else list.push(entry);
 }
@@ -152,10 +160,15 @@ export function uninstall({ path = settingsPath(), codexPath = codexHooksPath() 
     cfg.hooks.PreToolUse = cfg.hooks.PreToolUse.filter((/** @type {any} */ h) => !isGuard(h));
     if (cfg.hooks.PreToolUse.length < before) changes.push('removed the Claude Code subagent guard');
   }
-  const alertsBefore = cfg.hooks?.SessionStart?.length ?? 0;
-  if (alertsBefore) {
-    cfg.hooks.SessionStart = cfg.hooks.SessionStart.filter((/** @type {any} */ h) => !isAlert(h));
-    if (cfg.hooks.SessionStart.length < alertsBefore) changes.push('removed the starting-context alert');
+  for (const [event, mine, what] of /** @type {[string, (h:any)=>boolean, string][]} */ ([
+    ['SessionStart', isAlert, 'the starting-context alert'],
+    ['UserPromptSubmit', isPromptCheck, 'the cold-cache warning'],
+    ['SubagentStop', isReceipt, 'subagent receipts'],
+  ])) {
+    const n = cfg.hooks?.[event]?.length ?? 0;
+    if (!n) continue;
+    cfg.hooks[event] = cfg.hooks[event].filter((/** @type {any} */ h) => !mine(h));
+    if (cfg.hooks[event].length < n) changes.push(`removed ${what}`);
   }
   writeSettings(path, cfg);
   if (existsSync(codexPath)) {
@@ -200,9 +213,12 @@ export function installedFeatures(path = settingsPath()) {
 /** @param {any} h */
 const isGuard = (h) =>
   (h.hooks ?? []).some((/** @type {any} */ x) => typeof x.command === 'string' && x.command.includes(MARK) && /\bguard\b/.test(x.command));
-/** @param {any} h */
-const isAlert = (h) =>
-  (h.hooks ?? []).some((/** @type {any} */ x) => typeof x.command === 'string' && x.command.includes(MARK) && /\bdrift --hook\b/.test(x.command));
+/** @param {RegExp} re @returns {(h:any)=>boolean} */
+const runs = (re) => (h) =>
+  (h.hooks ?? []).some((/** @type {any} */ x) => typeof x.command === 'string' && x.command.includes(MARK) && re.test(x.command));
+const isAlert = runs(/\bdrift --hook\b/);
+const isPromptCheck = runs(/\bprompt-check\b/);
+const isReceipt = runs(/\bsubagent-receipt\b/);
 
 /** @param {string} path */
 export function readSettings(path) {
@@ -294,11 +310,19 @@ export function doctor({ path = settingsPath(), codexPath = codexHooksPath(), sa
           : `Node path in settings is gone (${exePath}): run \`limitcast doctor --fix\``,
       });
   }
-  const guard = /** @type {any} */ (cfg.hooks?.PreToolUse ?? []).some(isGuard);
+  const hooks = /** @type {any} */ (cfg).hooks ?? {};
+  const guard = (hooks.PreToolUse ?? []).some(isGuard);
   out.push({
     ok: true,
     line: guard ? 'Claude Code subagent guard installed' : 'Claude Code subagent guard not installed (optional: `limitcast install --guard`)',
   });
+  // Installed with --guard before 0.11: the cold-cache warning and subagent receipts are missing until a re-install.
+  const newer = (hooks.UserPromptSubmit ?? []).some(isPromptCheck) && (hooks.SubagentStop ?? []).some(isReceipt);
+  if (guard && !newer)
+    out.push({
+      ok: !license?.ok,
+      line: 'Cold-cache warning and subagent receipts not installed yet: run `limitcast doctor --fix`',
+    });
   if (existsSync(codexPath)) out.push(codexGuardCheck(codexPath));
   out.push(
     samplesAgeMs === null
