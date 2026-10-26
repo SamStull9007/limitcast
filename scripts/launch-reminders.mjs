@@ -15,6 +15,10 @@ const between = (from, to) => today >= from && today <= to;
 
 /** One step per day; `open` is the plan-page section to open with it. */
 const steps = [
+  {
+    on: '2026-10-26',
+    text: 'Google Search Console and Bing Webmaster Tools: verify limitcast.dev, then submit https://limitcast.dev/sitemap.xml (5 minutes).',
+  },
   { on: '2026-10-27', text: 'Send the 4 creator messages (Sharbel, Povilas, Matt, Ian).', open: '#creators' },
   { on: '2026-10-28', text: 'GitHub: open the 2 awesome-list pull requests and comment on claude-code #24147.', open: '#ready' },
   { on: '2026-10-29', text: 'Hacker News: comment on 2–3 threads so your account is active before launch day.' },
