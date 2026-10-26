@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- New: `limitcast report --why` shows where your new tokens went (subagents, session starts, cache rebuilds after idle, tool results by tool, model output) and the largest single steps. It reads your Claude Code transcripts and takes about 40 seconds on a few GB of them.
+- `limitcast report` now ranks projects, models and sessions by new tokens (input, cache writes, output) instead of total tokens, so cached reads no longer decide the order.
+
 ## 0.11.5
 
 - The license is the Elastic License 2.0, as in 0.11.3. 0.11.4 was published with the wrong license text and is deprecated; use 0.11.5 or later. No code changes.
