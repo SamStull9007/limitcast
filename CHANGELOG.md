@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.2
+
+- When a Polar license stops working because the subscription ended or the key was revoked, `limitcast license` now says so and links to pricing, instead of "license not found at Polar".
+
 ## 0.11.1
 
 - Install docs: Homebrew 7+ refuses formulas from untrusted taps, so the README now says to run `brew trust samstull9007/limitcast` before `brew install`. No code changes.
