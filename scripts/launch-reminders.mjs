@@ -8,7 +8,7 @@ import { send } from '../src/notify.mjs';
 import { stateDir } from '../src/store.mjs';
 
 const PLAN = 'https://claude.ai/artifact/BQrhx5JhKBBXXvj7z98j54';
-const DEVTO_ARTICLES = [4918168];
+const DEVTO_ARTICLES = [4918168, 4918765, 4918772];
 const dry = process.argv.includes('--dry-run');
 const today = process.env.LIMITCAST_TODAY ?? new Date().toLocaleDateString('en-CA'); // local YYYY-MM-DD; the env var is for testing
 const between = (from, to) => today >= from && today <= to;
