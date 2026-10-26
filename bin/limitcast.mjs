@@ -33,6 +33,7 @@ import { loadBlocks, resultsReport, resultsShare, resultsStats, weeklyDue, weekl
 import { claudeSamples, readCodex } from '../src/sources.mjs';
 import { countInteractiveSince, latestInteractiveTranscript } from '../src/startup.mjs';
 import { KEEP_MS, load, record, stateDir } from '../src/store.mjs';
+import { forTerminal } from '../src/term.mjs';
 import { baseline, contributors, measuredSavings, shareSummary, startupReport, trimReport } from '../src/trim.mjs';
 import { claudeRoot, grokRoot, readUsage } from '../src/usage.mjs';
 import { dailyDue, foldEvents, loadValue, saveValue, scanSessions, valueSection, valueTotals } from '../src/value.mjs';
@@ -254,7 +255,7 @@ if (cmd === 'status') {
           ? `✓ Turned off ${changed.length} Codex MCP servers (enabled = false in ${codexConfigPath()}): ${changed.map((s) => s.name).join(', ')}\nTakes effect in your next Codex session. Undo: limitcast trim --codex --undo`
           : 'Nothing to turn off: every server that is on was used.',
       );
-    } else console.log(r.text);
+    } else console.log(forTerminal(r.text));
     process.exit(0);
   }
   /** @type {import('../src/trim.mjs').Activity} */
@@ -298,7 +299,7 @@ if (cmd === 'status') {
   if (out) {
     writeFileSync(out, `${text}\n`);
     console.log(`Wrote ${out}`);
-  } else console.log(text);
+  } else console.log(forTerminal(text));
 } else if (cmd === 'drift') {
   // SessionStart hook: tells the user (systemMessage, never the model's context) when starting context grew.
   const hook = args.includes('--hook');
@@ -335,7 +336,7 @@ if (cmd === 'status') {
       if (lines.length) console.log(JSON.stringify({ systemMessage: lines.join('\n') }));
     } else if (!latest) console.log('No interactive Claude Code session found yet.');
     else if (!d) console.log('Starting context recorded. limitcast will tell you when it grows.');
-    else console.log(d.alert ? driftMessage(d) : 'No meaningful change in your starting context since the last session.');
+    else console.log(d.alert ? forTerminal(driftMessage(d)) : 'No meaningful change in your starting context since the last session.');
   } catch (e) {
     if (!hook) throw e; // a hook must never break session start
   }
@@ -347,7 +348,9 @@ if (cmd === 'status') {
   const latest = await latestInteractiveTranscript(claudeRoot());
   if (latest) recordOverhead(snapshot(latest));
   const s = loadOverhead();
-  console.log(s ? savedSummary(s, await countInteractiveSince(claudeRoot(), s.first.at)) : 'Nothing measured yet. Run `limitcast trim` first.');
+  console.log(
+    forTerminal(s ? savedSummary(s, await countInteractiveSince(claudeRoot(), s.first.at)) : 'Nothing measured yet. Run `limitcast trim` first.'),
+  );
 } else if (cmd === 'results') {
   // Free shows limits reached, how far ahead limitcast warned, and the guard preview; Pro adds real blocks and savings.
   const pro = isPro();
@@ -400,7 +403,7 @@ if (cmd === 'status') {
       opener.on('error', () => {});
       opener.unref();
     }
-  } else console.log(resultsReport({ now, days: days(), samples, blocks, pro, saved, value: valueSection(totals, { now, pro }) }));
+  } else console.log(forTerminal(resultsReport({ now, days: days(), samples, blocks, pro, saved, value: valueSection(totals, { now, pro }) })));
 } else if (cmd === 'notify') {
   // Desktop notifications from the status line (Pro, opt-in).
   if (!isPro()) {

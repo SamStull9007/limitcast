@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.1
+
+- `results`, `trim`, `report`, `saved` and `drift` print headings and highlights in bold in a terminal instead of showing raw Markdown (`##`, `**`). Piped output and `--out` files are still Markdown; `NO_COLOR` gives plain text without the markers.
+
 ## 0.10.0
 
 Robustness:
