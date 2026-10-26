@@ -70,7 +70,8 @@ await section('Site (GoatCounter)', async () => {
   const token = secret('limitcast-goatcounter');
   if (!token) throw new Error('add a GoatCounter API token to the Keychain as "limitcast-goatcounter"');
   const auth = { authorization: `Bearer ${token}` };
-  const q = `start=${day(weekAgo)}&end=${day(now)}`;
+  // Full timestamps: date-only values cut off the current day.
+  const q = `start=${weekAgo.toISOString()}&end=${now.toISOString()}`;
   const total = await json(`https://limitcast.goatcounter.com/api/v0/stats/total?${q}`, auth);
   const refs = await json(`https://limitcast.goatcounter.com/api/v0/stats/toprefs?${q}&limit=8`, auth);
   const hits = await json(`https://limitcast.goatcounter.com/api/v0/stats/hits?${q}&limit=20`, auth);
