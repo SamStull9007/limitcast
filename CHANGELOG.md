@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.1
+
+- Install docs: Homebrew 7+ refuses formulas from untrusted taps, so the README now says to run `brew trust samstull9007/limitcast` before `brew install`. No code changes.
+
 ## 0.11.0
 
 Four new Pro features, each priced from your own measured tokens-per-percent:
