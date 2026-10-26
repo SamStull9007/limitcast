@@ -92,4 +92,4 @@ Free: runout forecast with NEAR warnings and the daily allowance, status-line re
 
 ## License
 
-[MIT](LICENSE). Versions up to 0.11.3 were released under the Elastic License 2.0 and stay under it.
+[Elastic License 2.0](LICENSE): free to use; you may not remove or circumvent the license-key checks or offer limitcast as a hosted service.
