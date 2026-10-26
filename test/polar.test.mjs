@@ -73,6 +73,7 @@ test('status: expiry, revocation and the 30-day offline grace period', () => {
   assert.equal(polarStatus(base, 29 * DAY).ok, true);
   assert.match(polarStatus(base, 31 * DAY).reason, /not checked with Polar for 30 days/);
   assert.match(polarStatus({ ...base, status: 'revoked' }, 1).reason, /revoked/);
+  assert.match(polarStatus({ ...base, status: 'not found' }, 1).reason, /no longer active.*Resubscribe/);
   assert.match(polarStatus({ ...base, expiresAt: new Date(DAY).toISOString() }, 2 * DAY).reason, /expired/);
   assert.equal(polarStatus({ ...base, expiresAt: new Date(400 * DAY).toISOString() }, 2 * DAY).claims.x, 400 * 86400);
   assert.equal(polarStatus(base, DAY).claims.p, 'polar');

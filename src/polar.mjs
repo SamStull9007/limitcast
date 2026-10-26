@@ -36,7 +36,11 @@ function savePolar(l) {
  * @returns {{ok:true, claims:{e:string, p:string, i:number, x:number}} | {ok:false, reason:string}}
  */
 export function polarStatus(l, now) {
-  if (l.status !== 'granted') return { ok: false, reason: `license ${l.status} at Polar` };
+  if (l.status !== 'granted')
+    return {
+      ok: false,
+      reason: `this key is no longer active at Polar (${l.status}): the subscription ended or the key was revoked. Resubscribe at https://limitcast.dev/#pricing`,
+    };
   const exp = l.expiresAt ? Date.parse(l.expiresAt) : 0;
   if (exp && exp < now) return { ok: false, reason: `expired ${new Date(exp).toISOString().slice(0, 10)}` };
   if (now - l.checkedAt > GRACE_MS)
