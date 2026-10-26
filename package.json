@@ -1,6 +1,6 @@
 {
   "name": "limitcast",
-  "version": "0.11.3",
+  "version": "0.11.4",
   "description": "Stretch your Claude Code plan: measure what every session loads before you type, cut what you never use, and stop runaway subagents before they burn your window.",
   "type": "module",
   "bin": {
@@ -36,5 +36,5 @@
     "url": "git+https://github.com/SamStull9007/limitcast.git"
   },
   "author": "Sam Stull",
-  "license": "Elastic-2.0"
+  "license": "MIT"
 }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.4
+
+- License changed from Elastic License 2.0 to MIT. Versions up to 0.11.3 stay under the Elastic License 2.0. No code changes.
+
 ## 0.11.3
 
 - If you wrap your own status line, the limitcast line (`5h 14% · 7d 18% · today 9% left`, plus any warning) now always shows on the line under it. Before, it appeared only when there was something to act on, so the runout forecast was invisible to anyone with their own status line.
