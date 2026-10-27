@@ -395,7 +395,9 @@ export function jobsReport(r, { since, now }) {
     '',
     `Every run loads your settings, plugins, hooks, MCP servers, skills and instruction files before it reads its prompt. "New tokens at start" is what counts against your limit; "starting prompt" is the whole context, cached or not. The smallest starting prompt among these jobs averages ${avg(lean.size, lean)} (${leanJob.replace(/\|/g, '/')}); the heaviest job's averages ${avg(ranked[0][1].size, ranked[0][1])}.`,
     '',
-    'A job that does not need all of that can leave it out: launch it with `claude -p --setting-sources "" --strict-mcp-config`, plus `--mcp-config` for the servers it uses. That also drops hooks, plugins and permission rules, so pass `--model` and `--permission-mode` and check the job still does what it should.',
+    'A job that does not need your hooks can leave them out and keep its claude.ai connectors: launch it with `claude -p --settings \'{"disableAllHooks": true}\'`. In a test on one scheduled job that cut each start from about 16k new tokens to about 5k.',
+    '',
+    'To leave out everything else too, add `--setting-sources "" --strict-mcp-config` (and `--mcp-config` for the servers it uses). That also drops the claude.ai connectors, plugins and permission rules, so a job that reads from one (HubSpot, Slack) cannot use it. Pass `--model` and `--permission-mode`, and check the job still does what it should.',
     '',
     '_Estimated from your local transcripts. A job is its first 45 characters of prompt, so runs of the same job group together._',
   );

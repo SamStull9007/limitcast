@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fix:** the advice at the end of `limitcast report --jobs` told you to launch a job with `--setting-sources "" --strict-mcp-config`, which also drops the claude.ai connectors, so a job that reads from HubSpot or Slack would stop working. It now leads with `--settings '{"disableAllHooks": true}'` (hooks off, connectors kept; about 16k new tokens down to about 5k per start in one test) and says plainly that the harder flags drop the connectors.
+
 - **Grok API-equivalent cost.** `limitcast report` prices Grok models at xAI list prices (docs.x.ai, 2026-10-26): grok-4.7 / 4.6 / 4.5 / 4.3 / 4.20 and grok-build-0.1, including the 200k-prompt long-context rate. Cache creation is billed as input (xAI lists cached reads, not a write multiplier). `grok-4.6-build` matches `grok-4.6`. Unknown models stay uncounted.
 - **Grok `subagent-model`.** `limitcast subagent-model explore grok-4.3` accepts grok ids, matches types case-insensitively, and writes `[subagents.models]` in `~/.grok/config.toml` (restart Grok). The guard rewrites `spawn_subagent` only when the spawn already has a `model` field: adding one fails Grok's schema and would deny the call.
 

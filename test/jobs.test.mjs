@@ -68,7 +68,11 @@ test('jobsReport groups runs by their first 45 characters, ranks by total start,
   assert.match(md, /\| \/p \| 1 \| 0 \| 9\.0k \| 0 \| 0% \| 0% \|/); // no prompt: the project names it; a start served from the cache is warm
   assert.ok(md.indexOf(BASE) < md.indexOf('Slack /'));
   assert.match(md, /smallest starting prompt among these jobs averages 9\.0k \(\/p\); the heaviest job's averages 35\.0k/);
-  assert.match(md, /--setting-sources ""/);
+  // The advice keeps connectors by default (hooks off) and warns that the harder flags drop them.
+  assert.match(md, /`claude -p --settings '\{"disableAllHooks": true\}'`/);
+  assert.match(md, /keep its claude\.ai connectors/);
+  assert.match(md, /--setting-sources "" --strict-mcp-config.*drops the claude\.ai connectors/);
+  assert.ok(md.indexOf('disableAllHooks') < md.indexOf('--strict-mcp-config')); // the safe flag comes first
   assert.match(jobsReport(attribute([]), { since: T0, now: T0 }), /No headless runs in this period\./);
 });
 
