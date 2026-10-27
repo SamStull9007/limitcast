@@ -13,7 +13,8 @@ import { jsonlFiles } from './usage.mjs';
 // call i-1: its own output (written to the cache) plus the tool results it asked for plus your messages. So the input
 // of call i, less call i-1's output, is attributed to the tools call i-1 used. Claude Code transcripts only.
 
-/** @typedef {{t:number, input:number, cacheWrite:number, cacheRead:number, output:number, tools:string[], side:boolean, entry:string, project:string, prompt?:string}} Call  prompt: first words of the session's first message, on its first main-thread call */
+/** @typedef {{t:number, input:number, cacheWrite:number, cacheRead:number, output:number, tools:string[], side:boolean, entry:string, project:string, model?:string, prompt?:string, agentType?:string}} Call
+ *  prompt: first words of the session's first message, on its first main-thread call; agentType: a subagent transcript's type, on its first call */
 
 const COLD_MIN = 100_000; // prompt size from which a missed cache is called a rebuild after idle
 const NO_TOOL = '(your messages)';
@@ -73,6 +74,7 @@ export async function readCalls(file) {
         side: !!ev.isSidechain,
         entry: String(ev.entrypoint ?? ''),
         project: ev.cwd ?? '',
+        model: String(m.model ?? ''),
       };
       calls.set(id === ':' ? `line${calls.size}` : id, c);
     }
@@ -83,6 +85,15 @@ export async function readCalls(file) {
   const all = [...calls.values()];
   const first = all.find((c) => !c.side);
   if (first && prompt) first.prompt = prompt;
+  // A subagent's transcript has its type in a file next to it: agent-<id>.jsonl and agent-<id>.meta.json.
+  if (all.length && file.includes('/subagents/')) {
+    try {
+      const type = JSON.parse(readFileSync(file.replace(/\.jsonl$/, '.meta.json'), 'utf8')).agentType;
+      if (typeof type === 'string') all[0].agentType = type;
+    } catch {
+      /* no meta file: the type stays unknown */
+    }
+  }
   return all;
 }
 
@@ -106,19 +117,40 @@ export function attribute(sessions, since = 0) {
     tools: new Map(),
     /** @type {{tokens:number, tool:string, t:number, project:string}[]} */
     steps: [],
-    /** @type {{tokens:number, size:number, calls:number, prompt:string, project:string, entry:string}[]} headless session starts: new tokens, and the whole starting prompt (cached or not) */
+    /** @type {{t:number, tokens:number, size:number, calls:number, prompt:string, project:string, entry:string}[]} headless session starts: when, new tokens, and the whole starting prompt (cached or not) */
     starts: [],
+    /** @type {Map<string, number>} every new token, by model */
+    byModel: new Map(),
+    /** @type {Map<string, {type:string, model:string, tokens:number, runs:number}>} subagent new tokens, by type and model */
+    subagentsBy: new Map(),
+  };
+  /** @param {Call} c */
+  const byModel = (c) => {
+    const k = c.model || '(unknown)';
+    r.byModel.set(k, (r.byModel.get(k) ?? 0) + c.input + c.cacheWrite + c.output);
   };
   for (const calls of sessions) {
     const main = calls.filter((c) => !c.side);
+    const type = calls.find((c) => c.agentType)?.agentType ?? '(unknown)';
+    const counted = new Set(); // one run per transcript for each type and model
     for (const c of calls.filter((x) => x.side && x.t >= since)) {
       const n = c.input + c.cacheWrite + c.output;
       r.total += n;
       r.subagents += n;
+      byModel(c);
+      const k = `${type}\0${c.model || '(unknown)'}`;
+      const e = r.subagentsBy.get(k) ?? { type, model: c.model || '(unknown)', tokens: 0, runs: 0 };
+      e.tokens += n;
+      if (!counted.has(k)) {
+        counted.add(k);
+        e.runs++;
+      }
+      r.subagentsBy.set(k, e);
     }
     main.forEach((c, i) => {
       if (c.t < since) return;
       r.total += c.input + c.cacheWrite + c.output;
+      byModel(c);
       r.output += c.output;
       if (i === 0) {
         const interactive = c.entry === 'cli';
@@ -126,6 +158,7 @@ export function attribute(sessions, since = 0) {
         r[interactive ? 'sessionsInteractive' : 'sessionsHeadless']++;
         if (!interactive) {
           r.starts.push({
+            t: c.t,
             tokens: c.input + c.cacheWrite,
             size: c.input + c.cacheWrite + c.cacheRead,
             calls: main.filter((x) => x.t >= since).length,
@@ -187,6 +220,29 @@ export function whyReport(r, { since, now, calib }) {
   for (const [k, n] of rows) lines.push(`| ${k} | ${fmt(n)} | ${share(n)}${windows(n)} |`);
   if (r.starts.length) lines.push('', 'Headless runs by job: `limitcast report --jobs`.');
 
+  if (r.subagentsBy.size) {
+    lines.push(
+      '',
+      '## Subagents by type and model',
+      '',
+      '| type | model | runs | new tokens | share of subagent tokens | per run |',
+      '|---|---|---:|---:|---:|---:|',
+    );
+    for (const e of [...r.subagentsBy.values()].sort((a, b) => b.tokens - a.tokens).slice(0, 8)) {
+      lines.push(
+        `| ${e.type} | ${e.model} | ${e.runs} | ${fmt(e.tokens)} | ${Math.round((e.tokens / r.subagents) * 100)}% | ${fmt(Math.round(e.tokens / e.runs))} |`,
+      );
+    }
+  }
+  if (r.byModel.size > 1) {
+    lines.push('', '## New tokens by model', '', '| model | new tokens | share |', '|---|---:|---:|');
+    for (const [k, n] of [...r.byModel].sort((a, b) => b[1] - a[1]).slice(0, 6)) lines.push(`| ${k} | ${fmt(n)} | ${share(n)} |`);
+    lines.push(
+      '',
+      'Models may count differently against your limit; limitcast cannot tell them apart, so these are token counts, not window shares.',
+    );
+  }
+
   if (r.tools.size) {
     lines.push('', '## Tool results by source', '', '| tool | new tokens | calls | per call |', '|---|---:|---:|---:|');
     for (const [k, e] of [...r.tools].sort((a, b) => b[1].tokens - a[1].tokens).slice(0, 8)) {
@@ -223,6 +279,68 @@ export function whyReport(r, { since, now, calib }) {
 }
 
 /**
+ * A start is cold when most of its prompt was new tokens, so the prompt cache did not have it.
+ * @param {{tokens:number, size:number}} s
+ */
+const isCold = (s) => s.tokens * 2 > s.size;
+
+const GAPS = /** @type {[string, number][]} */ ([
+  ['within 5 min', 5],
+  ['5 to 60 min', 60],
+  ['over 60 min', Number.POSITIVE_INFINITY],
+]);
+
+/**
+ * "Cold starts": how many runs started without the cache, what that cost beyond the same job's warm runs, and how
+ * the gap since the job's previous run decides it (so you can see how close together runs must be).
+ * @param {number} runs
+ * @param {{runs:number, tokens:number, size:number, cold:number, coldTokens:number, warmTokens:number, starts:{t:number, tokens:number, size:number}[]}[]} jobs
+ */
+function coldSection(runs, jobs) {
+  const cold = jobs.reduce((a, j) => a + j.cold, 0);
+  const lines = ['', '## Cold starts', ''];
+  // Only a job with both kinds of start can say what a cold one costs extra: cold runs times the difference.
+  const extra = jobs.reduce((a, j) => {
+    const warm = j.runs - j.cold;
+    return j.cold && warm ? a + j.cold * Math.max(0, j.coldTokens / j.cold - j.warmTokens / warm) : a;
+  }, 0);
+  const newTokens = jobs.reduce((a, j) => a + j.tokens, 0);
+  const prompts = jobs.reduce((a, j) => a + j.size, 0);
+  lines.push(
+    `${cold} of ${runs} runs (${Math.round((cold / runs) * 100)}%) started cold: more than half of their starting prompt was new tokens, not served from the prompt cache. ` +
+      `On average ${Math.round((1 - newTokens / prompts) * 100)}% of a starting prompt came from the cache.` +
+      (extra >= 1000 ? ` Against the warm runs of the same jobs, the cold ones cost about ${fmt(Math.round(extra))} more new tokens.` : ''),
+  );
+  const bucket = GAPS.map(() => ({ runs: 0, cold: 0 }));
+  for (const j of jobs) {
+    const sorted = [...j.starts].sort((a, b) => a.t - b.t);
+    for (let i = 1; i < sorted.length; i++) {
+      const gap = (sorted[i].t - sorted[i - 1].t) / 60_000;
+      if (!Number.isFinite(gap)) continue;
+      const b = bucket[GAPS.findIndex(([, max]) => gap <= max)];
+      b.runs++;
+      if (isCold(sorted[i])) b.cold++;
+    }
+  }
+  if (bucket.some((b) => b.runs)) {
+    lines.push('', '| time since the same job last ran | runs | started cold |', '|---|---:|---:|');
+    GAPS.forEach(([label], i) => {
+      if (bucket[i].runs) lines.push(`| ${label} | ${bucket[i].runs} | ${Math.round((bucket[i].cold / bucket[i].runs) * 100)}% |`);
+    });
+    const near = bucket[0];
+    if (near.runs >= 5) {
+      lines.push(
+        '',
+        near.cold / near.runs > 0.5
+          ? "Even runs within 5 minutes of the same job's previous run mostly started cold, so running them closer together is unlikely to help: the cached prompt is not being reused between runs. Look for anything near the start of a run's prompt that changes every time, such as hook output with a date or counts."
+          : "Runs close behind the same job's previous run mostly started warm, so running a job's work in batches lets later runs reuse the first one's cached prompt.",
+      );
+    }
+  }
+  return lines;
+}
+
+/**
  * Markdown: the scheduled (headless) jobs whose runs spent the most new tokens just starting. A run's start is what
  * it loads before reading its prompt: settings, plugins, hooks, MCP servers, skills and instruction files.
  * @param {ReturnType<typeof attribute>} r
@@ -237,15 +355,20 @@ export function jobsReport(r, { since, now }) {
     '',
   ];
   if (!r.starts.length) return [...lines, 'No headless runs in this period.'].join('\n');
-  /** @type {Map<string, {runs:number, tokens:number, size:number, calls:number}>} */
+  /** @type {Map<string, {runs:number, tokens:number, size:number, calls:number, cold:number, coldTokens:number, warmTokens:number, starts:typeof r.starts}>} */
   const jobs = new Map();
   for (const s of r.starts) {
     const k = s.prompt.slice(0, 45) || s.project || '(unknown)';
-    const j = jobs.get(k) ?? { runs: 0, tokens: 0, size: 0, calls: 0 };
+    const j = jobs.get(k) ?? { runs: 0, tokens: 0, size: 0, calls: 0, cold: 0, coldTokens: 0, warmTokens: 0, starts: [] };
     j.runs++;
     j.tokens += s.tokens;
     j.size += s.size;
     j.calls += s.calls;
+    if (isCold(s)) {
+      j.cold++;
+      j.coldTokens += s.tokens;
+    } else j.warmTokens += s.tokens;
+    j.starts.push(s);
     jobs.set(k, j);
   }
   const share = (/** @type {number} */ n) => `${Math.round((n / r.total) * 100)}%`;
@@ -254,16 +377,17 @@ export function jobsReport(r, { since, now }) {
     '',
   );
   lines.push(
-    '| job (first words of its prompt) | runs | new tokens at start | starting prompt | total start | share of all new | calls per run |',
-    '|---|---:|---:|---:|---:|---:|---:|',
+    '| job (first words of its prompt) | runs | new tokens at start | starting prompt | total start | share of all new | cold starts | calls per run |',
+    '|---|---:|---:|---:|---:|---:|---:|---:|',
   );
   const ranked = [...jobs].sort((a, b) => b[1].tokens - a[1].tokens);
   const avg = (/** @type {number} */ n, /** @type {{runs:number}} */ j) => fmt(Math.round(n / j.runs));
   for (const [k, j] of ranked.slice(0, 10)) {
     lines.push(
-      `| ${k.replace(/\|/g, '/')} | ${j.runs} | ${avg(j.tokens, j)} | ${avg(j.size, j)} | ${fmt(j.tokens)} | ${share(j.tokens)} | ${(j.calls / j.runs).toFixed(1)} |`,
+      `| ${k.replace(/\|/g, '/')} | ${j.runs} | ${avg(j.tokens, j)} | ${avg(j.size, j)} | ${fmt(j.tokens)} | ${share(j.tokens)} | ${Math.round((j.cold / j.runs) * 100)}% | ${(j.calls / j.runs).toFixed(1)} |`,
     );
   }
+  lines.push(...coldSection(r.starts.length, [...jobs.values()]));
   const [leanJob, lean] = [...jobs].sort((a, b) => a[1].size / a[1].runs - b[1].size / b[1].runs)[0];
   lines.push(
     '',
@@ -278,7 +402,7 @@ export function jobsReport(r, { since, now }) {
   return lines.join('\n');
 }
 
-const CACHE_VERSION = 2; // 2: the first call carries the session's first words
+const CACHE_VERSION = 3; // 2: the first call carries the session's first words; 3: model per call, subagent type
 const CACHE_KEEP_MS = 35 * 86400_000;
 const cacheFile = () => join(stateDir(), 'where-cache.json');
 

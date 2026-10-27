@@ -44,12 +44,12 @@ test('attribute collects headless starts only, with new tokens and the whole sta
     [call({ cacheWrite: 1000, cacheRead: 500, prompt: 'job A' }), call({ t: T0 + 1, cacheWrite: 10 })],
     [call({ cacheWrite: 7, entry: 'cli' })],
   ]);
-  assert.deepEqual(r.starts, [{ tokens: 1001, size: 1501, calls: 2, prompt: 'job A', project: '/p', entry: 'sdk-cli' }]);
+  assert.deepEqual(r.starts, [{ t: T0, tokens: 1001, size: 1501, calls: 2, prompt: 'job A', project: '/p', entry: 'sdk-cli' }]);
   assert.equal(r.sessionsInteractive, 1);
 });
 
 test('jobsReport groups runs by their first 45 characters, ranks by total start, escapes pipes', () => {
-  const start = (prompt, tokens, size, calls = 3) => ({ tokens, size, calls, prompt, project: '/p', entry: 'sdk-cli' });
+  const start = (prompt, tokens, size, calls = 3) => ({ t: T0, tokens, size, calls, prompt, project: '/p', entry: 'sdk-cli' });
   const r = attribute([]);
   r.total = 1_000_000;
   r.startHeadless = 62_000;
@@ -63,9 +63,9 @@ test('jobsReport groups runs by their first 45 characters, ranks by total start,
   assert.match(md, /^# limitcast: heaviest scheduled-job starts/);
   assert.match(md, /4 headless runs spent 62\.0k new tokens just starting: 6% of all new tokens\./);
   // Two runs of one job: 50k total, 25k average new at start, 35k average prompt, 4.0 calls; first in the table.
-  assert.match(md, new RegExp(`\\| ${BASE} \\| 2 \\| 25\\.0k \\| 35\\.0k \\| 50\\.0k \\| 5% \\| 4\\.0 \\|`));
-  assert.match(md, /\| Slack \/ canvas job \| 1 \| 12\.0k \| 14\.0k \| 12\.0k \| 1% \| 1\.0 \|/);
-  assert.match(md, /\| \/p \| 1 \| 0 \| 9\.0k \| 0 \|/); // no prompt: the project names it
+  assert.match(md, new RegExp(`\\| ${BASE} \\| 2 \\| 25\\.0k \\| 35\\.0k \\| 50\\.0k \\| 5% \\| 100% \\| 4\\.0 \\|`));
+  assert.match(md, /\| Slack \/ canvas job \| 1 \| 12\.0k \| 14\.0k \| 12\.0k \| 1% \| 100% \| 1\.0 \|/);
+  assert.match(md, /\| \/p \| 1 \| 0 \| 9\.0k \| 0 \| 0% \| 0% \|/); // no prompt: the project names it; a start served from the cache is warm
   assert.ok(md.indexOf(BASE) < md.indexOf('Slack /'));
   assert.match(md, /smallest starting prompt among these jobs averages 9\.0k \(\/p\); the heaviest job's averages 35\.0k/);
   assert.match(md, /--setting-sources ""/);
@@ -113,6 +113,6 @@ test('CLI: report --jobs is Pro and lists each job from the transcripts', () => 
   assert.equal(pro.status, 0, pro.stderr.toString());
   const out = pro.stdout.toString();
   assert.match(out, /3 headless runs spent 60\.0k new tokens just starting/);
-  assert.match(out, /\| Prepare the nightly brief for the team \| 2 \| 20\.0k \| 20\.0k \| 40\.0k \| \d+% \| 3\.0 \|/);
+  assert.match(out, /\| Prepare the nightly brief for the team \| 2 \| 20\.0k \| 20\.0k \| 40\.0k \| \d+% \| 100% \| 3\.0 \|/);
   assert.match(out, /\| Update the Slack canvas \| 1 \| 20\.0k \|/);
 });

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `limitcast report --why` now splits subagent tokens by type and model and shows all new tokens by model. A subagent's type comes from the `.meta.json` file next to its transcript. Models may count differently against your limit, so these are token counts, not window shares.
+- `limitcast report --jobs` adds a cold-starts column per job and a "Cold starts" section: how many runs started without the prompt cache, how much more that cost than the same job's warm runs, and whether starting a job's runs closer together would help.
+
 - New (Pro): `limitcast report --jobs` lists the scheduled (headless) jobs whose runs spend the most new tokens just starting. Runs of one job are grouped by the first 45 characters of their prompt, with runs, average new tokens at start, average starting prompt, share of all new tokens and calls per run, plus how to launch a job leaner. `report --why` points to it when there are headless runs.
 
 - New (Pro, `install --alerts`): a PostToolUse hook tells you, once per tool per session, when a single tool result is very large (about 20k tokens or more, from its size; `LIMITCAST_TOOL_TOKENS` changes the threshold), with what to ask for next time. It runs on Bash, Read, Grep, WebFetch and MCP tools, shows the message to you only, and adds about 30 ms per call. Re-run `limitcast install --alerts` (or `doctor --fix`) to add it to an existing install.
