@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- New: `limitcast report --why` shows where your new tokens went (subagents, session starts, cache rebuilds after idle, tool results by tool, model output) and the largest single steps. It reads your Claude Code transcripts and takes about 40 seconds on a few GB of them.
+- New: `limitcast report --why` shows where your new tokens went (subagents, session starts, cache rebuilds after idle, tool results by tool, model output) and the largest single steps. It reads your Claude Code transcripts once and caches them, so only the first run over a few GB is slow (3 to 40 seconds, depending on whether the disk cache is warm) and later runs only read what changed.
 - `limitcast report` now ranks projects, models and sessions by new tokens (input, cache writes, output) instead of total tokens, so cached reads no longer decide the order.
 
 ## 0.11.5

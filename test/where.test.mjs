@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { burnReport } from '../src/report.mjs';
-import { attribute, readCalls, whyReport } from '../src/where.mjs';
+import { attribute, readCalls, whyReport, whySessions } from '../src/where.mjs';
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
+process.env.LIMITCAST_STATE = tmp('lc-where-state-'); // the cache lives here, never in the real state dir
 const T0 = Date.parse('2026-10-24T12:00:00.000Z');
 const call = ({ mins = 0, input = 1, cw = 0, cr = 0, out = 0, tools = [], side = false, entry = 'cli' }) => ({
   t: T0 + mins * 60_000,
@@ -99,6 +100,26 @@ test('readCalls merges the repeated blocks of one message and collects tool name
   assert.deepEqual([calls[0].input, calls[0].cacheWrite, calls[0].cacheRead, calls[0].output], [2, 100, 5, 10]);
   assert.deepEqual(calls[0].tools, ['mcp:claude_ai_HubSpot', 'Bash']);
   assert.equal(calls[0].entry, 'cli');
+});
+
+test('whySessions reads a transcript once: unchanged files come from the cache, changed ones are read again', async () => {
+  const root = tmp('lc-where-root-');
+  mkdirSync(join(root, 'p'));
+  const f = join(root, 'p', 's.jsonl');
+  const ev = (out) =>
+    `${JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(), requestId: 'r', message: { id: 'm', usage: { input_tokens: 1, output_tokens: out } } })}\n`;
+  const MTIME = 1_700_000_000; // whole seconds, so the mtime survives a round trip exactly
+  writeFileSync(f, ev(11));
+  utimesSync(f, MTIME, MTIME);
+  const first = await whySessions(root, 0);
+  assert.equal(first[0][0].output, 11);
+  // Same size and mtime, different content: only a cache hit can still answer 11.
+  writeFileSync(f, ev(22));
+  utimesSync(f, MTIME, MTIME);
+  assert.equal((await whySessions(root, 0))[0][0].output, 11);
+  // A different size is a changed file: read again.
+  writeFileSync(f, ev(333));
+  assert.equal((await whySessions(root, 0))[0][0].output, 333);
 });
 
 test('whyReport lists categories, tools and steps; shows windows only with a calibration', () => {

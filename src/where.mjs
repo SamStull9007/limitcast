@@ -1,8 +1,10 @@
 // @ts-check
-import { createReadStream } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fmt } from './report.mjs';
+import { stateDir } from './store.mjs';
 import { jsonlFiles } from './usage.mjs';
 
 // `limitcast report --why` (Pro): where the new tokens went, which is what moves the limit (cached reads barely count).
@@ -167,15 +169,44 @@ export function whyReport(r, { since, now, calib }) {
   return lines.join('\n');
 }
 
+const CACHE_VERSION = 1;
+const CACHE_KEEP_MS = 35 * 86400_000;
+const cacheFile = () => join(stateDir(), 'where-cache.json');
+
+/** @returns {Record<string, {s:number, m:number, c:Call[]}>} the parsed calls of each transcript, by path */
+function loadCache() {
+  try {
+    const d = JSON.parse(readFileSync(cacheFile(), 'utf8'));
+    return d.v === CACHE_VERSION ? d.files : {};
+  } catch {
+    return {};
+  }
+}
+
 /**
- * Read every Claude Code transcript touched since `since` and sort its calls into categories.
- * shortcut: re-reads the transcripts on every run (no cache); add one like readUsage's if this gets slow.
+ * The calls of every Claude Code transcript touched since `since`. Parsed transcripts are cached by size and mtime,
+ * so only new or changed ones are read again (a few GB of transcripts took 3 to 43 seconds uncached).
  * @param {string} root
  * @param {number} since
+ * @returns {Promise<Call[][]>}
  */
 export async function whySessions(root, since) {
-  /** @type {Call[][]} */
-  const sessions = [];
-  for (const f of jsonlFiles(root, since, () => true)) sessions.push(await readCalls(f));
-  return sessions;
+  const cache = loadCache();
+  /** @type {typeof cache} */
+  const next = {};
+  const files = jsonlFiles(root, since, () => true);
+  for (const f of files) {
+    const st = statSync(f);
+    const hit = cache[f];
+    next[f] = hit && hit.s === st.size && hit.m === st.mtimeMs ? hit : { s: st.size, m: st.mtimeMs, c: await readCalls(f) };
+  }
+  // Keep entries this run didn't need (another period) while they are recent; drop the rest.
+  for (const [f, e] of Object.entries(cache)) if (!next[f] && e.m >= Date.now() - CACHE_KEEP_MS && existsSync(f)) next[f] = e;
+  try {
+    mkdirSync(stateDir(), { recursive: true });
+    writeFileSync(cacheFile(), JSON.stringify({ v: CACHE_VERSION, files: next }));
+  } catch {
+    /* a cache: the next run just reads the transcripts */
+  }
+  return files.map((f) => next[f].c);
 }
