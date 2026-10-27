@@ -8,7 +8,8 @@ import { stateDir } from './store.mjs';
 /**
  * One model response's token usage.
  * @typedef {{t:number, src:'claude'|'codex'|'grok', session:string, project:string, model:string, sidechain:boolean,
- *   input:number, cacheWrite:number, cacheRead:number, output:number, entry?:string}} Usage  entry: how Claude Code was launched (cli, sdk-py, ...)
+ *   input:number, cacheWrite:number, cacheWrite1h?:number, cacheRead:number, output:number, entry?:string}} Usage
+ *   entry: how Claude Code was launched (cli, sdk-py, ...); cacheWrite1h: the part of cacheWrite that used the 1-hour cache
  */
 
 export const claudeRoot = () => join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'projects');
@@ -46,6 +47,7 @@ export function claudeUsage(line, seen, session) {
     sidechain: !!ev.isSidechain,
     input: u.input_tokens ?? 0,
     cacheWrite: u.cache_creation_input_tokens ?? 0,
+    cacheWrite1h: u.cache_creation?.ephemeral_1h_input_tokens ?? 0,
     cacheRead: u.cache_read_input_tokens ?? 0,
     output: u.output_tokens ?? 0,
     ...(ev.entrypoint ? { entry: String(ev.entrypoint) } : {}),
@@ -232,12 +234,14 @@ export async function readUsage(since, roots = {}, activity) {
 }
 
 const CACHE_KEEP_MS = 35 * 86400_000;
+const USAGE_CACHE_VERSION = 2; // 2: records carry cacheWrite1h; an older cache is read again
 const usageCacheFile = () => join(stateDir(), 'usage-cache.json');
 
 /** @returns {Record<string, {s:number, m:number, u:Usage[], a?:{skills:string[], mcp:string[]}}>} */
 function loadUsageCache() {
   try {
-    return JSON.parse(readFileSync(usageCacheFile(), 'utf8'));
+    const d = JSON.parse(readFileSync(usageCacheFile(), 'utf8'));
+    return d.v === USAGE_CACHE_VERSION ? d.files : {};
   } catch {
     return {};
   }
@@ -247,7 +251,7 @@ function loadUsageCache() {
 function saveUsageCache(c) {
   try {
     mkdirSync(stateDir(), { recursive: true });
-    writeFileSync(usageCacheFile(), JSON.stringify(c));
+    writeFileSync(usageCacheFile(), JSON.stringify({ v: USAGE_CACHE_VERSION, files: c }));
   } catch {
     /* a cache: the next run just reads the transcripts */
   }

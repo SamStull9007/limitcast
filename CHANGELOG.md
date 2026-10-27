@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- New (Pro): `limitcast report` shows the API-equivalent cost of your tokens: a total line, and a dollar column by tool, day, project, model and session. It prices input, 5-minute and 1-hour cache writes, cache reads and output at the API's list prices for Claude 5.x models (Haiku is priced higher above 100k-token prompts); any other model is left out and counted as "not counted", never as $0. Add or change prices in `~/.local/state/limitcast/prices.json`.
 - New (Pro): `limitcast subagent-model <type> <model>` runs every new subagent of that type on the model you choose, for example `limitcast subagent-model Explore haiku`. A spawn that names its own model is left alone. While a window is tight, a type pinned to Opus is still moved to Sonnet. `limitcast subagent-model` lists what is pinned and the types you ran in the last 30 days, and `results` counts the subagents it moved (free installs see what it would have done).
 
 ## 0.12.0
