@@ -13,7 +13,7 @@ const dry = process.argv.includes('--dry-run');
 const today = process.env.LIMITCAST_TODAY ?? new Date().toLocaleDateString('en-CA'); // local YYYY-MM-DD; the env var is for testing
 const between = (from, to) => today >= from && today <= to;
 
-/** One step per day; `open` is the plan-page section to open with it. */
+/** The steps of each day; `open` is the plan-page section to open with it. */
 const steps = [
   {
     on: '2026-10-26',
@@ -46,8 +46,8 @@ try {
 const first = !existsSync(file);
 const messages = [];
 
-const step = steps.find((s) => s.on === today);
-if (step) messages.push(step.text);
+const todays = steps.filter((s) => s.on === today);
+for (const s of todays) messages.push(s.text);
 if (daily) messages.push(daily);
 
 const ids = (/** @type {any[]} */ list) => list.flatMap((c) => [c, ...ids(c.children ?? [])]);
@@ -81,5 +81,6 @@ if (dry) console.log(messages.length ? messages.join('\n') : '(nothing today)');
 else {
   writeFileSync(file, JSON.stringify(state));
   for (const m of messages) send(m);
-  if (step?.open) spawn('open', [PLAN + step.open], { detached: true, stdio: 'ignore' }).unref();
+  const open = todays.find((s) => s.open)?.open;
+  if (open) spawn('open', [PLAN + open], { detached: true, stdio: 'ignore' }).unref();
 }
