@@ -1053,7 +1053,9 @@ function applyMessage(latest, used) {
 }
 
 /** The keep-list servers a Codex or Grok `trim --apply` left on. @param {string[]} kept */
-const keptNote = (kept) => (kept.length ? `\nKept, as on your keep-list: ${kept.join(', ')}` : '');
+function keptNote(kept) {
+  return kept.length ? `\nKept, as on your keep-list: ${kept.join(', ')}` : '';
+}
 
 /** @param {ReturnType<typeof undoTrim>} e */
 function undoMessage(e) {

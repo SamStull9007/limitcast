@@ -58,7 +58,11 @@ export function bindingLine(rows, grokCap, clock) {
   // Room: the least-used window of another tool that is not itself in trouble.
   const room = rows.filter((f) => f.src !== first.src && f.verdict === 'OK').sort((a, b) => a.pct - b.pct)[0];
   const cap = room?.src === 'grok' ? grokCap?.[/** @type {'5h'} */ (room.win)] : undefined;
-  const left = !room ? '' : cap ? ` ${name(room)} still has $${Math.round((cap * (100 - room.pct)) / 100)}.` : ` ${name(room)} has ${Math.round(100 - room.pct)}% left.`;
+  const left = !room
+    ? ''
+    : cap
+      ? ` ${name(room)} still has $${Math.round((cap * (100 - room.pct)) / 100)}.`
+      : ` ${name(room)} has ${Math.round(100 - room.pct)}% left.`;
   return `You'll hit ${name(first)} first (${clock(first.wall ?? first.reset)}).${left}`;
 }
 

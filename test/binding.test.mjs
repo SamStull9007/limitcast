@@ -11,7 +11,12 @@ const clock = (ms) => `t${ms}`;
 const row = (src, win, pct, verdict, wall = null) => ({ src, win, pct, reset: 9, wall, verdict, rate: 1, today: null });
 
 test('binding line: names the window that runs out first and the roomiest other tool', () => {
-  const rows = [row('claude', '5h', 30, 'OK'), row('claude', '7d', 60, 'AT_RISK', 500), row('claude', '5h', 80, 'AT_RISK', 900), row('grok', '5h', 24, 'OK')];
+  const rows = [
+    row('claude', '5h', 30, 'OK'),
+    row('claude', '7d', 60, 'AT_RISK', 500),
+    row('claude', '5h', 80, 'AT_RISK', 900),
+    row('grok', '5h', 24, 'OK'),
+  ];
   assert.equal(bindingLine(rows, { '5h': 50 }, clock), "You'll hit Claude 7d first (t500). Grok 5h still has $38.");
   assert.equal(bindingLine(rows, null, clock), "You'll hit Claude 7d first (t500). Grok 5h has 76% left."); // no dollar cap known: a percent
   assert.equal(bindingLine([row('claude', '7d', 60, 'AT_RISK', 500)], null, clock), "You'll hit Claude 7d first (t500).");

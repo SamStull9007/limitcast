@@ -63,7 +63,10 @@ test('keep-list: Codex and Grok reports leave kept servers out of what --apply t
 
 test('CLI: trim keep adds, lists and removes names, and the list persists', () => {
   const env = { ...process.env, LIMITCAST_STATE: tmp('lc-keep-cli-') };
-  const run = (...a) => spawnSync('node', [bin, 'trim', 'keep', ...a], { env }).stdout.toString().trim();
+  const run = (...a) =>
+    spawnSync('node', [bin, 'trim', 'keep', ...a], { env })
+      .stdout.toString()
+      .trim();
   assert.match(run(), /Nothing on the keep-list/);
   assert.equal(run('ego-browser,figma'), 'Kept by `trim --apply`: ego-browser, figma');
   assert.equal(run('ego-browser'), 'Kept by `trim --apply`: ego-browser, figma'); // no duplicates
