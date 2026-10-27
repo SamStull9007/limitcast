@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeF
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { grokDoctor, grokHome, grokPresent, installGrok, uninstallGrok } from './grok.mjs';
 import { stateDir } from './store.mjs';
 
 export const settingsPath = () => join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'settings.json');
@@ -77,9 +78,16 @@ export function launcherTargets(path) {
  * Idempotent; backs up settings.json first; remembers the original status line for uninstall.
  * With `guard`, Codex gets the guard too when ~/.codex exists. With `alerts`, a SessionStart hook tells you
  * (never the model) when your starting context grew.
- * @param {{guard:boolean, alerts?:boolean, path?:string, codexPath?:string, self?:string}} opts
+ * @param {{guard:boolean, alerts?:boolean, path?:string, codexPath?:string, grokDir?:string, self?:string}} opts
  */
-export function install({ guard, alerts = false, path = settingsPath(), codexPath = codexHooksPath(), self = selfCommand() }) {
+export function install({
+  guard,
+  alerts = false,
+  path = settingsPath(),
+  codexPath = codexHooksPath(),
+  grokDir = grokHome(),
+  self = selfCommand(),
+}) {
   const cfg = readSettings(path);
   backup(path);
   const changes = [];
@@ -120,6 +128,7 @@ export function install({ guard, alerts = false, path = settingsPath(), codexPat
     writeSettings(codexPath, codex);
     changes.push('added the Codex subagent guard (Codex runs it after you trust it: start Codex and approve the new hook)');
   }
+  if (grokPresent(grokDir)) changes.push(...installGrok({ guard, self, home: grokDir }));
   return changes;
 }
 
@@ -150,9 +159,9 @@ function upsertHook(cfg, event, entry, mine) {
 
 /**
  * Remove everything limitcast added and restore the original status line.
- * @param {{path?:string, codexPath?:string}} [opts]
+ * @param {{path?:string, codexPath?:string, grokDir?:string}} [opts]
  */
-export function uninstall({ path = settingsPath(), codexPath = codexHooksPath() } = {}) {
+export function uninstall({ path = settingsPath(), codexPath = codexHooksPath(), grokDir = grokHome() } = {}) {
   const cfg = readSettings(path);
   backup(path);
   const changes = [];
@@ -189,6 +198,7 @@ export function uninstall({ path = settingsPath(), codexPath = codexHooksPath() 
       changes.push('removed the Codex subagent guard');
     }
   }
+  changes.push(...uninstallGrok({ home: grokDir }));
   return changes;
 }
 
@@ -333,6 +343,7 @@ export function doctor({ path = settingsPath(), codexPath = codexHooksPath(), sa
       line: 'Cold-cache warning and subagent receipts not installed yet: run `limitcast doctor --fix`',
     });
   if (existsSync(codexPath)) out.push(codexGuardCheck(codexPath));
+  out.push(...grokDoctor());
   out.push(
     samplesAgeMs === null
       ? { ok: false, line: 'No Claude limit readings yet: send a message in Claude Code' }

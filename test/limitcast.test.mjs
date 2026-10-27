@@ -9,6 +9,7 @@ import { guardDecision, runGuard } from '../src/guard.mjs';
 import { claudeSamples, codexSamples, readCodex } from '../src/sources.mjs';
 
 const H = 3600_000;
+process.env.GROK_HOME = mkdtempSync(join(tmpdir(), 'lc-main-grok-'));
 const now = Date.UTC(2026, 9, 24, 18, 0);
 const reset = now / 1000 + 2 * 3600; // resets in 2h
 const s = (minsAgo, pct, r = reset) => ({ t: now - minsAgo * 60_000, src: 'claude', win: '5h', pct, reset: r });
@@ -175,7 +176,7 @@ test('guard blocks subagents only when a Claude window runs out soon', () => {
 
 test('CLI end to end: statusline records, wraps the command; guard is Pro-gated and denies with Pro', async () => {
   const state = mkdtempSync(join(tmpdir(), 'lc-state-'));
-  const env = { ...process.env, LIMITCAST_STATE: state, CODEX_HOME: join(state, 'nocodex') };
+  const env = { ...process.env, LIMITCAST_STATE: state, CODEX_HOME: join(state, 'nocodex'), GROK_HOME: join(state, 'nogrok') };
   const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
   const r = Math.floor(Date.now() / 1000) + 3600;
   const feed = (pct) => JSON.stringify({ rate_limits: { five_hour: { used_percentage: pct, resets_at: r } } });

@@ -10,6 +10,7 @@ import { attribute, whyReport } from '../src/where.mjs';
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
 process.env.LIMITCAST_STATE = tmp('lc-tool-state-'); // the once-per-session record lives here, never in the real state dir
+process.env.GROK_HOME = tmp('lc-tool-grok-'); // install() wraps Grok when ~/.grok exists
 
 test('resultTokens estimates from size and works on any result shape', () => {
   assert.equal(resultTokens('x'.repeat(4000)), 1000);

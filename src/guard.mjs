@@ -1,5 +1,6 @@
 // @ts-check
 import { forecastAll, oneClaudeAccount } from './forecast.mjs';
+import { grokSamples } from './grok.mjs';
 import { logBlock } from './results.mjs';
 import { readCodex } from './sources.mjs';
 import { KEEP_MS, load } from './store.mjs';
@@ -24,7 +25,7 @@ export function spawnSource(tool) {
  * Reason to block a new subagent, or null to allow it.
  * Blocks only when the spawning tool's own window is on pace to run out before it resets within `minutes`.
  * A window already at 100% is left to the tool: with extra usage enabled, work continues past it.
- * Grok keeps no limit readings on disk, so its spawns are never blocked.
+ * Grok keeps no % used on disk; `grokSamples` only exist after `limitcast budget grok`, so without a cap its spawns are never blocked.
  * @param {string} tool
  * @param {ReturnType<typeof import('./forecast.mjs').forecastAll>} forecasts
  * @param {number} now epoch ms
@@ -63,13 +64,15 @@ function blockingForecast(tool, forecasts, now, minutes) {
 export async function runGuard(hook, now, minutes, { preview = false } = {}) {
   const tool = String(hook?.tool_name ?? hook?.toolName ?? hook?.tool ?? '');
   const src = spawnSource(tool);
-  // Codex: only the last two hours of rollouts, so the hook stays fast; Grok has no readings to judge by.
+  // Codex: only the last two hours of rollouts, so the hook stays fast. Grok: spend vs the user's dollar cap.
   const samples =
     src === 'claude'
       ? oneClaudeAccount(load(now - KEEP_MS), hook.session_id ?? hook.sessionId)
       : src === 'codex'
         ? await readCodex(now - 2 * 3600_000)
-        : [];
+        : src === 'grok'
+          ? grokSamples(now)
+          : [];
   const forecasts = forecastAll(samples, now);
   const reason = guardDecision(tool, forecasts, now, minutes);
   const f = reason ? blockingForecast(tool, forecasts, now, minutes) : undefined;

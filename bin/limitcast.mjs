@@ -18,6 +18,21 @@ import {
 } from '../src/apply.mjs';
 import { calibrate, limitChange, limitChangeMessage, windowPct } from '../src/calibrate.mjs';
 import { applyCodexTrim, codexConfigPath, codexServers, codexStartup, codexTrimReport, codexUsedServers, undoCodexTrim } from '../src/codex.mjs';
+import {
+  applyGrokTrim,
+  getGrokBudget,
+  grokConfigPath,
+  grokPresent,
+  grokSamples,
+  grokServers,
+  grokSessionLine,
+  grokSpend,
+  grokStartup,
+  grokTrimReport,
+  grokUsedServers,
+  setGrokBudget,
+  undoGrokTrim,
+} from '../src/grok.mjs';
 import { coldCost, coldMessage, firstWarning } from '../src/cold.mjs';
 import { forecastAll, oneClaudeAccount, resetTarget } from '../src/forecast.mjs';
 import { formatChecks } from '../src/formats.mjs';
@@ -43,9 +58,9 @@ import { dailyDue, foldEvents, loadValue, saveValue, scanSessions, valueSection,
 import { attribute, jobsReport, whyReport, whySessions } from '../src/where.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
-const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
+const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok plans
 
-  limitcast install [--guard]        wire limitcast into Claude Code (and, with --guard, Codex); backs up settings
+  limitcast install [--guard]        wire limitcast into Claude Code (and, with --guard, Codex and Grok); backs up settings
                                      (without Pro the guard is a preview: it records what it would block, never blocks)
   limitcast uninstall                remove it and restore your original status line
   limitcast doctor [--fix]           check the setup (--fix: re-install with this Node, e.g. after a Node upgrade)
@@ -53,6 +68,7 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
   limitcast status [--json]         used, burn rate, runout time, reset, and today's share of each weekly window
   limitcast trim [--share]           tokens every session loads before you type, and how much you never use
   limitcast trim --codex             the same for Codex: AGENTS.md size and MCP servers you haven't used
+  limitcast trim --grok              the same for Grok: system prompt size and MCP servers you haven't used
   limitcast results [--days N]       limits you reached, how far ahead limitcast warned, what the guard blocked
                     [--share]        totals only, safe to post
   limitcast license                  show the license and re-check it with Polar
@@ -62,6 +78,7 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
                                              (--share: totals only, no names, safe to post)
   limitcast trim --apply / --undo            hide those skills and turn off those MCP servers (backed up, reversible)
   limitcast trim --codex --apply / --undo    turn off unused Codex MCP servers (enabled = false; reversible)
+  limitcast trim --grok --apply / --undo     turn off unused Grok MCP servers (enabled = false; reversible)
   limitcast saved                            tokens saved since limitcast first measured you
   limitcast install --guard                  block new subagents when a window is on pace to run out, and run
                                              them on Sonnet while a window is tight (NEAR or AT_RISK); show what
@@ -69,6 +86,8 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
                                              one starts; hold the first message after the prompt
                                              cache expired (idle over 60 min, LIMITCAST_CACHE_MINUTES) and say what it costs
   limitcast budget subagents <percent>|off   hold new subagents once they used that much of the 5-hour window
+  limitcast budget grok <usd>|off            Grok 5-hour dollar cap (Grok stores spend, not a % used; the guard
+                                             needs this cap to block spawn_subagent). Optional: budget grok 7d <usd>
   limitcast install --alerts                 tell you when your starting context grows, plus a weekly summary, and
                                              when one tool result is very large (about 20k tokens), with what to ask for instead
   limitcast notify on|off|test               desktop notification when a window turns NEAR, AT_RISK or HIT, or resets,
@@ -85,7 +104,7 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
   limitcast activate <license-key>           unlock Pro on this computer (online once; then a weekly check, offline up to 30 days)
   limitcast deactivate                       free this computer's activation to use the key elsewhere
 
-  Used by Claude Code and Codex (set up by install)
+  Used by Claude Code, Codex and Grok (set up by install)
   limitcast statusline [-- <cmd...>]  record limit readings, then run your status-line command
   limitcast guard                     PreToolUse hook (Pro)
   limitcast prompt-check              UserPromptSubmit hook: the cold-cache warning (Pro)
@@ -107,25 +126,30 @@ if (['report', 'trim', 'saved', 'results', 'drift', 'doctor', 'license'].include
 }
 
 if (cmd === 'status') {
-  const rows = forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS))]), now);
+  const rows = forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS)), ...grokSamples(now)]), now);
   if (args.includes('--json')) console.log(JSON.stringify(rows, null, 2));
   else {
-    console.log(rows.length ? table(rows) : 'No data yet. Run `limitcast install`, then send a message in Claude Code, or run Codex once.');
+    console.log(rows.length ? table(rows) : 'No data yet. Run `limitcast install`, then send a message in Claude Code, Codex or Grok.');
     // Pro: the other Claude accounts limitcast has current readings for (the table shows the latest one).
     if (isPro())
       for (const a of accountForecasts(load(now - KEEP_MS), now).slice(1))
         console.log(
           `other Claude account (last used ${clock(a.lastSeen)}): ${a.rows.map((f) => `${f.win} ${f.verdict === 'RESET' ? 0 : Math.round(f.pct)}%${f.verdict === 'OK' || f.verdict === 'RESET' ? '' : ` ${f.verdict}`}`).join(' · ')}`,
         );
-    if (existsSync(grokRoot())) console.log('grok: no limit readings (Grok keeps none on disk); its token use is in `limitcast report`');
+    const spend = grokSpendLine(now);
+    if (spend) console.log(spend);
+    else if (existsSync(grokRoot()) && !rows.some((f) => f.src === 'grok'))
+      console.log('grok: spent $0 in the current windows. Set a cap to forecast runout: limitcast budget grok <usd>');
   }
 } else if (cmd === 'statusline') {
   const input = readStdin();
   let sid;
+  /** @type {any} */
+  let feed;
   /** @type {string[]} */
   const hints = [];
   try {
-    const feed = JSON.parse(input);
+    feed = JSON.parse(input);
     sid = feed?.session_id;
     record(claudeSamples(feed, now));
     saveFeedShape(feed);
@@ -137,11 +161,15 @@ if (cmd === 'status') {
     if (health) hints.push(health);
     if (isPro()) {
       const samples = load(now - KEEP_MS);
-      if (notifyEnabled()) notifyChanges(forecastAll(oneClaudeAccount(samples, sid), now), clock);
+      if (notifyEnabled()) notifyChanges(forecastAll(oneClaudeAccount([...samples, ...grokSamples(now)], sid), now), clock);
       const room = headroom(samples, sid, now);
       if (room) hints.push(room);
-      const ctx = typeof feed?.transcript_path === 'string' ? compactHint(lastCallTokens(feed.transcript_path)) : null;
-      if (ctx) hints.push(ctx);
+      const ctxPct = Number(feed?.context_window?.used_percentage);
+      if (Number.isFinite(ctxPct) && ctxPct >= 80) hints.push(`${ctxPct}% ctx`);
+      else if (typeof feed?.transcript_path === 'string') {
+        const ctx = compactHint(lastCallTokens(feed.transcript_path));
+        if (ctx) hints.push(ctx);
+      }
     } else {
       const week = freeWeeklyHint(now);
       if (week) hints.push(week);
@@ -151,21 +179,26 @@ if (cmd === 'status') {
   }
   const sep = args.indexOf('--');
   const wrapped = sep >= 0 ? args.slice(sep + 1) : [];
+  const grokOwn = grokSessionLine(feed);
+  let line = 'waiting for data';
+  try {
+    // Grok spend/forecast stays on the Grok status line. Claude's feed has rate_limits; mixing the two
+    // would print grok $ on Claude Code and break "waiting for data" when there are no Claude readings.
+    const grokExtra = grokOwn ? grokSamples(now) : [];
+    line = statusBits(forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...grokExtra], sid), now), grokOwn ? grokSpendLine(now) : '', hints);
+  } catch {
+    /* never break the status line */
+  }
   if (wrapped.length) {
     const r = spawnSync(wrapped[0], wrapped.slice(1), { input, stdio: ['pipe', 'pipe', 'inherit'] });
     // Your status line stays as it was; limitcast adds its own line under it (status scripts often printf without a newline).
     const yours = r.stdout?.toString() ?? '';
     process.stdout.write(yours && !yours.endsWith('\n') ? `${yours}\n` : yours);
-    let line = 'waiting for data';
-    try {
-      line = oneLine(forecastAll(oneClaudeAccount(load(now - KEEP_MS), sid), now)).replace(/^limitcast: /, '');
-    } catch {
-      /* never break the status line */
-    }
-    console.log(`limitcast: ${[line, ...hints].join(' · ')}`);
+    console.log(`limitcast: ${line}`);
     process.exit(r.status ?? 1);
   }
-  console.log([oneLine(forecastAll(oneClaudeAccount(load(now - KEEP_MS), sid), now)), ...hints].join(' · '));
+  if (grokOwn) console.log(grokOwn);
+  console.log(`limitcast: ${line}`);
 } else if (cmd === 'guard') {
   // Blocking is Pro; without a valid license the guard only previews (logs what Pro would block) and allows everything.
   if (process.env.LIMITCAST_ALLOW === '1') process.exit(0);
@@ -262,12 +295,33 @@ if (cmd === 'status') {
   }
 } else if (cmd === 'budget') {
   if (!isPro()) {
-    console.log(`Subagent budgets are part of limitcast Pro: ${UPGRADE_URL}`);
+    console.log(`Budgets are part of limitcast Pro: ${UPGRADE_URL}`);
     process.exit(2);
+  }
+  if (args[0] === 'grok') {
+    const win = args[1] === '7d' || args[1] === '5h' ? args[1] : '5h';
+    const value = args[1] === '7d' || args[1] === '5h' ? args[2] : args[1];
+    if (value !== undefined && value !== 'off' && !(Number(value) > 0)) {
+      console.log('Usage: limitcast budget grok <usd>|off    (5-hour dollar cap)\n       limitcast budget grok 7d <usd>|off');
+      process.exit(1);
+    }
+    if (value !== undefined) setGrokBudget(value === 'off' ? null : Number(value), win);
+    const budget = getGrokBudget();
+    const spend = grokSpend(now);
+    const cap = budget?.[win];
+    const used = spend?.[win];
+    console.log(
+      cap
+        ? `Grok ${win} budget: $${cap}. Spent this window: $${(used ?? 0).toFixed(2)} (${Math.min(100, ((used ?? 0) / cap) * 100).toFixed(0)}%). The guard holds new spawn_subagent calls when this window is on pace to run out.`
+        : `No Grok ${win} dollar cap. Spent this window: $${(used ?? 0).toFixed(2)}. Grok stores spend, not a % used; set a cap so the guard can block: limitcast budget grok 5`,
+    );
+    if (getGrokBudget() && !installedFeatures().guard && grokPresent())
+      console.log('The budget is enforced by the guard: limitcast install --guard (then restart Grok).');
+    process.exit(0);
   }
   const value = args[1];
   if (args[0] !== 'subagents' || (value !== undefined && value !== 'off' && !(Number(value) > 0 && Number(value) <= 100))) {
-    console.log('Usage: limitcast budget subagents <percent of the 5-hour window, 1-100>|off');
+    console.log('Usage: limitcast budget subagents <percent of the 5-hour window, 1-100>|off\n       limitcast budget grok <usd>|off');
     process.exit(1);
   }
   if (value !== undefined) setBudget(value === 'off' ? null : Number(value));
@@ -295,7 +349,9 @@ if (cmd === 'status') {
   }
   if (wantAlerts && !isPro()) console.log(`Alerts and the weekly summary are part of limitcast Pro (${UPGRADE_URL}). Skipping them.`);
   for (const c of install({ guard: wantGuard, alerts: wantAlerts && isPro() })) console.log(`✓ ${c}`);
-  console.log('Restart Claude Code and Codex to load it. Then: limitcast doctor');
+  console.log('Restart Claude Code, Codex and Grok to load it. Then: limitcast doctor');
+  if (wantGuard && grokPresent() && !getGrokBudget())
+    console.log('Grok stores spend, not a % used. Set a 5-hour dollar cap so the guard can block: limitcast budget grok <usd>');
   // First run: show the number that matters right away, and what comes next.
   try {
     const latest = await latestInteractiveTranscript(claudeRoot());
@@ -332,7 +388,7 @@ if (cmd === 'status') {
     if (!f.statusLine) console.log('limitcast is not installed. Run `limitcast install` first.');
     else {
       for (const c of install({ guard: f.guard && isPro(), alerts: f.alerts && isPro() })) console.log(`✓ ${c}`);
-      console.log('Restart Claude Code to load it. Codex asks you to approve the guard again: start Codex and accept it.');
+      console.log('Restart Claude Code, Codex and Grok to load it. Codex asks you to approve the guard again: start Codex and accept it.');
     }
   }
   const checks = await healthChecks();
@@ -372,6 +428,39 @@ if (cmd === 'status') {
       console.log(
         changed.length
           ? `✓ Turned off ${changed.length} Codex MCP servers (enabled = false in ${codexConfigPath()}): ${changed.map((s) => s.name).join(', ')}\nTakes effect in your next Codex session. Undo: limitcast trim --codex --undo`
+          : 'Nothing to turn off: every server that is on was used.',
+      );
+    } else console.log(forTerminal(r.text));
+    process.exit(0);
+  }
+  if (cmd === 'trim' && args.includes('--grok')) {
+    if ((args.includes('--apply') || args.includes('--undo')) && !pro) {
+      console.log(`\`limitcast trim --grok --apply\` is part of limitcast Pro: ${UPGRADE_URL}`);
+      process.exit(2);
+    }
+    if (args.includes('--undo')) {
+      const e = undoGrokTrim();
+      console.log(
+        e ? `✓ Back to how they were: ${e.servers.map((s) => s.name).join(', ')}. Takes effect in your next Grok session.` : 'Nothing to undo.',
+      );
+      process.exit(0);
+    }
+    if (!existsSync(grokConfigPath())) {
+      console.log(`No Grok setup found (${grokConfigPath()}). Set GROK_HOME if Grok keeps it elsewhere.`);
+      process.exit(0);
+    }
+    const r = grokTrimReport({
+      servers: grokServers(),
+      used: grokUsedServers(since),
+      startup: grokStartup(),
+      days: days(),
+      pro,
+    });
+    if (args.includes('--apply')) {
+      const changed = applyGrokTrim(r.unused);
+      console.log(
+        changed.length
+          ? `✓ Turned off ${changed.length} Grok MCP servers (enabled = false in ${grokConfigPath()}): ${changed.map((s) => s.name).join(', ')}\nTakes effect in your next Grok session. Undo: limitcast trim --grok --undo`
           : 'Nothing to turn off: every server that is on was used.',
       );
     } else console.log(forTerminal(r.text));
@@ -883,16 +972,35 @@ function table(rows) {
 
 /** @param {ReturnType<typeof forecastAll>} rows */
 function oneLine(rows) {
-  return (
-    rows
-      .filter((f) => f.src === 'claude')
-      .map(
-        (f) =>
-          `${f.win} ${Math.round(f.pct)}%${f.verdict === 'AT_RISK' ? ` ⚠ out ${clock(f.wall)}` : f.verdict === 'NEAR' ? ' ⚠ near limit' : f.verdict === 'HIT' ? ' ⛔' : ''}` +
-          (f.today && f.verdict !== 'HIT' ? ` · today ${todayLabel(f.today)}` : ''),
-      )
-      .join(' · ') || 'limitcast: waiting for data'
+  const bits = rows.map(
+    (f) =>
+      `${f.src === 'claude' ? '' : `${f.src} `}${f.win} ${Math.round(f.pct)}%${f.verdict === 'AT_RISK' ? ` ⚠ out ${clock(f.wall)}` : f.verdict === 'NEAR' ? ' ⚠ near limit' : f.verdict === 'HIT' ? ' ⛔' : ''}` +
+      (f.today && f.verdict !== 'HIT' ? ` · today ${todayLabel(f.today)}` : ''),
   );
+  return bits.join(' · ') || 'limitcast: waiting for data';
+}
+
+/**
+ * Status-line body: forecasts, Grok spend when there is no cap, then hints. No "waiting for data" when spend is known.
+ * @param {ReturnType<typeof forecastAll>} rows
+ * @param {string} spend
+ * @param {string[]} hints
+ */
+function statusBits(rows, spend, hints) {
+  const core = oneLine(rows);
+  const parts = [];
+  if (core !== 'limitcast: waiting for data') parts.push(core.replace(/^limitcast: /, ''));
+  if (spend) parts.push(spend);
+  parts.push(...hints);
+  return parts.join(' · ') || 'waiting for data';
+}
+
+/** Grok spend line when no dollar cap is set (a cap becomes a forecast row instead). */
+function grokSpendLine(t) {
+  if (getGrokBudget()) return '';
+  const s = grokSpend(t);
+  if (!s) return '';
+  return `grok 5h $${s['5h'].toFixed(2)} · 7d $${s['7d'].toFixed(2)}`;
 }
 
 /**

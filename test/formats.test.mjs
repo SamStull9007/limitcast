@@ -20,6 +20,7 @@ const FX = fileURLToPath(new URL('./fixtures/', import.meta.url));
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
 process.env.LIMITCAST_STATE = tmp('lc-fmt-state-');
 process.env.CLAUDE_CONFIG_DIR = join(FX, 'claude-config-unused');
+process.env.GROK_HOME = tmp('lc-fmt-grok-'); // install() wraps Grok when ~/.grok exists; formatChecks overrides this
 const roots = { claude: join(FX, 'claude'), codex: join(FX, 'codex', 'sessions'), grok: join(FX, 'grok', 'sessions') };
 
 test('contract: usage from all three tools', async () => {

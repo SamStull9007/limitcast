@@ -13,6 +13,7 @@ import { resultsReport, resultsStats } from '../src/results.mjs';
 import { budgetSpent, receiptMessage, subagentUsage, windowStart } from '../src/subagents.mjs';
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
+process.env.GROK_HOME = tmp('lc-pro11-grok-'); // install() wraps Grok when ~/.grok exists
 const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
 const M = 60_000;
 const D = 86400_000;

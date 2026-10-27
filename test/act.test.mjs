@@ -14,6 +14,7 @@ import { resultsStats } from '../src/results.mjs';
 
 const H = 3600_000;
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
+process.env.GROK_HOME = tmp('lc-act-grok-'); // statusline CLI must not read the real ~/.grok spend
 
 test('daily allowance: an even share of what was left this morning, minus what today used', () => {
   const now = new Date(2026, 9, 27, 15, 0).getTime(); // Tue 15:00 local
@@ -138,7 +139,7 @@ test('model guard: a tight window runs new Claude subagents on Sonnet; free only
 
 test('CLI: Pro gates and the status line hint when wrapping a status line', () => {
   const state = tmp('lc-act-');
-  const env = { ...process.env, LIMITCAST_STATE: state, CODEX_HOME: join(state, 'nocodex') };
+  const env = { ...process.env, LIMITCAST_STATE: state, CODEX_HOME: join(state, 'nocodex'), GROK_HOME: join(state, 'nogrok') };
   delete env.LIMITCAST_LICENSE;
   const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
   for (const args of [

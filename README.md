@@ -28,10 +28,10 @@ Every Claude Code session starts at 102.7k tokens before your first message.
 
 | | Claude Code | Codex | Grok |
 |---|---|---|---|
-| Limit forecast (`status`) | ✓ status-line feed | ✓ session logs | no: Grok keeps no limit readings on disk |
-| Subagent guard | ✓ `Task`/`Agent` | ✓ `spawn_agent` | never blocks (nothing to judge by) |
+| Limit forecast (`status`) | ✓ status-line feed | ✓ session logs | spend from `usage.json`; % / runout after `limitcast budget grok <usd>` |
+| Subagent guard | ✓ `Task`/`Agent` | ✓ `spawn_agent` | ✓ `spawn_subagent` (blocks once a dollar cap is set) |
 | Token report (`report`) | ✓ | ✓ | ✓ per-turn ledger |
-| Trim advisor (`trim`) | ✓ | - | - |
+| Trim advisor (`trim`) | ✓ | `--codex` | `--grok` |
 
 Requires Node 20+ on macOS or Linux.
 
@@ -51,7 +51,7 @@ In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast
 
 **Codex:** forecasts and reports need no setup (`~/.codex/sessions`, or `$CODEX_HOME/sessions`). With `--guard`, `install` also appends the guard to `~/.codex/hooks.json`, after your existing hooks so the ones you've already trusted keep their trust. Codex runs a new hook only once you approve it: start Codex and accept it. `limitcast doctor` shows whether it's trusted.
 
-**Grok:** `report` reads each session's `~/.grok/sessions/*/*/usage.json`. Grok also loads hooks from `~/.claude/settings.json`; the guard's `Task|Agent` matcher doesn't match Grok's `spawn_subagent`, and the guard never blocks Grok spawns anyway.
+**Grok:** `report` reads each session's `~/.grok/sessions/*/*/usage.json`. `install` wraps `[ui.status_line]` in `~/.grok/config.toml` (session model, context % and cost on one line; the limitcast forecast under it). `--guard` writes `~/.grok/hooks/limitcast.json` matching `spawn_subagent`. Grok stores spend, not a % used, so the status line shows `grok 5h $X · 7d $Y` until you set a dollar cap (`limitcast budget grok <usd>`); then `status` forecasts that window and the guard blocks new spawns when it is on pace to run out. Restart Grok to load the status line and hook.
 
 ## Commands
 
@@ -59,17 +59,19 @@ In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast
 |---|---|
 | `limitcast status [--json]` | Used, burn rate, runout time and reset for each window, and today's share of each weekly one. **Pro** also lists your other Claude accounts |
 | `limitcast trim --codex [--apply / --undo]` | Codex: AGENTS.md size and MCP servers in `~/.codex/config.toml` you haven't used. **Pro** names them and turns them off (`enabled = false`; `--undo` restores the file exactly) |
+| `limitcast trim --grok [--apply / --undo]` | Grok: system prompt and tool-definition size, and MCP servers in `~/.grok/config.toml` you haven't used. **Pro** names them and turns them off (`enabled = false`; `--undo` restores the file exactly) |
 | `limitcast notify on/off/test` | **Pro.** A desktop notification when a Claude window turns NEAR, AT_RISK or HIT, and when it resets after a HIT. On macOS they come from a tiny limitcast notifier app, listed as "limitcast" in System Settings → Notifications |
 | `limitcast notify ntfy <topic or https URL>` / `notify webhook <https URL>` | **Pro.** Also send every notification to your phone through [ntfy](https://ntfy.sh) (install the app, subscribe to the topic) or to a Slack or Discord incoming webhook. `off` removes it. Sent in the background, so no hook waits on the network |
 | `limitcast budget subagents <percent>` / `off` | **Pro.** Once subagents have used that share of the current 5-hour window, the guard holds new ones until it resets. Priced from your own readings (needs about a day of use first) |
+| `limitcast budget grok <usd>` / `off` / `7d <usd>` | **Pro.** Dollar cap for Grok's aligned 5-hour window (optional 7-day cap). Turns Grok spend into a % so `status` can forecast runout and the guard can block `spawn_subagent` |
 | `limitcast after-reset [--src claude/codex] [--window 5h/7d] [--detach] -- <cmd>` | **Pro.** Wait for the window to reset, then run the command |
 | `limitcast results --html [--out FILE]` | **Pro.** Results, current windows and the burn report on one page, opened in your browser |
 | `limitcast install [--guard] [--alerts]` / `uninstall` | Wire into Claude Code / restore your settings |
 | `limitcast doctor [--fix]` | Check the setup, data freshness, license, and that Claude Code, Codex and Grok logs are still in a format limitcast reads. Also runs daily in the background and flags problems in the status line. `--fix` re-installs with the current Node (after a Node upgrade) |
 | `limitcast trial` | Pro free for 7 days on this computer, no card, once |
 | `limitcast report [--days N] [--out FILE]` | **Pro.** Tokens by tool, day, project, model and session; subagent share |
-| `limitcast report --why [--days N]` | **Pro.** Where your new tokens went: subagents, session starts, cache rebuilds after idle, tool results by tool, model output, the largest single steps, subagents by type and model, and new tokens by model (Claude Code only) |
-| `limitcast report --jobs [--days N]` | **Pro.** The scheduled (headless) jobs that spend the most tokens just starting: runs, average start, share of all new tokens, how many starts were cold (not served from the prompt cache) and what decides that, and how to launch a job leaner (Claude Code only) |
+| `limitcast report --why [--days N]` | **Pro.** Where your new tokens went: subagents, session starts, cache rebuilds after idle, tool results by tool, model output, and the largest single steps (Claude Code only) |
+| `limitcast report --jobs [--days N]` | **Pro.** The scheduled (headless) jobs that spend the most tokens just starting: runs, average start, share of all new tokens, and how to launch a job leaner (Claude Code only) |
 | `limitcast trim [--days N] [--share]` | Measured starting context of your latest session and how much you haven't used in N days (default 7). **Pro** names each item. `--share`: totals only, no names, safe to post |
 | `limitcast saved` | **Pro.** How much the part of your starting context you control has dropped since limitcast first measured it, times your sessions since |
 | `limitcast trim --apply` / `--undo` | **Pro.** Hide the unused skills from the model and turn off the unused MCP servers for that project, through Claude Code's own settings. Backed up; `--undo` reverses exactly what it changed |
