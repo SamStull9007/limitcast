@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.1
 
 - **Fix:** the advice at the end of `limitcast report --jobs` told you to launch a job with `--setting-sources "" --strict-mcp-config`, which also drops the claude.ai connectors, so a job that reads from HubSpot or Slack would stop working. It now leads with `--settings '{"disableAllHooks": true}'` (hooks off, connectors kept; about 16k new tokens down to about 5k per start in one test) and says plainly that the harder flags drop the connectors.
 
