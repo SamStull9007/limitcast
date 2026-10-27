@@ -69,6 +69,7 @@ In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast
 | `limitcast trial` | Pro free for 7 days on this computer, no card, once |
 | `limitcast report [--days N] [--out FILE]` | **Pro.** Tokens by tool, day, project, model and session; subagent share |
 | `limitcast report --why [--days N]` | **Pro.** Where your new tokens went: subagents, session starts, cache rebuilds after idle, tool results by tool, model output, and the largest single steps (Claude Code only) |
+| `limitcast report --jobs [--days N]` | **Pro.** The scheduled (headless) jobs that spend the most tokens just starting: runs, average start, share of all new tokens, and how to launch a job leaner (Claude Code only) |
 | `limitcast trim [--days N] [--share]` | Measured starting context of your latest session and how much you haven't used in N days (default 7). **Pro** names each item. `--share`: totals only, no names, safe to post |
 | `limitcast saved` | **Pro.** How much the part of your starting context you control has dropped since limitcast first measured it, times your sessions since |
 | `limitcast trim --apply` / `--undo` | **Pro.** Hide the unused skills from the model and turn off the unused MCP servers for that project, through Claude Code's own settings. Backed up; `--undo` reverses exactly what it changed |

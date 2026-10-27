@@ -13,22 +13,42 @@ import { jsonlFiles } from './usage.mjs';
 // call i-1: its own output (written to the cache) plus the tool results it asked for plus your messages. So the input
 // of call i, less call i-1's output, is attributed to the tools call i-1 used. Claude Code transcripts only.
 
-/** @typedef {{t:number, input:number, cacheWrite:number, cacheRead:number, output:number, tools:string[], side:boolean, entry:string, project:string}} Call */
+/** @typedef {{t:number, input:number, cacheWrite:number, cacheRead:number, output:number, tools:string[], side:boolean, entry:string, project:string, prompt?:string}} Call  prompt: first words of the session's first message, on its first main-thread call */
 
 const COLD_MIN = 100_000; // prompt size from which a missed cache is called a rebuild after idle
 const NO_TOOL = '(your messages)';
 const TIP_MIN_PER_CALL = 2000; // a tip is only worth showing for a source whose results average at least this many new tokens
 
 /**
+ * The first words of a transcript line that is the session's own first message, else undefined.
+ * @param {string} line
+ */
+function firstPrompt(line) {
+  try {
+    const ev = JSON.parse(line);
+    if (ev?.type !== 'user' || ev.isSidechain || ev.isMeta) return undefined;
+    const c = ev.message?.content;
+    const text = typeof c === 'string' ? c : Array.isArray(c) ? c.map((b) => (b?.type === 'text' ? b.text : '')).join(' ') : '';
+    return text.replace(/\s+/g, ' ').trim().slice(0, 80) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * One transcript's model calls in order. A call's usage repeats on every content block it streamed, so calls are
- * merged by message id and their tool_use names collected.
+ * merged by message id and their tool_use names collected. The first main-thread call also carries the session's
+ * first words (`prompt`), which tell a scheduled job's runs apart.
  * @param {string} file
  * @returns {Promise<Call[]>}
  */
 export async function readCalls(file) {
   /** @type {Map<string, Call>} */
   const calls = new Map();
+  /** @type {string|undefined} */
+  let prompt;
   for await (const line of createInterface({ input: createReadStream(file), crlfDelay: Infinity })) {
+    if (prompt === undefined && line.includes('"type":"user"')) prompt = firstPrompt(line);
     if (!line.includes('"usage"')) continue;
     let ev;
     try {
@@ -60,7 +80,10 @@ export async function readCalls(file) {
       if (b?.type === 'tool_use' && typeof b.name === 'string' && !c.tools.includes(toolKey(b.name))) c.tools.push(toolKey(b.name));
     }
   }
-  return [...calls.values()];
+  const all = [...calls.values()];
+  const first = all.find((c) => !c.side);
+  if (first && prompt) first.prompt = prompt;
+  return all;
 }
 
 /**
@@ -83,6 +106,8 @@ export function attribute(sessions, since = 0) {
     tools: new Map(),
     /** @type {{tokens:number, tool:string, t:number, project:string}[]} */
     steps: [],
+    /** @type {{tokens:number, size:number, calls:number, prompt:string, project:string, entry:string}[]} headless session starts: new tokens, and the whole starting prompt (cached or not) */
+    starts: [],
   };
   for (const calls of sessions) {
     const main = calls.filter((c) => !c.side);
@@ -99,6 +124,16 @@ export function attribute(sessions, since = 0) {
         const interactive = c.entry === 'cli';
         r[interactive ? 'startInteractive' : 'startHeadless'] += c.input + c.cacheWrite;
         r[interactive ? 'sessionsInteractive' : 'sessionsHeadless']++;
+        if (!interactive) {
+          r.starts.push({
+            tokens: c.input + c.cacheWrite,
+            size: c.input + c.cacheWrite + c.cacheRead,
+            calls: main.filter((x) => x.t >= since).length,
+            prompt: c.prompt ?? '',
+            project: c.project,
+            entry: c.entry,
+          });
+        }
         return;
       }
       const p = main[i - 1];
@@ -150,6 +185,7 @@ export function whyReport(r, { since, now, calib }) {
   lines.push(`${fmt(r.total)} new tokens (input, cache writes and output; cached reads are left out).`, '');
   lines.push(`| where | new tokens | share${calib ? ' | 5-hour windows' : ''} |`, `|---|---:|---:${calib ? '|---:' : ''}|`);
   for (const [k, n] of rows) lines.push(`| ${k} | ${fmt(n)} | ${share(n)}${windows(n)} |`);
+  if (r.starts.length) lines.push('', 'Headless runs by job: `limitcast report --jobs`.');
 
   if (r.tools.size) {
     lines.push('', '## Tool results by source', '', '| tool | new tokens | calls | per call |', '|---|---:|---:|---:|');
@@ -186,7 +222,63 @@ export function whyReport(r, { since, now, calib }) {
   return lines.join('\n');
 }
 
-const CACHE_VERSION = 1;
+/**
+ * Markdown: the scheduled (headless) jobs whose runs spent the most new tokens just starting. A run's start is what
+ * it loads before reading its prompt: settings, plugins, hooks, MCP servers, skills and instruction files.
+ * @param {ReturnType<typeof attribute>} r
+ * @param {{since:number, now:number}} o
+ */
+export function jobsReport(r, { since, now }) {
+  const day = (/** @type {number} */ t) => new Date(t).toLocaleDateString('sv-SE');
+  const lines = [
+    '# limitcast: heaviest scheduled-job starts',
+    '',
+    `${day(since)} to ${day(now)} · headless runs (started by scripts and tools, not from the CLI) · Claude Code only`,
+    '',
+  ];
+  if (!r.starts.length) return [...lines, 'No headless runs in this period.'].join('\n');
+  /** @type {Map<string, {runs:number, tokens:number, size:number, calls:number}>} */
+  const jobs = new Map();
+  for (const s of r.starts) {
+    const k = s.prompt.slice(0, 45) || s.project || '(unknown)';
+    const j = jobs.get(k) ?? { runs: 0, tokens: 0, size: 0, calls: 0 };
+    j.runs++;
+    j.tokens += s.tokens;
+    j.size += s.size;
+    j.calls += s.calls;
+    jobs.set(k, j);
+  }
+  const share = (/** @type {number} */ n) => `${Math.round((n / r.total) * 100)}%`;
+  lines.push(
+    `${r.starts.length} headless runs spent ${fmt(r.startHeadless)} new tokens just starting: ${share(r.startHeadless)} of all new tokens.`,
+    '',
+  );
+  lines.push(
+    '| job (first words of its prompt) | runs | new tokens at start | starting prompt | total start | share of all new | calls per run |',
+    '|---|---:|---:|---:|---:|---:|---:|',
+  );
+  const ranked = [...jobs].sort((a, b) => b[1].tokens - a[1].tokens);
+  const avg = (/** @type {number} */ n, /** @type {{runs:number}} */ j) => fmt(Math.round(n / j.runs));
+  for (const [k, j] of ranked.slice(0, 10)) {
+    lines.push(
+      `| ${k.replace(/\|/g, '/')} | ${j.runs} | ${avg(j.tokens, j)} | ${avg(j.size, j)} | ${fmt(j.tokens)} | ${share(j.tokens)} | ${(j.calls / j.runs).toFixed(1)} |`,
+    );
+  }
+  const [leanJob, lean] = [...jobs].sort((a, b) => a[1].size / a[1].runs - b[1].size / b[1].runs)[0];
+  lines.push(
+    '',
+    '## Why a run starts this big',
+    '',
+    `Every run loads your settings, plugins, hooks, MCP servers, skills and instruction files before it reads its prompt. "New tokens at start" is what counts against your limit; "starting prompt" is the whole context, cached or not. The smallest starting prompt among these jobs averages ${avg(lean.size, lean)} (${leanJob.replace(/\|/g, '/')}); the heaviest job's averages ${avg(ranked[0][1].size, ranked[0][1])}.`,
+    '',
+    'A job that does not need all of that can leave it out: launch it with `claude -p --setting-sources "" --strict-mcp-config`, plus `--mcp-config` for the servers it uses. That also drops hooks, plugins and permission rules, so pass `--model` and `--permission-mode` and check the job still does what it should.',
+    '',
+    '_Estimated from your local transcripts. A job is its first 45 characters of prompt, so runs of the same job group together._',
+  );
+  return lines.join('\n');
+}
+
+const CACHE_VERSION = 2; // 2: the first call carries the session's first words
 const CACHE_KEEP_MS = 35 * 86400_000;
 const cacheFile = () => join(stateDir(), 'where-cache.json');
 

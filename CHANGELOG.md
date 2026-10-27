@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- New (Pro): `limitcast report --jobs` lists the scheduled (headless) jobs whose runs spend the most new tokens just starting. Runs of one job are grouped by the first 45 characters of their prompt, with runs, average new tokens at start, average starting prompt, share of all new tokens and calls per run, plus how to launch a job leaner. `report --why` points to it when there are headless runs.
+
 - New (Pro, `install --alerts`): a PostToolUse hook tells you, once per tool per session, when a single tool result is very large (about 20k tokens or more, from its size; `LIMITCAST_TOOL_TOKENS` changes the threshold), with what to ask for next time. It runs on Bash, Read, Grep, WebFetch and MCP tools, shows the message to you only, and adds about 30 ms per call. Re-run `limitcast install --alerts` (or `doctor --fix`) to add it to an existing install.
 - `limitcast report --why` ends with "What to try": how many single steps added over 20k new tokens and what share of tool-result tokens they were, and advice for the sources whose results average 2k+ new tokens.
 

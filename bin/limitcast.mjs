@@ -40,7 +40,7 @@ import { firstFlag, toolKey, toolNotice } from '../src/toolcheck.mjs';
 import { baseline, contributors, measuredSavings, shareSummary, startupReport, trimReport } from '../src/trim.mjs';
 import { claudeRoot, grokRoot, readUsage } from '../src/usage.mjs';
 import { dailyDue, foldEvents, loadValue, saveValue, scanSessions, valueSection, valueTotals } from '../src/value.mjs';
-import { attribute, whyReport, whySessions } from '../src/where.mjs';
+import { attribute, jobsReport, whyReport, whySessions } from '../src/where.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
@@ -80,6 +80,7 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
   limitcast results --html [--out FILE]      results, current windows and the burn report as one page
   limitcast report [--days N] [--out FILE]   tokens by tool, day, project, model and session
   limitcast report --why [--days N]          where the new tokens went: subagents, session starts, cache rebuilds, tool results
+  limitcast report --jobs [--days N]         the scheduled (headless) jobs that spend the most tokens just starting
   (status line, Pro: points to another account with room, and suggests /compact past ~150k tokens a call)
   limitcast activate <license-key>           unlock Pro on this computer (online once; then a weekly check, offline up to 30 days)
   limitcast deactivate                       free this computer's activation to use the key elsewhere
@@ -378,11 +379,14 @@ if (cmd === 'status') {
   }
   /** @type {import('../src/trim.mjs').Activity} */
   const used = { skills: new Set(), mcp: new Set() };
+  const jobs = cmd === 'report' && args.includes('--jobs');
   const why = cmd === 'report' && args.includes('--why');
-  const usage = why ? [] : await readUsage(since, {}, cmd === 'trim' ? used : undefined);
+  const usage = why || jobs ? [] : await readUsage(since, {}, cmd === 'trim' ? used : undefined);
   let text;
-  if (why) text = whyReport(attribute(await whySessions(claudeRoot(), since), since), { since, now, calib: loadValue().calib });
-  else if (cmd === 'report') text = burnReport(usage, { since, now });
+  if (why || jobs) {
+    const r = attribute(await whySessions(claudeRoot(), since), since);
+    text = jobs ? jobsReport(r, { since, now }) : whyReport(r, { since, now, calib: loadValue().calib });
+  } else if (cmd === 'report') text = burnReport(usage, { since, now });
   else {
     // Prefer the measured starting context of the latest interactive session; older Claude Code logs fall back to estimates.
     const latest = await latestInteractiveTranscript(claudeRoot());
