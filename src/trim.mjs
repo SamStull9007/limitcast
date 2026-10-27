@@ -148,14 +148,14 @@ export function trimReport(base, c, used, days) {
   const lines = ['# limitcast trim', ''];
   if (base) {
     lines.push(
-      `Every Claude Code session starts at **${fmt(base.median)} tokens** before your first message (median of ${base.sessions} interactive sessions, max ${fmt(base.max)}).`,
+      `Your recorded Claude Code sessions start at **${fmt(base.median)} tokens** before your first message (median of ${base.sessions} interactive sessions, max ${fmt(base.max)}).`,
       'That context is re-sent on every turn and to every subagent, so every token you cut stretches your limit windows.',
       '',
     );
   } else lines.push('No interactive Claude Code sessions in the period yet.', '');
 
   const pct = base && s.skillTokens ? ` (${Math.round((s.skillTokens / base.median) * 100)}% of your fixed overhead)` : '';
-  lines.push(`## Measured savings: ~${fmt(s.skillTokens)} tokens per session${pct}`, '');
+  lines.push(`## Estimated removable context: ~${fmt(s.skillTokens)} tokens per session${pct}`, '');
   if (s.unusedSkills.length) {
     const names = s.unusedSkills.slice(0, 12).map((k) => k.name);
     lines.push(
@@ -235,13 +235,18 @@ export function startupReport(base, b, used, days, keep = []) {
   const lines = ['# limitcast trim', ''];
   if (base) {
     lines.push(
-      `Every Claude Code session starts at **${fmt(median)} tokens** before your first message (median of ${base.sessions} interactive sessions).`,
+      `Your recorded Claude Code sessions start at **${fmt(median)} tokens** before your first message (median of ${base.sessions} interactive sessions).`,
       'That context is re-sent on every turn and to every subagent, so every token you cut stretches your limit windows.',
       '',
     );
   }
   const pct = median ? ` (${Math.round((s.tokens / median) * 100)}% of your starting context)` : '';
-  lines.push(`## Measured savings: ~${fmt(s.tokens)} tokens per session${pct}`, '', `From things you haven't used in the last ${days} days:`, '');
+  lines.push(
+    `## Estimated removable context: ~${fmt(s.tokens)} tokens per session${pct}`,
+    '',
+    `From things you haven't used in the last ${days} days:`,
+    '',
+  );
   if (s.unusedMcp.length) {
     const total = s.unusedMcp.reduce((a, m) => a + m.chars, 0);
     lines.push(

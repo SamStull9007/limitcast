@@ -43,9 +43,11 @@ import {
 import { runGuard } from '../src/guard.mjs';
 import { accountForecasts, bindingLine, compactHint, headroom, lastCall, lastCallTokens } from '../src/hints.mjs';
 import { htmlPage } from '../src/html.mjs';
+import { insightsReport, insightsShare, periodInsights } from '../src/insights.mjs';
 import { doctor, install, installedFeatures, readSettings, settingsPath, uninstall } from '../src/install.mjs';
 import { activate, currentLicense, isPro, startTrial, trialStatus, UPGRADE_URL } from '../src/license.mjs';
 import { buildNotifierApp, loadChannels, notifierApp, notifyChanges, notifyEnabled, send, setChannel, setNotify } from '../src/notify.mjs';
+import { onboardingReport } from '../src/onboarding.mjs';
 import { driftMessage, loadOverhead, recordOverhead, savedPerSession, savedSummary, snapshot } from '../src/overhead.mjs';
 import { advise, getPlan, loadPeaks, PLANS, planPrices, planStats, recordPeaks, setPlan } from '../src/plan.mjs';
 import { activatePolar, deactivatePolar, refreshDue, refreshPolar } from '../src/polar.mjs';
@@ -74,12 +76,13 @@ import { forTerminal } from '../src/term.mjs';
 import { firstFlag, toolKey, toolNotice } from '../src/toolcheck.mjs';
 import { baseline, contributors, measuredSavings, shareSummary, startupReport, trimReport } from '../src/trim.mjs';
 import { claudeRoot, grokRoot, readUsage } from '../src/usage.mjs';
-import { dailyDue, foldEvents, loadValue, saveValue, scanSessions, valueSection, valueTotals } from '../src/value.mjs';
+import { dailyDue, foldEvents, loadValue, saveValue, scanSessions, valuePeriod, valueSection, valueTotals } from '../src/value.mjs';
 import { attribute, jobsReport, whyReport, whySessions } from '../src/where.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok plans
 
+  limitcast onboard                 read-only setup checks and a guided first useful result
   limitcast install [--guard]        wire limitcast into Claude Code (and, with --guard, Codex and Grok); backs up settings
                                      (without Pro the guard is a preview: it records what it would block, never blocks)
   limitcast uninstall                remove it and restore your original status line
@@ -144,7 +147,14 @@ const flag = (/** @type {string} */ name) => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
 };
-const days = () => Math.max(1, Number(flag('--days') ?? 7));
+const days = () => {
+  const n = Number(flag('--days') ?? 7);
+  if (!Number.isFinite(n) || n <= 0 || !Number.isFinite(new Date(now - n * 86400_000).getTime())) {
+    console.error('--days must be a finite positive number.');
+    process.exit(1);
+  }
+  return Math.max(1, n);
+};
 
 // Interactive commands re-check a Polar license weekly; hooks (statusline, guard, drift --hook) never touch the network.
 if (['report', 'trim', 'saved', 'results', 'drift', 'doctor', 'license'].includes(cmd) && !args.includes('--hook')) {
@@ -504,6 +514,30 @@ if (cmd === 'status') {
 } else if (cmd === 'uninstall') {
   const changes = uninstall();
   console.log(changes.length ? changes.map((c) => `✓ ${c}`).join('\n') : 'Nothing to remove.');
+} else if (cmd === 'onboard') {
+  const checks = await healthChecks();
+  let features = { statusLine: false, guard: false, alerts: false };
+  try {
+    features = installedFeatures();
+  } catch {
+    /* invalid settings are explained by doctor */
+  }
+  const latest = await latestInteractiveTranscript(claudeRoot());
+  const providers = [];
+  if (existsSync(settingsPath()) || latest) providers.push('Claude Code');
+  if (existsSync(codexConfigPath())) providers.push('Codex');
+  if (grokPresent()) providers.push('Grok');
+  console.log(
+    forTerminal(
+      onboardingReport({
+        checks,
+        features,
+        pro: isPro(),
+        providers,
+        contextTokens: latest ? latest.pieces.reduce((n, p) => n + p.chars, 0) / 4 : null,
+      }),
+    ),
+  );
 } else if (cmd === 'doctor') {
   if (args.includes('--fix')) {
     // Re-install what is installed, with this Node and this copy of limitcast (after a Node upgrade, say).
@@ -676,13 +710,9 @@ if (cmd === 'status') {
         const samples = [...load(since), ...(await readCodex(since))];
         const s = loadOverhead();
         // The daily rollup keeps the value record current; a session-start hook must not scan transcripts itself.
-        const week = Object.values(loadValue().sessions).filter((x) => x.at >= since);
+        const week = valuePeriod(loadValue(), since, now);
         lines.push(
-          weeklyLine(
-            resultsStats({ now, days: 7, samples, blocks: loadBlocks(since), pro: true }),
-            s ? savedPerSession(s) : null,
-            week.reduce((a, x) => a + x.turns * x.savedPerTurn, 0),
-          ),
+          weeklyLine(resultsStats({ now, days: 7, samples, blocks: loadBlocks(since), pro: true }), s ? savedPerSession(s) : null, week.tokens),
         );
       }
       if (lines.length) console.log(JSON.stringify({ systemMessage: lines.join('\n') }));
@@ -721,7 +751,9 @@ if (cmd === 'status') {
   }
   const samples = [...load(since), ...(await readCodex(since))];
   const blocks = loadBlocks(since);
-  const totals = valueTotals(await refreshValue());
+  const value = await refreshValue();
+  const totals = valueTotals(value);
+  const insight = periodInsights({ value, usage: await readUsage(since - days() * 86400_000, {}), blocks, since, until: now });
   if (args.includes('--share'))
     console.log(
       resultsShare(resultsStats({ now, days: days(), samples, blocks, pro }), {
@@ -729,7 +761,9 @@ if (cmd === 'status') {
         pro,
         savedPerSession: perSession,
         notResent: totals.tokens,
-      }),
+      }) +
+        '\n' +
+        insightsShare(insight, pro),
     );
   else if (args.includes('--html')) {
     // Pro: results, the current windows and the burn report on one page, opened in the browser.
@@ -740,6 +774,7 @@ if (cmd === 'status') {
     const rows = forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS))]), now);
     const burn = burnReport(await readUsage(since, {}), { since, now }).replace(/^(#{1,2}) /gm, '#$1 ');
     const md = [
+      insightsReport(insight, pro),
       resultsReport({ now, days: days(), samples, blocks, pro, saved, value: valueSection(totals, { now, pro }), subagents: loadSubagents(since) }),
       '## Right now',
       '```',
@@ -758,7 +793,19 @@ if (cmd === 'status') {
   } else
     console.log(
       forTerminal(
-        resultsReport({ now, days: days(), samples, blocks, pro, saved, value: valueSection(totals, { now, pro }), subagents: loadSubagents(since) }),
+        [
+          insightsReport(insight, pro),
+          resultsReport({
+            now,
+            days: days(),
+            samples,
+            blocks,
+            pro,
+            saved,
+            value: valueSection(totals, { now, pro }),
+            subagents: loadSubagents(since),
+          }),
+        ].join('\n\n'),
       ),
     );
 } else if (cmd === 'notify') {

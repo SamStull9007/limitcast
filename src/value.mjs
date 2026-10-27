@@ -13,10 +13,10 @@ import { claudeUsage } from './usage.mjs';
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */
 /** @typedef {import('./results.mjs').Block} Block */
-/** @typedef {{at:number, turns:number, savedPerTurn:number}} SessionValue  savedPerTurn: tokens below the first measured start */
+/** @typedef {{at:number, turns:number, savedPerTurn:number, calls?:number[]}} SessionValue  calls: main-thread timestamps; absent in legacy records */
 /** @typedef {{src:string, win:string, at:number, lead:number|null, unseen:boolean}} HitValue  lead: minutes of warning */
 /** @typedef {{t:number, src:string, win:string, shadow:boolean, outcome:string}} BlockValue */
-/** @typedef {{since:number, scanned:number, sessions:Record<string, SessionValue>, hits:Record<string, HitValue>, blocks:Record<string, BlockValue>, switches?:Record<string, {shadow:boolean}>, calib?:{fresh:number, read:number, n:number, at:number}, calibHistory?:{fresh:number, read:number, n:number, at:number}[], limitChange?:{from:number, to:number, at:number}}} Value
+/** @typedef {{since:number, contextSince?:number, scanned:number, sessions:Record<string, SessionValue>, hits:Record<string, HitValue>, blocks:Record<string, BlockValue>, switches?:Record<string, {shadow:boolean}>, calib?:{fresh:number, read:number, n:number, at:number}, calibHistory?:{fresh:number, read:number, n:number, at:number}[], limitChange?:{from:number, to:number, at:number}}} Value
  *   calibHistory: one calibration of the last 3 days per day, to notice limit changes */
 
 const file = () => join(stateDir(), 'value.json');
@@ -102,13 +102,13 @@ export async function sessionValue(path, baselineChars) {
   if (b.entry !== 'cli' || !b.pieces.length) return null;
   const chars = b.pieces.reduce((a, p) => a + p.chars, 0);
   const seen = new Set();
-  let turns = 0;
+  const calls = [];
   const rl = createInterface({ input: createReadStream(path), crlfDelay: Infinity });
   for await (const line of rl) {
     const u = claudeUsage(line, seen, '');
-    if (u && !u.sidechain) turns++;
+    if (u && !u.sidechain) calls.push(u.t);
   }
-  return { at: b.at, turns, savedPerTurn: Math.max(0, tok(baselineChars - chars)) };
+  return { at: b.at, turns: calls.length, savedPerTurn: Math.max(0, tok(baselineChars - chars)), calls };
 }
 
 /**
@@ -118,6 +118,7 @@ export async function sessionValue(path, baselineChars) {
  */
 export async function scanSessions(v, { root, baseline, now }) {
   if (!baseline) return v;
+  v.contextSince ??= baseline.at;
   try {
     for (const proj of readdirSync(root, { withFileTypes: true })) {
       if (!proj.isDirectory()) continue;
@@ -125,9 +126,11 @@ export async function scanSessions(v, { root, baseline, now }) {
         if (!f.isFile() || !f.name.endsWith('.jsonl')) continue;
         const p = join(root, proj.name, f.name);
         const st = statSync(p);
-        if (st.mtimeMs < Math.max(baseline.at, v.scanned) || (st.birthtimeMs || st.mtimeMs) < baseline.at - 86400_000) continue;
+        const id = f.name.replace(/\.jsonl$/, '');
+        const legacy = v.sessions[id] && !Array.isArray(v.sessions[id].calls);
+        if ((!legacy && st.mtimeMs < Math.max(baseline.at, v.scanned)) || (st.birthtimeMs || st.mtimeMs) < baseline.at - 86400_000) continue;
         const s = await sessionValue(p, baseline.chars);
-        if (s && s.at >= baseline.at) v.sessions[f.name.replace(/\.jsonl$/, '')] = s;
+        if (s && s.at >= baseline.at) v.sessions[id] = s;
       }
     }
   } catch {
@@ -168,6 +171,29 @@ export function valueTotals(v) {
   };
 }
 
+/** Activity in an exact half-open period; never assign an entire session to its start week.
+ * @param {Value} v
+ * @param {number} since
+ * @param {number} until
+ */
+export function valuePeriod(v, since, until) {
+  let calls = 0;
+  let tokens = 0;
+  let sessions = 0;
+  let legacy = 0;
+  for (const s of Object.values(v.sessions)) {
+    if (!Array.isArray(s.calls)) {
+      if (s.at < until) legacy++;
+      continue;
+    }
+    const n = s.calls.filter((t) => t >= since && t < until).length;
+    if (n) sessions++;
+    calls += n;
+    tokens += n * s.savedPerTurn;
+  }
+  return { calls, tokens, sessions, legacy };
+}
+
 /**
  * The "since you installed" section at the top of `limitcast results`.
  * @param {ReturnType<typeof valueTotals>} t
@@ -177,21 +203,21 @@ export function valueSection(t, { now, pro }) {
   if (!t.since) return '';
   const days = Math.max(1, Math.round((now - t.since) / 86400_000));
   const out = [`## Since limitcast started watching (${new Date(t.since).toLocaleDateString()}, ${days} day${days === 1 ? '' : 's'})`];
-  if (t.tokens > 0) {
+  if (pro && t.tokens > 0) {
     out.push(
-      `- **${fmtBig(t.tokens)} tokens not re-sent.** Your sessions now start smaller than the first one limitcast measured, and Claude Code re-sends the starting context on every model call: ${t.turns.toLocaleString()} calls across ${t.sessions} sessions. (Most of it would have been cached input.)`,
+      `- **Estimated ${fmtBig(t.tokens)} context tokens not re-sent.** Compared with your first recorded Claude Code starting context: ${t.turns.toLocaleString()} calls across ${t.sessions} sessions. Estimated from characters / 4; most would have been cached input. Project or manual configuration changes can also change this baseline; this is not a causal savings measurement.`,
     );
     if (t.windowPct !== null && t.calib)
       out.push(
         `  Against your limit: **≈ ${t.windowPct < 1 ? t.windowPct.toFixed(2) : t.windowPct.toFixed(1)}% of a 5-hour window.** From your own readings, 1% of it is about ${fmtBig(Math.round(1e6 / t.calib.fresh))} new tokens or ${fmtBig(Math.round(1e6 / t.calib.read))} cached ones, so cached context is cheap and new tokens (long sessions, subagents) are what run you out.`,
       );
-  } else if (t.sessions) {
+  } else if (pro && t.sessions) {
     out.push(`- Starting context: no smaller than when limitcast first measured it. \`limitcast trim\` shows what to cut.`);
   }
   if (t.hits) {
     const avg = t.leads.length ? `, on average ${fmtMin(t.leads.reduce((a, b) => a + b, 0) / t.leads.length)} ahead` : '';
     out.push(
-      `- **Warned you before ${t.leads.length} of the ${t.watched} limits it watched you approach**${avg}. (${t.hits} limits reached in all.)`,
+      `- **Forecast risk before ${t.leads.length} of the ${t.watched} limits it watched you approach**${avg}. (${t.hits} limits reached in all; replayed from recorded readings, not proof a notification was delivered.)`,
     );
   } else out.push('- No limit reached yet.');
   if (pro) {

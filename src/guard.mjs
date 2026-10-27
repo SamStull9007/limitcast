@@ -64,6 +64,7 @@ function blockingForecast(tool, forecasts, now, minutes) {
 export async function runGuard(hook, now, minutes, { preview = false } = {}) {
   const tool = String(hook?.tool_name ?? hook?.toolName ?? hook?.tool ?? '');
   const src = spawnSource(tool);
+  const operation = hook?.tool_use_id ?? hook?.toolUseId ?? hook?.call_id;
   // Codex: only the last two hours of rollouts, so the hook stays fast. Grok: spend vs the user's dollar cap.
   const samples =
     src === 'claude'
@@ -81,6 +82,7 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
     const sid = f.src === 'claude' ? samples.find((s) => s.src === 'claude' && s.sid)?.sid : undefined;
     try {
       logBlock({
+        ...(typeof operation === 'string' ? { operation } : {}),
         t: now,
         src: f.src,
         win: f.win,
@@ -102,6 +104,7 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
   if (day && (preview || getTodayHold())) {
     try {
       logBlock({
+        ...(typeof operation === 'string' ? { operation } : {}),
         t: now,
         kind: 'today',
         src: day.src,
@@ -126,6 +129,7 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
     if (spent >= budget) {
       try {
         logBlock({
+          ...(typeof operation === 'string' ? { operation } : {}),
           t: now,
           kind: 'budget',
           src: 'claude',
@@ -147,13 +151,14 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
   const tight = forecasts.find((x) => x.src === 'claude' && (x.verdict === 'AT_RISK' || x.verdict === 'NEAR'));
   const type = String(input?.subagent_type ?? input?.subagentType ?? '');
   const pinned = isUnset(input?.model) && type ? pinnedModel(type) : undefined;
-  if (src === 'grok') return grokPinOrNotice(input, type, pinned, forecasts, now, preview);
+  if (src === 'grok') return grokPinOrNotice(input, type, pinned, forecasts, now, preview, operation);
   if (src !== 'claude') return null;
   const model = pinned ?? input?.model;
   if (!tight || !switchable(model)) {
     if (pinned) {
       try {
         logBlock({
+          ...(typeof operation === 'string' ? { operation } : {}),
           t: now,
           kind: 'default',
           src: 'claude',
@@ -183,6 +188,7 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
   }
   try {
     logBlock({
+      ...(typeof operation === 'string' ? { operation } : {}),
       t: now,
       kind: 'switch',
       src: 'claude',
@@ -238,13 +244,15 @@ const isUnset = (model) => model === undefined || model === null || model === ''
  * @param {ReturnType<typeof import('./forecast.mjs').forecastAll>} forecasts
  * @param {number} now
  * @param {boolean} preview
+ * @param {unknown} operation
  */
-function grokPinOrNotice(input, type, pinned, forecasts, now, preview) {
+function grokPinOrNotice(input, type, pinned, forecasts, now, preview, operation) {
   const grokPin = pinned && /^grok-/i.test(pinned) ? pinned : undefined;
   const hasModelField = input && typeof input === 'object' && Object.hasOwn(input, 'model');
   if (grokPin && hasModelField) {
     try {
       logBlock({
+        ...(typeof operation === 'string' ? { operation } : {}),
         t: now,
         kind: 'default',
         src: 'grok',

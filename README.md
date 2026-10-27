@@ -1,14 +1,14 @@
 # limitcast
 
-Stretch your Claude Code plan. Every session starts with ~100k tokens of context before you type, re-sent on every turn and to every subagent. limitcast measures what's in it, names what you never use, and stops runaway subagents before they burn the rest of your window.
+Get more work from your AI coding plan. Forecast usage limits, control subagent burn, and trim unused starting context across Claude Code, Codex and Grok. Runs locally, with keep-lists, backups and undo.
 
 ![limitcast status, trim and results running in a terminal](https://limitcast.dev/demo.gif)
 
 ```
 $ limitcast trim
-Every Claude Code session starts at 102.7k tokens before your first message.
+Your recorded Claude Code sessions start at 102.7k tokens before your first message.
 
-## Measured savings: ~6.2k tokens per session (6% of your starting context)
+## Estimated removable context: ~6.2k tokens per session (6% of your starting context)
 - Disable 9 MCP servers you haven't used in 14 days (~0.9k): postman, context7, ...
 - Hide 66 skills from the model (~5.3k): dataviz, block-kit, ...
 ```
@@ -21,7 +21,7 @@ Every Claude Code session starts at 102.7k tokens before your first message.
 - **Limit-change alert (Pro):** limitcast re-measures how many tokens move your meter by 1% every day and notifies you when that shifts by 15% or more, so you know when the limit itself changed.
 - **Daily allowance (free):** today's even share of each weekly window, so you can pace the week: `7d 41% · today 6% left`.
 - **Pro extras:** desktop notifications (`limitcast notify on`), also to your phone (`notify ntfy <topic>`) or a Slack/Discord webhook (`notify webhook <url>`), run a job after the reset (`limitcast after-reset -- …`), a pointer to your other account when this one is near its limit, a `/compact` nudge in long sessions, and an HTML dashboard (`limitcast results --html`).
-- **Results:** `limitcast results` shows the value since you installed it (tokens not re-sent, limits it warned you about and how far ahead, subagents stopped), then checks the last week against what actually happened.
+- **Capacity report:** `limitcast results` separates recorded consumption by provider, applied protection decisions and free previews, and (Pro) estimated Claude context tokens not re-sent relative to a recorded baseline. Calls crossing a week boundary are counted in the period they happened. It also shows lifetime context estimates, forecast replay and next steps. Unknown evidence stays unavailable; controls are not converted into invented saved tokens.
 - **Burn report (Pro):** Claude Code, Codex and Grok tokens by day, project, model and session.
 - **Runout forecast (free):** burn rate and the clock time each window runs out.
 - **Local only.** Reads the limit readings Claude Code passes to your status line and the logs Claude Code, Codex and Grok already write. No logins, and your usage data never leaves your machine. The free tier makes no network calls; a Pro license key talks to Polar only to activate, to re-check weekly, and to deactivate (it sends the key and your computer's name). If you turn on phone or webhook notifications (Pro, off by default), each notification's text goes to the service you chose (ntfy.sh or your webhook) and nothing else.
@@ -39,6 +39,7 @@ Requires Node 20+ on macOS or Linux.
 
 ```sh
 npm install -g limitcast     # or: brew trust samstull9007/limitcast && brew install samstull9007/limitcast/limitcast
+limitcast onboard            # read-only: setup checks and a first useful result
 limitcast install            # free: status-line recorder
 limitcast trial              # Pro free for 7 days, no card (or: limitcast activate <key>)
 limitcast install --guard    # also the subagent guard (free: preview only)
@@ -57,6 +58,7 @@ In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast
 
 | Command | |
 |---|---|
+| `limitcast onboard` | Read-only guided setup: local tools, readiness, trial choices, personal context finding, keep/undo/override controls and next commands. Never enables a trial or changes settings |
 | `limitcast status [--json]` | Used, burn rate, runout time and reset for each window, and today's share of each weekly one. When a window is on pace to run out, one line names the one that binds first and where else there is room ("You'll hit Claude 7d first (Thu 14:00). Grok 5h still has $38."). **Pro** also lists your other Claude accounts |
 | `limitcast trim --codex [--apply / --undo]` | Codex: AGENTS.md size and MCP servers in `~/.codex/config.toml` you haven't used. **Pro** names them and turns them off (`enabled = false`; `--undo` restores the file exactly) |
 | `limitcast trim --grok [--apply / --undo]` | Grok: system prompt and tool-definition size, and MCP servers in `~/.grok/config.toml` you haven't used. **Pro** names them and turns them off (`enabled = false`; `--undo` restores the file exactly) |
@@ -79,7 +81,7 @@ In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast
 | `limitcast saved` | **Pro.** How much the part of your starting context you control has dropped since limitcast first measured it, times your sessions since |
 | `limitcast trim --apply` / `--undo` | **Pro.** Hide the unused skills from the model and turn off the unused MCP servers for that project, through Claude Code's own settings. Backed up; `--undo` reverses exactly what it changed |
 | `limitcast trim keep <name>[,<name>]` | Servers or skills no `trim --apply` (Claude, Codex or Grok) ever turns off or hides, e.g. `trim keep ego-browser`. `--remove <name>` drops one; no name lists them. Free to set; `trim` shows what it would keep |
-| `limitcast results [--days N] [--share]` | Proof it works: each limit window that reached 100% and how far ahead limitcast warned, and what the guard blocked (free: what it would have blocked) and whether that window then ran out. **Pro** adds starting-context savings. `--share`: totals only |
+| `limitcast results [--days N] [--share]` | Capacity report plus forecast evidence: each limit window that reached 100% and how far ahead limitcast warned, and what the guard blocked (free: what it would have blocked) and whether that window then ran out. **Pro** adds baseline context estimates. `--share`: voluntary totals only; nothing uploads automatically |
 | `install --alerts` | **Pro.** A SessionStart hook that tells you (never the model) when your starting context grew ~1k+ tokens, and what grew, plus a one-line weekly summary of what limitcast did |
 | `limitcast activate <key>` | Unlock Pro: registers this computer with Polar (3 computers per key). Polar re-checks it weekly in the background; it keeps working up to 30 days offline |
 | `limitcast deactivate` | Free this computer so the key can be used on another one |
@@ -98,6 +100,14 @@ Each limit reading is saved to `~/.local/state/limitcast/samples.jsonl` when it 
 ## Pricing
 
 Free: runout forecast with NEAR warnings and the daily allowance, status-line readout, your starting-context total with how much you never use (Claude Code and Codex), `results`, and a preview of the guard. Pro ($79/year or $9/month, 14 days free; or `limitcast trial` for 7 days, no card; Team $69/seat/year, 3 seats minimum): names what to cut and cuts it (`trim --apply`, also for Codex), a subagent guard that blocks and switches to Sonnet, subagent receipts and budgets, the cold-cache warning, limit-change alerts, burn report, alerts, a weekly summary, notifications (desktop, phone or webhook), after-reset jobs, account headroom, the `/compact` nudge and the HTML dashboard. Cancel anytime; 14-day refund on any charge: email support@limitcast.dev. See https://limitcast.dev.
+
+## Measuring recurring value
+
+`results` uses exact activity timestamps for its rolling period and UTC calendar dates for active-day counts. New input/cache writes, cached reads and model output are separate. Pro context reductions are estimated at characters / 4 against the first recorded baseline; different projects or manual configuration changes can affect that baseline. This is not measured causal savings or a lower subscription bill. Legacy records without call timestamps remain readable but are excluded from period estimates until their transcripts can be rescanned. Codex/Grok context savings remain unavailable. A previous-period estimate requires two complete observed periods.
+
+Protection events retain the tier at decision time. Host operation IDs deduplicate retries when supplied; older/unidentified events remain labeled attempts. Forecast history is replayed from readings and does not prove that a notification was delivered. Controls cannot establish how many interruptions were prevented.
+
+For a small consenting pilot, see [the pilot protocol](docs/pilot.md) and [dated market assessment](docs/market-positioning.md). From a repository checkout, `node scripts/pilot-metrics.mjs participants.json` aggregates operator-recorded activation, eligible day-7/day-30 retention and verified renewals locally; it does not recruit people or collect telemetry.
 
 ## License
 

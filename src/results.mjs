@@ -5,7 +5,7 @@ import { claudeAccounts, forecast } from './forecast.mjs';
 import { stateDir } from './store.mjs';
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */
-/** @typedef {{t:number, src:string, win:string, pct:number, wall:number, reset:number, sid?:string, shadow?:boolean, kind?:string, from?:string, to?:string, type?:string, tokens?:number}} Block  t, wall, reset: epoch ms; shadow: a free install's preview, not acted on; kind "switch": a subagent moved to Sonnet instead of blocked, "budget": a subagent held over the budget, "cold": a message held after the prompt cache expired (pct: its cost, tokens: context re-sent), "today": a subagent held once today's share of a weekly window was used up (pct: used today); no kind: a forecast block */
+/** @typedef {{t:number, src:string, win:string, pct:number, wall:number, reset:number, sid?:string, operation?:string, shadow?:boolean, kind?:string, from?:string, to?:string, type?:string, tokens?:number}} Block  t, wall, reset: epoch ms; shadow: a free install's preview, not acted on; operation: host-supplied tool call ID when available; kind "switch": a subagent moved to Sonnet instead of blocked, "budget": a subagent held over the budget, "cold": a message held after the prompt cache expired (pct: its cost, tokens: context re-sent), "today": a subagent held once today's share of a weekly window was used up (pct: used today); no kind: a forecast block */
 
 const JITTER_MS = 120_000; // Codex resets_at drifts by seconds between events
 const NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok' };
@@ -25,16 +25,32 @@ export function logBlock(b) {
 /** @param {number} since epoch ms @returns {Block[]} */
 export function loadBlocks(since) {
   if (!existsSync(blockFile())) return [];
-  return readFileSync(blockFile(), 'utf8')
-    .split('\n')
-    .flatMap((line) => {
-      try {
-        const b = JSON.parse(line);
-        return b.t >= since ? [b] : [];
-      } catch {
-        return [];
-      }
-    });
+  return distinctBlocks(
+    readFileSync(blockFile(), 'utf8')
+      .split('\n')
+      .flatMap((line) => {
+        try {
+          const b = JSON.parse(line);
+          return b.t >= since ? [b] : [];
+        } catch {
+          return [];
+        }
+      }),
+  );
+}
+
+/** Keep one decision per host operation and tier; unidentified legacy attempts remain visible.
+ * @param {Block[]} blocks
+ */
+export function distinctBlocks(blocks) {
+  const seen = new Set();
+  return blocks.filter((b) => {
+    if (!b.operation) return true;
+    const key = JSON.stringify([b.src, b.sid, b.operation, Boolean(b.shadow)]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /**
@@ -121,7 +137,7 @@ export function resultsStats({ now, days, samples, blocks, pro }) {
   const hits = limitHits(samples.filter((s) => s.t >= since));
   const watched = hits.filter((h) => !h.unseen);
   const leads = hits.flatMap((h) => (h.warnedAt === null ? [] : [Math.round((h.at - h.warnedAt) / 60_000)]));
-  const mine = blocks.filter((b) => b.t >= since && Boolean(b.shadow) === !pro);
+  const mine = distinctBlocks(blocks).filter((b) => b.t >= since && b.t <= now && Boolean(b.shadow) === !pro);
   const outcomes = blockOutcomes(
     mine.filter((b) => !b.kind),
     samples,
@@ -162,7 +178,7 @@ export function resultsShare(st, { days, pro, savedPerSession, notResent = 0 }) 
   if (st.switches) parts.push(`${pro ? 'moved' : 'would have moved'} ${st.switches} subagent${st.switches === 1 ? '' : 's'} to Sonnet`);
   if (st.defaults) parts.push(`${pro ? 'ran' : 'would have run'} ${st.defaults} on the model you set for their type`);
   if (savedPerSession && savedPerSession > 0) parts.push(`starting context ${fmtK(savedPerSession)} tokens smaller per session`);
-  if (notResent > 0) parts.push(`${fmtK(notResent)} tokens not re-sent since install`);
+  if (pro && notResent > 0) parts.push(`estimated ${fmtK(notResent)} context tokens not re-sent since install vs baseline`);
   return `${parts[0]} ${parts.slice(1).join('; ')}. https://limitcast.dev`;
 }
 
@@ -174,7 +190,7 @@ export function resultsShare(st, { days, pro, savedPerSession, notResent = 0 }) 
  */
 export function weeklyLine(st, savedPerSession, notResent = 0) {
   const parts = [`${st.hits.length} limit${st.hits.length === 1 ? '' : 's'} reached`];
-  if (st.leads.length) parts.push(`warned ahead on ${st.leads.length} (avg ${avg(st.leads)} min)`);
+  if (st.leads.length) parts.push(`forecast risk on ${st.leads.length} (avg ${avg(st.leads)} min)`);
   parts.push(`guard blocked ${st.outcomes.length} subagent${st.outcomes.length === 1 ? '' : 's'}`);
   if (st.switches) parts.push(`moved ${st.switches} to Sonnet`);
   if (st.defaults) parts.push(`ran ${st.defaults} on their set model`);
@@ -182,7 +198,7 @@ export function weeklyLine(st, savedPerSession, notResent = 0) {
   if (st.todays) parts.push(`held ${st.todays} once today's share was used`);
   if (st.colds) parts.push(`caught ${st.colds} cold-cache message${st.colds === 1 ? '' : 's'}`);
   if (savedPerSession && savedPerSession > 0) parts.push(`starting context ${fmtK(savedPerSession)} tokens smaller`);
-  if (notResent > 0) parts.push(`${fmtK(notResent)} tokens not re-sent`);
+  if (notResent > 0) parts.push(`estimated ${fmtK(notResent)} context tokens not re-sent vs baseline`);
   return `limitcast this week: ${parts.join(', ')}. Details: limitcast results`;
 }
 

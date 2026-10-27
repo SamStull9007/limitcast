@@ -187,6 +187,8 @@ test.describe({ concurrency: 1 }, () => {
   test('statusline: Grok feed shows spend; a Claude feed does not', () => {
     const home = tmp('lc-grok-sl-');
     const state = tmp('lc-grok-sl-state-');
+    // Keep this output test independent of the detached daily health/rollup process.
+    writeFileSync(join(state, 'value.at'), String(Date.now()));
     const root = join(home, 'sessions');
     writeSession({
       root,

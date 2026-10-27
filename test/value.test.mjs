@@ -67,7 +67,7 @@ test('a session saves its smaller start on every main-thread model call', async 
   const dir = mkdtempSync(join(tmpdir(), 'lc-val-'));
   const p = transcript(dir, 'a', { skills: 4000, calls: 3, side: 5 });
   const v = await sessionValue(p, 8000);
-  assert.deepEqual(v, { at: t0, turns: 3, savedPerTurn: 1000 }); // (8000 - 4000 chars) / 4; subagent calls not counted
+  assert.deepEqual(v, { at: t0, turns: 3, savedPerTurn: 1000, calls: [t0, t0 + M, t0 + 2 * M] }); // (8000 - 4000 chars) / 4; subagent calls not counted
 });
 
 test('scan adds new sessions only, and the section reads clearly', async () => {
@@ -88,9 +88,9 @@ test('scan adds new sessions only, and the section reads clearly', async () => {
   assert.deepEqual([t.sessions, t.turns, t.tokens], [1, 10, 10_000]);
   const text = valueSection(t, { now: t0 + 2 * 86400_000, pro: true });
   assert.match(text, /Since limitcast started watching \(.*, 2 days\)/);
-  assert.match(text, /\*\*10\.0k tokens not re-sent\.\*\*/);
+  assert.match(text, /\*\*Estimated 10\.0k context tokens not re-sent\.\*\*/);
   assert.match(text, /10 calls across 1 sessions/);
-  assert.match(text, /Warned you before 1 of the 1 limits it watched you approach\*\*, on average 50 min ahead/);
+  assert.match(text, /Forecast risk before 1 of the 1 limits it watched you approach\*\*, on average 50 min ahead/);
   assert.match(text, /hasn't needed to stop a subagent yet/);
 });
 

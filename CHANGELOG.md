@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Read-only `limitcast onboard` guides setup, personal findings, trial choices, restarts and safe controls without changing settings.
+- `results`, its local dashboard and voluntary share output separate provider usage, estimated context reduction, protection events and free previews. Weekly context estimates use main-thread call timestamps, including sessions crossing the boundary; legacy state remains readable and is rescanned when available.
+- Hook records accept host operation IDs so reporting can deduplicate repeated decisions. Missing IDs stay explicitly labeled attempts. Existing guard decisions, overrides and entitlement checks are preserved.
+- Savings/trim labels state the character-count/baseline estimate. Previous-period comparisons require complete history; no model/cache/block savings are invented. Added a local consent-based pilot metrics tool and market/retention protocol.
+
 ## 0.14.0
 
 - New: `limitcast trim keep <name>[,<name>]` lists servers and skills that `trim --apply` never turns off or hides (Claude, Codex and Grok), for example `limitcast trim keep ego-browser`. `trim` shows what it would keep, and `--remove <name>` drops one.

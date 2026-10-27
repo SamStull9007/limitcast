@@ -84,7 +84,7 @@ test('--share and the weekly line are totals only, with no session or project na
   assert.match(free, /would have blocked 1 runaway subagent\. https/);
   assert.equal(
     weeklyLine(st, 4000),
-    'limitcast this week: 1 limit reached, warned ahead on 1 (avg 50 min), guard blocked 1 subagent, starting context 4.0k tokens smaller. Details: limitcast results',
+    'limitcast this week: 1 limit reached, forecast risk on 1 (avg 50 min), guard blocked 1 subagent, starting context 4.0k tokens smaller. Details: limitcast results',
   );
 });
 

@@ -143,7 +143,7 @@ test('trim measures savings from unused skills and MCP servers, honoring skillOv
 
   const md = trimReport({ sessions: 3, median: 105_000, max: 120_000 }, c, used, 7);
   assert.match(md, /105\.0k tokens/);
-  assert.match(md, /Measured savings: ~101 tokens per session \(0% of your fixed overhead\)/);
+  assert.match(md, /Estimated removable context: ~101 tokens per session \(0% of your fixed overhead\)/);
   assert.match(md, /Hide 1 skills you haven't used in 7 days/);
   assert.match(md, /Disable 1 MCP servers you haven't used in 7 days\*\*: idle/);
   assert.match(md, /Skill listing: 3 visible of 4 skills/);
