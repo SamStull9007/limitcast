@@ -64,7 +64,8 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
   limitcast saved                            tokens saved since limitcast first measured you
   limitcast install --guard                  block new subagents when a window is on pace to run out, and run
                                              them on Sonnet while a window is tight (NEAR or AT_RISK); show what
-                                             each finished subagent cost; hold the first message after the prompt
+                                             each finished subagent cost, and what that kind has cost before a new
+                                             one starts; hold the first message after the prompt
                                              cache expired (idle over 60 min, LIMITCAST_CACHE_MINUTES) and say what it costs
   limitcast budget subagents <percent>|off   hold new subagents once they used that much of the 5-hour window
   limitcast install --alerts                 tell you when your starting context grows, plus a weekly summary
@@ -169,6 +170,9 @@ if (cmd === 'status') {
     const d = await runGuard(JSON.parse(readStdin()), now, Number(process.env.LIMITCAST_GUARD_MINUTES ?? 30), { preview: !isPro() });
     if (typeof d === 'string') {
       console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: d } }));
+    } else if (d && 'notice' in d) {
+      // Allowed as is, with what this kind of subagent has cost so far (shown to the user, never the model).
+      console.log(JSON.stringify({ systemMessage: d.notice }));
     } else if (d) {
       // Model switch: allow the spawn with the same input and model "sonnet" (updatedInput replaces the whole input).
       console.log(

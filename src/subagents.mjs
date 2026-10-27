@@ -54,6 +54,33 @@ export function receiptMessage(type, u, pct) {
 }
 
 const k = (/** @type {number} */ n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}k`);
+const pct1 = (/** @type {number} */ p) => (p < 1 ? p.toFixed(2) : p.toFixed(1));
+
+const NOTICE_MIN_RUNS = 3;
+const NOTICE_MIN_PCT = 1; // a typical run under 1% of a window is not worth a message
+
+/**
+ * Before a subagent starts: what that kind has cost you so far, from the receipts ledger.
+ * "limitcast: Explore subagents have cost you a median ≈1.2% (max ≈3.6%) of a 5-hour window over 7 runs; this window is 38% used."
+ * Uses the same type when it has at least 3 priced runs, else every subagent. Null with too little history, or when
+ * the typical run is under 1% of a window and the window is not NEAR.
+ * @param {SubagentEntry[]} entries
+ * @param {unknown} type the subagent type about to start
+ * @param {{pct:number, verdict:string}|undefined} win the current 5-hour window
+ */
+export function spawnNotice(entries, type, win) {
+  const priced = entries.filter((e) => typeof e.pct === 'number');
+  const same = typeof type === 'string' && type ? priced.filter((e) => e.type === type) : [];
+  const runs = same.length >= NOTICE_MIN_RUNS ? same : priced;
+  if (runs.length < NOTICE_MIN_RUNS) return null;
+  const sorted = runs.map((e) => /** @type {number} */ (e.pct)).sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  if (median < NOTICE_MIN_PCT && win?.verdict !== 'NEAR') return null;
+  const who = runs === same ? `${type} subagents have` : 'Your subagents have';
+  const used = win ? `; this window is ${Math.round(win.pct)}% used` : '';
+  return `limitcast: ${who} cost you a median ≈${pct1(median)}% (max ≈${pct1(sorted.at(-1) ?? 0)}%) of a 5-hour window over ${runs.length} runs${used}.`;
+}
 
 /** @param {SubagentEntry} e */
 export function logSubagent(e) {

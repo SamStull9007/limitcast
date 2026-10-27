@@ -3,7 +3,7 @@ import { forecastAll, oneClaudeAccount } from './forecast.mjs';
 import { logBlock } from './results.mjs';
 import { readCodex } from './sources.mjs';
 import { KEEP_MS, load } from './store.mjs';
-import { budgetMessage, budgetSpent, getBudget, loadSubagents, windowStart } from './subagents.mjs';
+import { budgetMessage, budgetSpent, getBudget, loadSubagents, spawnNotice, windowStart } from './subagents.mjs';
 
 const NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok' };
 
@@ -121,7 +121,14 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
   // Not blocked, but a window is tight: run a new Claude subagent on Sonnet instead of the main (usually Opus) model.
   const input = hook?.tool_input ?? hook?.toolInput;
   const tight = forecasts.find((x) => x.src === 'claude' && (x.verdict === 'AT_RISK' || x.verdict === 'NEAR'));
-  if (src !== 'claude' || !tight || !switchable(input?.model)) return null;
+  if (src !== 'claude') return null;
+  if (!tight || !switchable(input?.model)) {
+    // Allowed as is: tell the user (never the model) what this kind of subagent has cost so far.
+    if (preview) return null;
+    const win = forecasts.find((x) => x.src === 'claude' && x.win === '5h' && x.verdict !== 'RESET');
+    const notice = spawnNotice(loadSubagents(now - 30 * 86400_000), input?.subagent_type, win);
+    return notice ? { notice } : null;
+  }
   try {
     logBlock({
       t: now,

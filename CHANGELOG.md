@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- New (Pro, with the guard): before a subagent starts you see what that kind has cost you, e.g. "Explore subagents have cost you a median ≈1.2% (max ≈3.6%) of a 5-hour window over 7 runs; this window is 38% used". It appears once there are 3 priced runs, uses all your subagents when that kind has fewer, and stays quiet when a typical run is under 1% of a window and the window is not NEAR. It never blocks.
 - New: `limitcast report --why` shows where your new tokens went (subagents, session starts, cache rebuilds after idle, tool results by tool, model output) and the largest single steps. It reads your Claude Code transcripts once and caches them, so only the first run over a few GB is slow (3 to 40 seconds, depending on whether the disk cache is warm) and later runs only read what changed.
 - `limitcast report` now ranks projects, models and sessions by new tokens (input, cache writes, output) instead of total tokens, so cached reads no longer decide the order.
 
