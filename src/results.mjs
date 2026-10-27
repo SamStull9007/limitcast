@@ -5,7 +5,7 @@ import { claudeAccounts, forecast } from './forecast.mjs';
 import { stateDir } from './store.mjs';
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */
-/** @typedef {{t:number, src:string, win:string, pct:number, wall:number, reset:number, sid?:string, shadow?:boolean, kind?:string, from?:string, tokens?:number}} Block  t, wall, reset: epoch ms; shadow: a free install's preview, not acted on; kind "switch": a subagent moved to Sonnet instead of blocked, "budget": a subagent held over the budget, "cold": a message held after the prompt cache expired (pct: its cost, tokens: context re-sent); no kind: a forecast block */
+/** @typedef {{t:number, src:string, win:string, pct:number, wall:number, reset:number, sid?:string, shadow?:boolean, kind?:string, from?:string, to?:string, type?:string, tokens?:number}} Block  t, wall, reset: epoch ms; shadow: a free install's preview, not acted on; kind "switch": a subagent moved to Sonnet instead of blocked, "budget": a subagent held over the budget, "cold": a message held after the prompt cache expired (pct: its cost, tokens: context re-sent); no kind: a forecast block */
 
 const JITTER_MS = 120_000; // Codex resets_at drifts by seconds between events
 const NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok' };
@@ -128,6 +128,7 @@ export function resultsStats({ now, days, samples, blocks, pro }) {
     now,
   );
   const switches = mine.filter((b) => b.kind === 'switch').length;
+  const defaults = mine.filter((b) => b.kind === 'default').length;
   const colds = mine.filter((b) => b.kind === 'cold');
   const budgets = mine.filter((b) => b.kind === 'budget').length;
   return {
@@ -137,6 +138,7 @@ export function resultsStats({ now, days, samples, blocks, pro }) {
     leads,
     outcomes,
     switches,
+    defaults,
     colds: colds.length,
     coldPct: colds.reduce((a, b) => a + b.pct, 0),
     budgets,
@@ -156,6 +158,7 @@ export function resultsShare(st, { days, pro, savedPerSession, notResent = 0 }) 
   if (st.outcomes.length)
     parts.push(`${pro ? 'blocked' : 'would have blocked'} ${st.outcomes.length} runaway subagent${st.outcomes.length === 1 ? '' : 's'}`);
   if (st.switches) parts.push(`${pro ? 'moved' : 'would have moved'} ${st.switches} subagent${st.switches === 1 ? '' : 's'} to Sonnet`);
+  if (st.defaults) parts.push(`${pro ? 'ran' : 'would have run'} ${st.defaults} on the model you set for their type`);
   if (savedPerSession && savedPerSession > 0) parts.push(`starting context ${fmtK(savedPerSession)} tokens smaller per session`);
   if (notResent > 0) parts.push(`${fmtK(notResent)} tokens not re-sent since install`);
   return `${parts[0]} ${parts.slice(1).join('; ')}. https://limitcast.dev`;
@@ -172,6 +175,7 @@ export function weeklyLine(st, savedPerSession, notResent = 0) {
   if (st.leads.length) parts.push(`warned ahead on ${st.leads.length} (avg ${avg(st.leads)} min)`);
   parts.push(`guard blocked ${st.outcomes.length} subagent${st.outcomes.length === 1 ? '' : 's'}`);
   if (st.switches) parts.push(`moved ${st.switches} to Sonnet`);
+  if (st.defaults) parts.push(`ran ${st.defaults} on their set model`);
   if (st.budgets) parts.push(`held ${st.budgets} over budget`);
   if (st.colds) parts.push(`caught ${st.colds} cold-cache message${st.colds === 1 ? '' : 's'}`);
   if (savedPerSession && savedPerSession > 0) parts.push(`starting context ${fmtK(savedPerSession)} tokens smaller`);
@@ -266,6 +270,10 @@ export function resultsReport({ now, days, samples, blocks, pro, saved, value = 
   if (st.switches)
     out.push(
       `${pro ? 'Ran' : 'Pro would have run'} ${st.switches} subagent${st.switches === 1 ? '' : 's'} on Sonnet instead of your main model while a window was tight.`,
+    );
+  if (st.defaults)
+    out.push(
+      `${pro ? 'Ran' : 'Pro would have run'} ${st.defaults} subagent${st.defaults === 1 ? '' : 's'} on the model you set for their type (limitcast subagent-model).`,
     );
   if (st.budgets) out.push(`Held ${st.budgets} subagent${st.budgets === 1 ? '' : 's'} once subagents had used their budget of the 5-hour window.`);
 

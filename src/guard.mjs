@@ -4,7 +4,7 @@ import { grokSamples } from './grok.mjs';
 import { logBlock } from './results.mjs';
 import { readCodex } from './sources.mjs';
 import { KEEP_MS, load } from './store.mjs';
-import { budgetMessage, budgetSpent, getBudget, loadSubagents, spawnNotice, windowStart } from './subagents.mjs';
+import { budgetMessage, budgetSpent, getBudget, getSubagentModels, loadSubagents, spawnNotice, windowStart } from './subagents.mjs';
 
 const NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok' };
 
@@ -125,7 +125,35 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
   const input = hook?.tool_input ?? hook?.toolInput;
   const tight = forecasts.find((x) => x.src === 'claude' && (x.verdict === 'AT_RISK' || x.verdict === 'NEAR'));
   if (src !== 'claude') return null;
-  if (!tight || !switchable(input?.model)) {
+  // A subagent type pinned to a model (`limitcast subagent-model Explore haiku`) runs on it unless the spawn names a model itself.
+  const type = String(input?.subagent_type ?? '');
+  const pinned = isUnset(input?.model) && type ? getSubagentModels()[type] : undefined;
+  const model = pinned ?? input?.model;
+  if (!tight || !switchable(model)) {
+    if (pinned) {
+      try {
+        logBlock({
+          t: now,
+          kind: 'default',
+          src: 'claude',
+          win: '5h',
+          pct: 0,
+          wall: now,
+          reset: now,
+          from: input?.model ?? 'default',
+          to: pinned,
+          type,
+          ...(preview ? { shadow: true } : {}),
+        });
+      } catch {
+        /* a failed log must not change the decision */
+      }
+      if (preview) return null;
+      return {
+        updatedInput: { ...input, model: pinned },
+        reason: `limitcast: ${type} subagents run on ${pinned}, the model you set for them. Set LIMITCAST_ALLOW=1 to keep the main model.`,
+      };
+    }
     // Allowed as is: tell the user (never the model) what this kind of subagent has cost so far.
     if (preview) return null;
     const win = forecasts.find((x) => x.src === 'claude' && x.win === '5h' && x.verdict !== 'RESET');
@@ -141,7 +169,7 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
       pct: tight.pct,
       wall: tight.wall ?? tight.reset,
       reset: tight.reset,
-      from: input?.model ?? 'default',
+      from: model ?? 'default',
       ...(preview ? { shadow: true } : {}),
     });
   } catch {
@@ -162,3 +190,6 @@ const SWITCH_TO = 'sonnet';
  * @param {unknown} model
  */
 export const switchable = (model) => model === undefined || model === null || model === 'inherit' || /opus|fable/i.test(String(model));
+
+/** Whether a spawn names no model of its own, so a pinned one may apply. @param {unknown} model */
+const isUnset = (model) => model === undefined || model === null || model === '' || model === 'inherit';

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- New (Pro): `limitcast subagent-model <type> <model>` runs every new subagent of that type on the model you choose, for example `limitcast subagent-model Explore haiku`. A spawn that names its own model is left alone. While a window is tight, a type pinned to Opus is still moved to Sonnet. `limitcast subagent-model` lists what is pinned and the types you ran in the last 30 days, and `results` counts the subagents it moved (free installs see what it would have done).
+
 ## 0.12.0
 
 - **Grok status line, trim and guard.** `limitcast install` wraps `[ui.status_line]` in `~/.grok/config.toml`. `--guard` writes `~/.grok/hooks/limitcast.json` for `spawn_subagent`. `limitcast trim --grok` measures the system prompt and unused MCP servers (`--apply` / `--undo` like Codex). Grok stores spend, not a % used: the status line shows `grok 5h $X · 7d $Y` from `usage.json`; `limitcast budget grok <usd>` (Pro) turns that into a forecast the guard can block on.

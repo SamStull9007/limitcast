@@ -49,7 +49,19 @@ import { loadBlocks, logBlock, resultsReport, resultsShare, resultsStats, weekly
 import { claudeSamples, readCodex } from '../src/sources.mjs';
 import { countInteractiveSince, latestInteractiveTranscript } from '../src/startup.mjs';
 import { KEEP_MS, load, record, stateDir } from '../src/store.mjs';
-import { budgetSpent, getBudget, loadSubagents, logSubagent, receiptMessage, setBudget, subagentUsage, windowStart } from '../src/subagents.mjs';
+import {
+  budgetSpent,
+  getBudget,
+  getSubagentModels,
+  loadSubagents,
+  logSubagent,
+  receiptMessage,
+  setBudget,
+  setSubagentModel,
+  subagentUsage,
+  validModel,
+  windowStart,
+} from '../src/subagents.mjs';
 import { forTerminal } from '../src/term.mjs';
 import { firstFlag, toolKey, toolNotice } from '../src/toolcheck.mjs';
 import { baseline, contributors, measuredSavings, shareSummary, startupReport, trimReport } from '../src/trim.mjs';
@@ -86,6 +98,7 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
                                              one starts; hold the first message after the prompt
                                              cache expired (idle over 60 min, LIMITCAST_CACHE_MINUTES) and say what it costs
   limitcast budget subagents <percent>|off   hold new subagents once they used that much of the 5-hour window
+  limitcast subagent-model <type> <model>|off  run new subagents of that type on sonnet, opus, haiku or a model id
   limitcast budget grok <usd>|off            Grok 5-hour dollar cap (Grok stores spend, not a % used; the guard
                                              needs this cap to block spawn_subagent). Optional: budget grok 7d <usd>
   limitcast install --alerts                 tell you when your starting context grows, plus a weekly summary, and
@@ -293,6 +306,34 @@ if (cmd === 'status') {
   } catch {
     /* a hook must never break the session */
   }
+} else if (cmd === 'subagent-model') {
+  if (!isPro()) {
+    console.log(`Per-type subagent models are part of limitcast Pro: ${UPGRADE_URL}`);
+    process.exit(2);
+  }
+  const [type, model] = args;
+  if (type && (model === undefined || (model !== 'off' && !validModel(model)))) {
+    console.log('Usage: limitcast subagent-model <type> <sonnet|opus|haiku|claude-id>|off\n       limitcast subagent-model            list them');
+    process.exit(1);
+  }
+  if (type) setSubagentModel(type, model === 'off' ? null : model);
+  const pinned = Object.entries(getSubagentModels());
+  console.log(pinned.length ? pinned.map(([t, m]) => `${t}: ${m}`).join('\n') : 'No subagent type is pinned to a model.');
+  const ran = new Map();
+  for (const e of loadSubagents(now - 30 * 86400_000)) if (e.type) ran.set(e.type, (ran.get(e.type) ?? 0) + 1);
+  if (ran.size)
+    console.log(
+      `\nTypes you ran in the last 30 days: ${[...ran]
+        .sort((a, b) => b[1] - a[1])
+        .map(([t, n]) => `${t} (${n})`)
+        .join(', ')}`,
+    );
+  if (pinned.length)
+    console.log(
+      '\nNew subagents of these types run on that model unless the spawn names one itself. Needs the guard: limitcast install --guard, then restart Claude Code.',
+    );
+  else console.log('\nExample: limitcast subagent-model Explore haiku');
+  process.exit(0);
 } else if (cmd === 'budget') {
   if (!isPro()) {
     console.log(`Budgets are part of limitcast Pro: ${UPGRADE_URL}`);

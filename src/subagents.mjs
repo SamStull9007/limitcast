@@ -131,6 +131,38 @@ export function setBudget(pct) {
   writeFileSync(configFile(), JSON.stringify({ ...cfg, subagentBudget: pct }));
 }
 
+/** A model a subagent type can be pinned to: sonnet, opus, haiku or a full claude-... id. */
+export const validModel = (/** @type {unknown} */ m) => typeof m === 'string' && /^(sonnet|opus|haiku|claude-[a-z0-9.-]+)$/i.test(m);
+
+/** @returns {Record<string, string>} the model each subagent type runs on by default, e.g. {Explore: 'haiku'} */
+export function getSubagentModels() {
+  try {
+    const m = JSON.parse(readFileSync(configFile(), 'utf8')).subagentModels;
+    return m && typeof m === 'object' ? Object.fromEntries(Object.entries(m).filter(([, v]) => validModel(v))) : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Pin a subagent type to a model, or null to remove it.
+ * @param {string} type
+ * @param {string|null} model
+ */
+export function setSubagentModel(type, model) {
+  let cfg = /** @type {any} */ ({});
+  try {
+    cfg = JSON.parse(readFileSync(configFile(), 'utf8'));
+  } catch {
+    /* new */
+  }
+  const models = { ...cfg.subagentModels };
+  if (model === null) delete models[type];
+  else models[type] = model;
+  mkdirSync(stateDir(), { recursive: true });
+  writeFileSync(configFile(), JSON.stringify({ ...cfg, subagentModels: models }));
+}
+
 /**
  * When the current Claude 5-hour window started: its reset minus 5 hours, or 5 hours ago without a reading.
  * @param {{src:string, win:string, verdict:string, reset:number}[]} forecasts
