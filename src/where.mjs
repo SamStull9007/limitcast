@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fmt } from './report.mjs';
 import { stateDir } from './store.mjs';
+import { BIG_RESULT, tipFor, toolKey } from './toolcheck.mjs';
 import { jsonlFiles } from './usage.mjs';
 
 // `limitcast report --why` (Pro): where the new tokens went, which is what moves the limit (cached reads barely count).
@@ -16,9 +17,7 @@ import { jsonlFiles } from './usage.mjs';
 
 const COLD_MIN = 100_000; // prompt size from which a missed cache is called a rebuild after idle
 const NO_TOOL = '(your messages)';
-
-/** @param {string} name */
-const toolKey = (name) => (name.startsWith('mcp__') ? `mcp:${name.split('__')[1]}` : name);
+const TIP_MIN_PER_CALL = 2000; // a tip is only worth showing for a source whose results average at least this many new tokens
 
 /**
  * One transcript's model calls in order. A call's usage repeats on every content block it streamed, so calls are
@@ -160,6 +159,24 @@ export function whyReport(r, { since, now, calib }) {
     lines.push('', '## Largest single steps', '', '| new tokens | tool | project | day |', '|---:|---|---|---|');
     for (const s of [...r.steps].sort((a, b) => b.tokens - a.tokens).slice(0, 5)) {
       lines.push(`| ${fmt(s.tokens)} | ${s.tool} | ${s.project.replace(homedir(), '~') || '(unknown)'} | ${day(s.t)} |`);
+    }
+    const big = r.steps.filter((s) => s.tokens >= BIG_RESULT);
+    const tips = [...r.tools]
+      .sort((a, b) => b[1].tokens - a[1].tokens)
+      .filter(([k, e]) => tipFor(k) && e.tokens / e.calls >= TIP_MIN_PER_CALL)
+      .slice(0, 3);
+    if (big.length || tips.length) {
+      lines.push('', '## What to try', '');
+      if (big.length) {
+        const bigTokens = big.reduce((a, s) => a + s.tokens, 0);
+        const by = new Map();
+        for (const s of big) by.set(s.tool, (by.get(s.tool) ?? 0) + s.tokens);
+        const top = [...by].sort((a, b) => b[1] - a[1])[0][0];
+        lines.push(
+          `- ${big.length} single steps added over ${fmt(BIG_RESULT)} new tokens each: ${Math.round((bigTokens / toolTokens) * 100)}% of all tool-result tokens, mostly ${top}.`,
+        );
+      }
+      for (const [k, e] of tips) lines.push(`- ${k} (${fmt(e.tokens)}, ${fmt(Math.round(e.tokens / e.calls))} per call): ${tipFor(k)}.`);
     }
   }
   lines.push(

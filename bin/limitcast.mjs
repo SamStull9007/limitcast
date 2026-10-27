@@ -36,6 +36,7 @@ import { countInteractiveSince, latestInteractiveTranscript } from '../src/start
 import { KEEP_MS, load, record, stateDir } from '../src/store.mjs';
 import { budgetSpent, getBudget, loadSubagents, logSubagent, receiptMessage, setBudget, subagentUsage, windowStart } from '../src/subagents.mjs';
 import { forTerminal } from '../src/term.mjs';
+import { firstFlag, toolKey, toolNotice } from '../src/toolcheck.mjs';
 import { baseline, contributors, measuredSavings, shareSummary, startupReport, trimReport } from '../src/trim.mjs';
 import { claudeRoot, grokRoot, readUsage } from '../src/usage.mjs';
 import { dailyDue, foldEvents, loadValue, saveValue, scanSessions, valueSection, valueTotals } from '../src/value.mjs';
@@ -68,7 +69,8 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code and Codex plans
                                              one starts; hold the first message after the prompt
                                              cache expired (idle over 60 min, LIMITCAST_CACHE_MINUTES) and say what it costs
   limitcast budget subagents <percent>|off   hold new subagents once they used that much of the 5-hour window
-  limitcast install --alerts                 tell you when your starting context grows, plus a weekly summary
+  limitcast install --alerts                 tell you when your starting context grows, plus a weekly summary, and
+                                             when one tool result is very large (about 20k tokens), with what to ask for instead
   limitcast notify on|off|test               desktop notification when a window turns NEAR, AT_RISK or HIT, or resets,
                                              and when your Claude limit itself changes
   limitcast notify ntfy <topic|url>|off      also send them to your phone (ntfy.sh)
@@ -216,6 +218,19 @@ if (cmd === 'status') {
     }
   } catch {
     /* a hook must never stop a prompt by failing */
+  }
+} else if (cmd === 'tool-check') {
+  // PostToolUse hook (Pro, installed with --alerts): tell the user, once per tool per session, about a very large tool
+  // result and what to ask for next time. Never reaches the model.
+  try {
+    if (isPro()) {
+      const hook = JSON.parse(readStdin());
+      const name = String(hook?.tool_name ?? '');
+      const notice = name ? toolNotice(name, hook?.tool_response, loadValue().calib, Number(process.env.LIMITCAST_TOOL_TOKENS) || undefined) : null;
+      if (notice && firstFlag(String(hook.session_id), toolKey(name))) console.log(JSON.stringify({ systemMessage: notice }));
+    }
+  } catch {
+    /* a hook must never break the session */
   }
 } else if (cmd === 'subagent-receipt') {
   // SubagentStop hook: price the finished subagent against the 5-hour window and log it (for budgets and results).

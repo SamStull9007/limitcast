@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- New (Pro, `install --alerts`): a PostToolUse hook tells you, once per tool per session, when a single tool result is very large (about 20k tokens or more, from its size; `LIMITCAST_TOOL_TOKENS` changes the threshold), with what to ask for next time. It runs on Bash, Read, Grep, WebFetch and MCP tools, shows the message to you only, and adds about 30 ms per call. Re-run `limitcast install --alerts` (or `doctor --fix`) to add it to an existing install.
+- `limitcast report --why` ends with "What to try": how many single steps added over 20k new tokens and what share of tool-result tokens they were, and advice for the sources whose results average 2k+ new tokens.
+
 - New (Pro, with the guard): before a subagent starts you see what that kind has cost you, e.g. "Explore subagents have cost you a median ≈1.2% (max ≈3.6%) of a 5-hour window over 7 runs; this window is 38% used". It appears once there are 3 priced runs, uses all your subagents when that kind has fewer, and stays quiet when a typical run is under 1% of a window and the window is not NEAR. It never blocks.
 - New: `limitcast report --why` shows where your new tokens went (subagents, session starts, cache rebuilds after idle, tool results by tool, model output) and the largest single steps. It reads your Claude Code transcripts once and caches them, so only the first run over a few GB is slow (3 to 40 seconds, depending on whether the disk cache is warm) and later runs only read what changed.
 - `limitcast report` now ranks projects, models and sessions by new tokens (input, cache writes, output) instead of total tokens, so cached reads no longer decide the order.

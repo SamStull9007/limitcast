@@ -104,6 +104,13 @@ export function install({ guard, alerts = false, path = settingsPath(), codexPat
   if (alerts) {
     upsertHook(cfg, 'SessionStart', { matcher: '', hooks: [{ type: 'command', command: `${self} drift --hook`, timeout: 15 }] }, isAlert);
     changes.push('added the starting-context alert');
+    upsertHook(
+      cfg,
+      'PostToolUse',
+      { matcher: 'Bash|Read|Grep|WebFetch|mcp__.*', hooks: [{ type: 'command', command: `${self} tool-check`, timeout: 10 }] },
+      isToolCheck,
+    );
+    changes.push('added the large tool-output notice');
   }
   writeSettings(path, cfg);
   if (guard && existsSync(join(codexPath, '..'))) {
@@ -164,6 +171,7 @@ export function uninstall({ path = settingsPath(), codexPath = codexHooksPath() 
     ['SessionStart', isAlert, 'the starting-context alert'],
     ['UserPromptSubmit', isPromptCheck, 'the cold-cache warning'],
     ['SubagentStop', isReceipt, 'subagent receipts'],
+    ['PostToolUse', isToolCheck, 'the large tool-output notice'],
   ])) {
     const n = cfg.hooks?.[event]?.length ?? 0;
     if (!n) continue;
@@ -219,6 +227,7 @@ const runs = (re) => (h) =>
 const isAlert = runs(/\bdrift --hook\b/);
 const isPromptCheck = runs(/\bprompt-check\b/);
 const isReceipt = runs(/\bsubagent-receipt\b/);
+const isToolCheck = runs(/\btool-check\b/);
 
 /** @param {string} path */
 export function readSettings(path) {
