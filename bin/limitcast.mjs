@@ -41,7 +41,7 @@ import {
   undoGrokTrim,
 } from '../src/grok.mjs';
 import { runGuard } from '../src/guard.mjs';
-import { accountForecasts, compactHint, headroom, lastCall, lastCallTokens } from '../src/hints.mjs';
+import { accountForecasts, bindingLine, compactHint, headroom, lastCall, lastCallTokens } from '../src/hints.mjs';
 import { htmlPage } from '../src/html.mjs';
 import { doctor, install, installedFeatures, readSettings, settingsPath, uninstall } from '../src/install.mjs';
 import { activate, currentLicense, isPro, startTrial, trialStatus, UPGRADE_URL } from '../src/license.mjs';
@@ -156,6 +156,8 @@ if (cmd === 'status') {
   if (args.includes('--json')) console.log(JSON.stringify(rows, null, 2));
   else {
     console.log(rows.length ? table(rows) : 'No data yet. Run `limitcast install`, then send a message in Claude Code, Codex or Grok.');
+    const binds = bindingLine(rows, getGrokBudget(), clock);
+    if (binds) console.log(`\n${binds}`);
     // Pro: the other Claude accounts limitcast has current readings for (the table shows the latest one).
     if (isPro())
       for (const a of accountForecasts(load(now - KEEP_MS), now).slice(1))

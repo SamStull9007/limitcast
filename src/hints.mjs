@@ -42,6 +42,26 @@ export function headroom(samples, sid, now) {
   return `⇄ other account ${parts.join(' · ')}`;
 }
 
+const NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok' };
+
+/**
+ * One sentence naming the window that runs out first at the current pace, and where else there is room:
+ * "You'll hit Claude 7d first (Thu 14:00). Grok 5h still has $38." Null when no window is on pace to run out.
+ * @param {ReturnType<typeof forecastAll>} rows
+ * @param {{'5h'?:number, '7d'?:number}|null} grokCap the Grok dollar caps; a Grok row holds a % of its cap
+ * @param {(ms:number)=>string} clock
+ */
+export function bindingLine(rows, grokCap, clock) {
+  const first = rows.filter((f) => f.verdict === 'AT_RISK' && f.wall !== null).sort((a, b) => (a.wall ?? 0) - (b.wall ?? 0))[0];
+  if (!first) return null;
+  const name = (/** @type {{src:string, win:string}} */ f) => `${NAMES[/** @type {'claude'} */ (f.src)] ?? f.src} ${f.win}`;
+  // Room: the least-used window of another tool that is not itself in trouble.
+  const room = rows.filter((f) => f.src !== first.src && f.verdict === 'OK').sort((a, b) => a.pct - b.pct)[0];
+  const cap = room?.src === 'grok' ? grokCap?.[/** @type {'5h'} */ (room.win)] : undefined;
+  const left = !room ? '' : cap ? ` ${name(room)} still has $${Math.round((cap * (100 - room.pct)) / 100)}.` : ` ${name(room)} has ${Math.round(100 - room.pct)}% left.`;
+  return `You'll hit ${name(first)} first (${clock(first.wall ?? first.reset)}).${left}`;
+}
+
 const COMPACT_AT = 150_000; // tokens re-sent per model call worth a /compact
 
 /**

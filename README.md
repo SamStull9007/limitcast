@@ -57,7 +57,7 @@ In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast
 
 | Command | |
 |---|---|
-| `limitcast status [--json]` | Used, burn rate, runout time and reset for each window, and today's share of each weekly one. **Pro** also lists your other Claude accounts |
+| `limitcast status [--json]` | Used, burn rate, runout time and reset for each window, and today's share of each weekly one. When a window is on pace to run out, one line names the one that binds first and where else there is room ("You'll hit Claude 7d first (Thu 14:00). Grok 5h still has $38."). **Pro** also lists your other Claude accounts |
 | `limitcast trim --codex [--apply / --undo]` | Codex: AGENTS.md size and MCP servers in `~/.codex/config.toml` you haven't used. **Pro** names them and turns them off (`enabled = false`; `--undo` restores the file exactly) |
 | `limitcast trim --grok [--apply / --undo]` | Grok: system prompt and tool-definition size, and MCP servers in `~/.grok/config.toml` you haven't used. **Pro** names them and turns them off (`enabled = false`; `--undo` restores the file exactly) |
 | `limitcast notify on/off/test` | **Pro.** A desktop notification when a Claude window turns NEAR, AT_RISK or HIT, and when it resets after a HIT. On macOS they come from a tiny limitcast notifier app, listed as "limitcast" in System Settings → Notifications |
