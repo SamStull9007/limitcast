@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.0
 
 - New (Pro): `limitcast plan` says whether your Claude plan fits how much you use. It keeps a record of the peak of every 5-hour and weekly window (so it needs a week or two of history before it recommends anything), then points to the next plan with the monthly price difference if you reached a limit three or more times (or the weekly limit once), or to a smaller plan if its limits would have held your busiest windows with room to spare. It also shows what your Claude Code tokens would cost at API list prices. Set your plan with `limitcast plan set pro|max5|max20`.
 
