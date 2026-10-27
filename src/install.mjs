@@ -80,14 +80,7 @@ export function launcherTargets(path) {
  * (never the model) when your starting context grew.
  * @param {{guard:boolean, alerts?:boolean, path?:string, codexPath?:string, grokDir?:string, self?:string}} opts
  */
-export function install({
-  guard,
-  alerts = false,
-  path = settingsPath(),
-  codexPath = codexHooksPath(),
-  grokDir = grokHome(),
-  self = selfCommand(),
-}) {
+export function install({ guard, alerts = false, path = settingsPath(), codexPath = codexHooksPath(), grokDir = grokHome(), self = selfCommand() }) {
   const cfg = readSettings(path);
   backup(path);
   const changes = [];

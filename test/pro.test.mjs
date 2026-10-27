@@ -296,7 +296,7 @@ test('spawn tools map to the tool whose limits they draw on', () => {
   assert.equal(spawnSource('wait_agent'), null);
 });
 
-test('guard judges each tool only by its own limits; Grok is not blocked by another tool\'s window', () => {
+test("guard judges each tool only by its own limits; Grok is not blocked by another tool's window", () => {
   const now = T0;
   const reset = now / 1000 + 7200;
   const mk = (src, minsAgo, pct) => ({ t: now - minsAgo * 60_000, src, win: '7d', pct, reset });

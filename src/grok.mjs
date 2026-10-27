@@ -243,13 +243,10 @@ export function installGrok({ guard, self, home = grokHome() }) {
       mkdirSync(stateDir(), { recursive: true });
       const snap = statusLineTable(prev);
       // Remember the user's table once; never snapshot a wrap we already own (launcher path includes "limitcast").
-      if (!isLimitcastStatus(snap ?? '') && (snap || !existsSync(statusLedger())))
-        writeFileSync(statusLedger(), JSON.stringify({ previous: snap }));
+      if (!isLimitcastStatus(snap ?? '') && (snap || !existsSync(statusLedger()))) writeFileSync(statusLedger(), JSON.stringify({ previous: snap }));
       writeText(cfgPath, next);
       changes.push(
-        isLimitcastStatus(statusLineCommand(prev))
-          ? 'Grok status line already installed (command path refreshed)'
-          : 'wrapped the Grok status line',
+        isLimitcastStatus(statusLineCommand(prev)) ? 'Grok status line already installed (command path refreshed)' : 'wrapped the Grok status line',
       );
     }
   }
