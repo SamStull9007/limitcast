@@ -7,11 +7,14 @@ import { fileURLToPath } from 'node:url';
 import {
   applyTrim,
   claudeJsonPath,
+  getKeep,
   installedPlugins,
+  isKept,
   localSkillFolders,
   planTrim,
   projectMcpServers,
   reapplyTrim,
+  setKeep,
   stillLoading,
   transcriptCwd,
   undoTrim,
@@ -94,6 +97,7 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
   limitcast trim --apply / --undo            hide those skills and turn off those MCP servers (backed up, reversible)
   limitcast trim --codex --apply / --undo    turn off unused Codex MCP servers (enabled = false; reversible)
   limitcast trim --grok --apply / --undo     turn off unused Grok MCP servers (enabled = false; reversible)
+  limitcast trim keep <name>[,<name>…]       never hide or turn off these (any --apply); --remove <name> drops one, no name lists them
   limitcast saved                            tokens saved since limitcast first measured you
   limitcast install --guard                  block new subagents when a window is on pace to run out, and run
                                              them on Sonnet while a window is tight (NEAR or AT_RISK); show what
@@ -501,6 +505,20 @@ if (cmd === 'status') {
     process.exit(2);
   }
   const since = now - days() * 86400_000;
+  if (cmd === 'trim' && args[0] === 'keep') {
+    // The keep-list: servers and skills `trim --apply` never touches (Claude, Codex and Grok). Free to manage; apply is Pro.
+    const drop = args[1] === '--remove';
+    const names = args
+      .slice(drop ? 2 : 1)
+      .join(',')
+      .split(',')
+      .map((n) => n.trim())
+      .filter(Boolean);
+    if (names.length) setKeep(drop ? getKeep().filter((k) => !isKept(names, k)) : [...getKeep(), ...names]);
+    const keep = getKeep();
+    console.log(keep.length ? `Kept by \`trim --apply\`: ${keep.join(', ')}` : 'Nothing on the keep-list. Example: limitcast trim keep ego-browser');
+    process.exit(0);
+  }
   if (cmd === 'trim' && args.includes('--codex')) {
     // Codex: AGENTS.md and the MCP servers in ~/.codex/config.toml. Free counts them; Pro names them and turns them off.
     if ((args.includes('--apply') || args.includes('--undo')) && !pro) {
@@ -519,13 +537,13 @@ if (cmd === 'status') {
       process.exit(0);
     }
     const servers = codexServers(readFileSync(codexConfigPath(), 'utf8'));
-    const r = codexTrimReport({ servers, used: await codexUsedServers(since), startup: await codexStartup(), days: days(), pro });
+    const r = codexTrimReport({ servers, used: await codexUsedServers(since), startup: await codexStartup(), days: days(), pro, keep: getKeep() });
     if (args.includes('--apply')) {
       const changed = applyCodexTrim(r.unused);
       console.log(
-        changed.length
+        (changed.length
           ? `✓ Turned off ${changed.length} Codex MCP servers (enabled = false in ${codexConfigPath()}): ${changed.map((s) => s.name).join(', ')}\nTakes effect in your next Codex session. Undo: limitcast trim --codex --undo`
-          : 'Nothing to turn off: every server that is on was used.',
+          : 'Nothing to turn off: every server that is on was used or is on your keep-list.') + keptNote(r.kept),
       );
     } else console.log(forTerminal(r.text));
     process.exit(0);
@@ -552,13 +570,14 @@ if (cmd === 'status') {
       startup: grokStartup(),
       days: days(),
       pro,
+      keep: getKeep(),
     });
     if (args.includes('--apply')) {
       const changed = applyGrokTrim(r.unused);
       console.log(
-        changed.length
+        (changed.length
           ? `✓ Turned off ${changed.length} Grok MCP servers (enabled = false in ${grokConfigPath()}): ${changed.map((s) => s.name).join(', ')}\nTakes effect in your next Grok session. Undo: limitcast trim --grok --undo`
-          : 'Nothing to turn off: every server that is on was used.',
+          : 'Nothing to turn off: every server that is on was used or is on your keep-list.') + keptNote(r.kept),
       );
     } else console.log(forTerminal(r.text));
     process.exit(0);
@@ -592,15 +611,16 @@ if (cmd === 'status') {
       console.log(args.includes('--undo') ? undoMessage(undoTrim()) : applyMessage(latest, used));
       process.exit(0);
     }
-    if (latest && (args.includes('--share') || !pro)) text = shareSummary(baseline(usage), latest, used, days());
-    else text = latest ? startupReport(baseline(usage), latest, used, days()) : trimReport(baseline(usage), contributors(), used, days());
+    const keep = getKeep();
+    if (latest && (args.includes('--share') || !pro)) text = shareSummary(baseline(usage), latest, used, days(), keep);
+    else text = latest ? startupReport(baseline(usage), latest, used, days(), keep) : trimReport(baseline(usage), contributors(), used, days());
     if (!pro)
       text += `\n\nPro names each item and what it costs, so you can cut it: ${UPGRADE_URL}\nTry it free for 7 days: limitcast trial. Already bought it? limitcast activate <license-key>`;
     else if (latest && !args.includes('--share')) {
       const still = stillLoading(latest);
       text += still.length
         ? `\n\nStill loading after \`trim --apply\`: ${still.join(', ')}. A Claude Code session that was running may have rewritten ~/.claude.json; quit Claude Code and run \`limitcast trim --apply\` again.`
-        : measuredSavings(latest.pieces, used).tokens > 0
+        : measuredSavings(latest.pieces, used, keep).tokens > 0
           ? '\n\nApply these cuts: `limitcast trim --apply` (backed up; `limitcast trim --undo` reverses it).'
           : '';
     }
@@ -992,6 +1012,7 @@ function applyMessage(latest, used) {
     plugins: installedPlugins(),
     projectMcpJson: projectMcpServers(cwd),
     localSkills: localSkillFolders(cwd),
+    keep: getKeep(),
   });
   const e = applyTrim(plan, { cwd, now });
   const lines = [];
@@ -1000,6 +1021,7 @@ function applyMessage(latest, used) {
   if (e.mcp.length) lines.push(`✓ Turned off ${e.mcp.length} MCP servers for ${cwd}: ${e.mcp.join(', ')}`);
   if (plan.pluginSkills.length) lines.push(`- Plugin skills can only be turned off with their plugin (\`/plugin\`): ${plan.pluginSkills.join(', ')}`);
   if (plan.manualMcp.length) lines.push(`- Turn these off in \`/mcp\` (limitcast couldn't confirm their exact names): ${plan.manualMcp.join(', ')}`);
+  if (plan.kept.length) lines.push(`- Kept, as on your keep-list: ${[...new Set(plan.kept)].join(', ')}`);
   if (!e.skills.length && !e.mcp.length) lines.unshift('Nothing to change automatically.');
   else
     lines.push(
@@ -1007,6 +1029,9 @@ function applyMessage(latest, used) {
     );
   return lines.join('\n');
 }
+
+/** The keep-list servers a Codex or Grok `trim --apply` left on. @param {string[]} kept */
+const keptNote = (kept) => (kept.length ? `\nKept, as on your keep-list: ${kept.join(', ')}` : '');
 
 /** @param {ReturnType<typeof undoTrim>} e */
 function undoMessage(e) {

@@ -30,6 +30,32 @@ const ledgerPath = () => join(stateDir(), 'trim-applied.json');
 
 /** MCP tool names keep the server name but normalize punctuation. @param {string} s */
 const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '_');
+const configFile = () => join(stateDir(), 'config.json');
+
+/** Names `trim --apply` never turns off or hides, from `limitcast trim keep`. @returns {string[]} */
+export function getKeep() {
+  try {
+    const k = JSON.parse(readFileSync(configFile(), 'utf8')).trimKeep;
+    return Array.isArray(k) ? k.filter((n) => typeof n === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/** @param {string[]} names */
+export function setKeep(names) {
+  let cfg = {};
+  try {
+    cfg = JSON.parse(readFileSync(configFile(), 'utf8'));
+  } catch {
+    /* new */
+  }
+  mkdirSync(stateDir(), { recursive: true });
+  writeFileSync(configFile(), JSON.stringify({ ...cfg, trimKeep: [...new Set(names)] }));
+}
+
+/** Same server or skill under another spelling ("ego-browser" / "ego_browser") counts. @param {string[]} keep @param {string} name */
+export const isKept = (keep, name) => keep.some((k) => norm(k) === norm(name));
 
 /**
  * Installed plugins and the MCP servers they register ("plugin:<plugin>:<server>").
@@ -63,15 +89,15 @@ export function installedPlugins(dir = configDir()) {
 
 /**
  * What `--apply` would change, from the unused items `trim` measured.
- * @param {{skills:string[], mcp:string[], cwd:string, settings:any, claudeJson:any, plugins:{names:Set<string>, servers:string[]}, projectMcpJson:string[], localSkills:Set<string>}} r
- *   localSkills: folder names of personal and project skills
+ * @param {{skills:string[], mcp:string[], cwd:string, settings:any, claudeJson:any, plugins:{names:Set<string>, servers:string[]}, projectMcpJson:string[], localSkills:Set<string>, keep?:string[]}} r
+ *   localSkills: folder names of personal and project skills; keep: the `trim keep` list, never hidden or disabled
  */
-export function planTrim({ skills, mcp, cwd, settings, claudeJson, plugins, projectMcpJson, localSkills }) {
+export function planTrim({ skills, mcp, cwd, settings, claudeJson, plugins, projectMcpJson, localSkills, keep = [] }) {
   // "x:y" is a plugin skill (namespaced by its plugin) unless x is one of your own skill folders with nested skills.
   // Plugins can load from places installed_plugins.json doesn't list, so the namespace alone decides.
   const isPluginSkill = (/** @type {string} */ n) => n.includes(':') && !localSkills.has(n.split(':')[0]);
   const overrides = settings.skillOverrides ?? {};
-  const hide = skills.filter((n) => !isPluginSkill(n) && (overrides[n] === undefined || overrides[n] === 'on'));
+  const hide = skills.filter((n) => !isPluginSkill(n) && (overrides[n] === undefined || overrides[n] === 'on') && !isKept(keep, n));
   const pluginSkills = skills.filter(isPluginSkill);
 
   // Exact server names Claude Code uses: configured servers, plugin servers, and names already toggled in /mcp anywhere.
@@ -90,12 +116,14 @@ export function planTrim({ skills, mcp, cwd, settings, claudeJson, plugins, proj
   /** @type {string[]} */
   const manualMcp = [];
   for (const m of mcp) {
+    if (isKept(keep, m)) continue;
     // .mcp.json servers are approved per project in settings, not toggled in disabledMcpServers.
     const name = projectServers.has(norm(m)) ? null : (byNorm.get(norm(m)) ?? (m.startsWith('claude.ai ') ? m : null));
     if (!name) manualMcp.push(m);
     else if (!already.has(name)) disable.push(name);
   }
-  return { hide, pluginSkills, disable, manualMcp };
+  const kept = [...skills, ...mcp].filter((n) => isKept(keep, n));
+  return { hide, pluginSkills, disable, manualMcp, kept };
 }
 
 /** @param {string} path */

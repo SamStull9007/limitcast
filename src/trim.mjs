@@ -196,8 +196,9 @@ const tok = (/** @type {number} */ chars) => Math.round(chars / 4);
  * From a measured startup breakdown: MCP servers and listed skills unused in the period, with their exact size.
  * @param {import('./startup.mjs').Piece[]} pieces
  * @param {Activity} used
+ * @param {string[]} [keep] the `trim keep` list: unused, but never counted as a cut; named in `kept`
  */
-export function measuredSavings(pieces, used) {
+export function measuredSavings(pieces, used, keep = []) {
   const usedMcp = new Set([...used.mcp].map(norm));
   // Instructions and tool names spell a server differently ("claude.ai Postman" / "claude_ai_Postman"): merge by normalized name.
   /** @type {Map<string, {name:string, chars:number}>} */
@@ -212,9 +213,12 @@ export function measuredSavings(pieces, used) {
     }
   }
   const skills = pieces.filter((p) => p.group === 'Skill listing' && !skillUsed(p.name, used.skills)).sort((a, b) => b.chars - a.chars);
-  const unusedMcp = [...mcp.values()].sort((a, b) => b.chars - a.chars);
-  const chars = unusedMcp.reduce((a, m) => a + m.chars, 0) + skills.reduce((a, s) => a + s.chars, 0);
-  return { unusedMcp, unusedSkills: skills, tokens: tok(chars) };
+  const kept = [...mcp.values(), ...skills].filter((x) => keep.some((k) => norm(k) === norm(x.name))).map((x) => x.name);
+  const isKept = (/** @type {{name:string}} */ x) => kept.includes(x.name);
+  const unusedMcp = [...mcp.values()].filter((m) => !isKept(m)).sort((a, b) => b.chars - a.chars);
+  const unusedSkills = skills.filter((s) => !isKept(s));
+  const chars = unusedMcp.reduce((a, m) => a + m.chars, 0) + unusedSkills.reduce((a, s) => a + s.chars, 0);
+  return { unusedMcp, unusedSkills, tokens: tok(chars), kept };
 }
 
 /**
@@ -223,9 +227,10 @@ export function measuredSavings(pieces, used) {
  * @param {{pieces:import('./startup.mjs').Piece[], at:number}} b
  * @param {Activity} used
  * @param {number} days
+ * @param {string[]} [keep] the `trim keep` list
  */
-export function startupReport(base, b, used, days) {
-  const s = measuredSavings(b.pieces, used);
+export function startupReport(base, b, used, days, keep = []) {
+  const s = measuredSavings(b.pieces, used, keep);
   const median = base?.median ?? 0;
   const lines = ['# limitcast trim', ''];
   if (base) {
@@ -257,7 +262,8 @@ export function startupReport(base, b, used, days) {
       '  Set each to `"user-invocable-only"` under `skillOverrides` in `~/.claude/settings.json`: `/name` still works.',
     );
   }
-  if (!s.unusedMcp.length && !s.unusedSkills.length) lines.push('- Nothing unused. Everything that loads was used in the period.');
+  if (s.kept.length) lines.push(`- **Would keep ${s.kept.length} on your keep-list** (\`trim --apply\` never touches them): ${s.kept.join(', ')}.`);
+  else if (!s.unusedMcp.length && !s.unusedSkills.length) lines.push('- Nothing unused. Everything that loads was used in the period.');
 
   /** @type {Map<string, number>} */
   const groups = new Map();
@@ -293,16 +299,17 @@ export function startupReport(base, b, used, days) {
  * @param {{pieces:import('./startup.mjs').Piece[]}} b
  * @param {Activity} used
  * @param {number} days
+ * @param {string[]} [keep] the `trim keep` list; only its count is shown
  */
-export function shareSummary(base, b, used, days) {
-  const s = measuredSavings(b.pieces, used);
+export function shareSummary(base, b, used, days, keep = []) {
+  const s = measuredSavings(b.pieces, used, keep);
   /** @type {Map<string, number>} */
   const groups = new Map();
   for (const p of b.pieces) groups.set(p.group, (groups.get(p.group) ?? 0) + p.chars);
   const median = base?.median ?? 0;
   const lines = [
     `My Claude Code sessions start at ${fmt(median)} tokens before I type.`,
-    `limitcast found ~${fmt(s.tokens)} per session${median ? ` (${Math.round((s.tokens / median) * 100)}%)` : ''} I haven't used in ${days} days: ${s.unusedMcp.length} MCP servers, ${s.unusedSkills.length} skills.`,
+    `limitcast found ~${fmt(s.tokens)} per session${median ? ` (${Math.round((s.tokens / median) * 100)}%)` : ''} I haven't used in ${days} days: ${s.unusedMcp.length} MCP servers, ${s.unusedSkills.length} skills${s.kept.length ? ` (${s.kept.length} more kept on my keep-list)` : ''}.`,
     'Where it comes from:',
     ...[...groups].sort((x, y) => y[1] - x[1]).map(([g, c]) => `  ${g}: ${fmt(tok(c))}`),
   ];
