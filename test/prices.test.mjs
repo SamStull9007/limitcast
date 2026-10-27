@@ -35,10 +35,25 @@ test('Haiku is priced higher for a call whose whole prompt is over 100k tokens',
 
 test('every listed price keeps the 5x output-to-input ratio (a typo in the table would break it)', () => {
   for (const [id, p] of Object.entries(PRICES)) {
+    if (id.startsWith('grok-')) continue;
     close(p.output / p.input, 5);
     if (p.over) close(p.over.output / p.over.input, 5);
     assert.ok(p.readX > 0 && p.readX <= 0.1, id);
   }
+});
+
+test('Grok list prices: cache writes at input, long-context at 200k, grok-4.6-build matches grok-4.6', () => {
+  const k = 100_000; // under the 200k long-context threshold
+  const g = (o) => ({ model: 'grok-4.6', input: 0, cacheWrite: 0, cacheRead: 0, output: 0, ...o });
+  close(callCost(g({ input: k })), 0.2);
+  close(callCost(g({ output: k })), 0.6);
+  close(callCost(g({ cacheRead: k })), 0.05);
+  close(callCost(g({ cacheWrite: k })), 0.2); // writeX 1, not Claude's 1.25x
+  close(callCost(g({ input: 250_000, output: 10_000 })), 1.12); // 250k x $4 + 10k x $12
+  close(callCost(g({ input: M })), 4); // 1M is long-context
+  close(callCost({ ...g({ input: k }), model: 'grok-4.6-build' }), 0.2);
+  close(callCost({ ...g({ input: k }), model: 'grok-4.20-0309-reasoning' }), 0.125);
+  assert.equal(callCost({ ...g({ input: k }), model: 'grok-unknown' }), null);
 });
 
 test('an unknown model has no price; a dated id uses the longest matching key', () => {
@@ -116,15 +131,17 @@ test('the burn report shows API-equivalent dollars for Claude, a dash for tools 
     cacheRead: 0,
     output: 0,
   });
-  const md = burnReport([u('claude', 'claude-sonnet-5-5', M), u('codex', 'gpt-5', 4 * M)], { since: 0, now: 1 });
+  const md = burnReport([u('claude', 'claude-sonnet-5-5', M), u('codex', 'gpt-5', 4 * M), u('grok', 'grok-4.6-build', M)], { since: 0, now: 1 });
   assert.match(md, /\| tool \| tokens \| output \| cache reads \| share \| API-equivalent \|/);
-  assert.match(md, /\| claude \| 1\.0M \| 0 \| 0 \| 20% \| \$2\.00 \|/);
-  assert.match(md, /\| codex \| 4\.0M \| 0 \| 0 \| 80% \| - \|/);
+  assert.match(md, /\| claude \| 1\.0M \| 0 \| 0 \| 17% \| \$2\.00 \|/);
+  assert.match(md, /\| grok \| 1\.0M \| 0 \| 0 \| 17% \| \$4\.00 \|/); // 1M prompt is Grok long-context
+  assert.match(md, /\| codex \| 4\.0M \| 0 \| 0 \| 67% \| - \|/);
   assert.match(
     md,
-    /\*\*API-equivalent cost: \$2\.00\*\* at list prices for Claude models, not what a subscription charges\. 4\.0M tokens on other models are not counted\./,
+    /\*\*API-equivalent cost: \$6\.00\*\* at list prices for Claude and Grok models, not what a subscription charges\. 4\.0M tokens on other models are not counted\./,
   );
-  assert.match(md, /## By model[\s\S]*\| claude-sonnet-5-5 \| 1\.0M \| 20% \| \$2\.00 \|/);
-  assert.match(md, /\| gpt-5 \| 4\.0M \| 80% \| - \|/);
+  assert.match(md, /## By model[\s\S]*\| claude-sonnet-5-5 \| 1\.0M \| 17% \| \$2\.00 \|/);
+  assert.match(md, /\| grok-4\.6-build \| 1\.0M \| 17% \| \$4\.00 \|/);
+  assert.match(md, /\| gpt-5 \| 4\.0M \| 67% \| - \|/);
   assert.doesNotMatch(burnReport([u('codex', 'gpt-5', M)], { since: 0, now: 1 }), /API-equivalent cost/);
 });

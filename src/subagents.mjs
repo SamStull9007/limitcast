@@ -131,8 +131,20 @@ export function setBudget(pct) {
   writeFileSync(configFile(), JSON.stringify({ ...cfg, subagentBudget: pct }));
 }
 
-/** A model a subagent type can be pinned to: sonnet, opus, haiku or a full claude-... id. */
-export const validModel = (/** @type {unknown} */ m) => typeof m === 'string' && /^(sonnet|opus|haiku|claude-[a-z0-9.-]+)$/i.test(m);
+/** A model a subagent type can be pinned to: sonnet, opus, haiku, a claude-... id, or a grok-... id. */
+export const validModel = (/** @type {unknown} */ m) => typeof m === 'string' && /^(sonnet|opus|haiku|claude-[a-z0-9.-]+|grok-[a-z0-9.-]+)$/i.test(m);
+
+/**
+ * The pinned model for a subagent type, matching the stored name case-insensitively (Claude "Explore" vs Grok "explore").
+ * @param {unknown} type
+ */
+export function pinnedModel(type) {
+  if (typeof type !== 'string' || !type) return undefined;
+  const models = getSubagentModels();
+  if (models[type]) return models[type];
+  const want = type.toLowerCase();
+  return Object.entries(models).find(([t]) => t.toLowerCase() === want)?.[1];
+}
 
 /** @returns {Record<string, string>} the model each subagent type runs on by default, e.g. {Explore: 'haiku'} */
 export function getSubagentModels() {

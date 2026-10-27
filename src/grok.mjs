@@ -395,6 +395,48 @@ export function restoreStatusLine(toml, previous) {
  * A one-line session summary from Grok's status-line JSON (model, context %, session cost).
  * @param {any} feed
  */
+/**
+ * Set or clear a Grok `[subagents.models]` pin. A non-grok model (or null) removes that type's key.
+ * @param {string} type
+ * @param {string|null} model
+ * @param {{path?:string}} [opts]
+ */
+export function applyGrokSubagentModel(type, model, { path = grokConfigPath() } = {}) {
+  if (!existsSync(path)) return false;
+  const grokId = typeof model === 'string' && /^grok-[a-z0-9.-]+$/i.test(model) ? model : null;
+  const prev = readFileSync(path, 'utf8');
+  const next = patchGrokSubagentModel(prev, type, grokId);
+  if (next === prev) return false;
+  backup(path);
+  writeText(path, next);
+  return true;
+}
+
+/**
+ * Pure TOML patch for `[subagents.models.<type>]`. `model` null deletes the key; an empty table is removed.
+ * @param {string} toml
+ * @param {string} type
+ * @param {string|null} model
+ */
+export function patchGrokSubagentModel(toml, type, model) {
+  const key = type.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+  if (!key) return toml;
+  const range = tableRange(toml, 'subagents.models');
+  if (!range) {
+    if (!model) return toml;
+    return `${toml.trimEnd()}\n\n[subagents.models]\n${key} = ${tomlString(model)}\n`;
+  }
+  const keys = parseTable(range.body);
+  if (model) keys[key] = model;
+  else delete keys[key];
+  if (!Object.keys(keys).length) {
+    const before = toml.slice(0, range.start).trimEnd();
+    const after = toml.slice(range.end).replace(/^\n+/, '');
+    return after ? `${before}\n\n${after}` : `${before}\n`;
+  }
+  return toml.slice(0, range.start) + renderTable('subagents.models', keys, range.body) + toml.slice(range.end);
+}
+
 export function grokSessionLine(feed) {
   if (!feed || typeof feed !== 'object') return '';
   if (feed.rate_limits) return ''; // Claude Code feed
@@ -548,7 +590,7 @@ function parseTable(body) {
   /** @type {Record<string, string>} */
   const keys = {};
   for (const line of body.split('\n').slice(1)) {
-    const m = /^\s*([A-Za-z0-9_]+)\s*=\s*(.*)$/.exec(line);
+    const m = /^\s*([A-Za-z0-9_-]+)\s*=\s*(.*)$/.exec(line);
     if (!m) continue;
     keys[m[1]] = unquote(m[2].trim());
   }
@@ -572,7 +614,7 @@ function unquote(v) {
 function renderTable(name, keys, previousBody) {
   const order = [];
   for (const line of previousBody.split('\n').slice(1)) {
-    const m = /^\s*([A-Za-z0-9_]+)\s*=/.exec(line);
+    const m = /^\s*([A-Za-z0-9_-]+)\s*=/.exec(line);
     if (m && keys[m[1]] !== undefined && !order.includes(m[1])) order.push(m[1]);
   }
   for (const k of Object.keys(keys)) if (!order.includes(k)) order.push(k);

@@ -14,6 +14,7 @@ import {
   grokTrimReport,
   grokUsedServers,
   installGrok,
+  patchGrokSubagentModel,
   setGrokBudget,
   uninstallGrok,
   wrapGrokStatusLine,
@@ -204,5 +205,20 @@ test.describe({ concurrency: 1 }, () => {
     }).toString();
     assert.match(claudeOut, /waiting for data/);
     assert.doesNotMatch(claudeOut, /grok 5h/);
+  });
+
+  test('patchGrokSubagentModel writes, updates and removes [subagents.models]', () => {
+    const base = '[models]\ndefault = "grok-4.6"\n';
+    const added = patchGrokSubagentModel(base, 'Explore', 'grok-4.3');
+    assert.match(added, /\[subagents\.models\]\nexplore = "grok-4\.3"/);
+    const general = patchGrokSubagentModel(added, 'general-purpose', 'grok-4.6');
+    assert.match(general, /general-purpose = "grok-4\.6"/);
+    const gone = patchGrokSubagentModel(general, 'explore', null);
+    assert.doesNotMatch(gone, /explore =/);
+    assert.match(gone, /general-purpose = "grok-4\.6"/);
+    const empty = patchGrokSubagentModel(gone, 'general-purpose', null);
+    assert.doesNotMatch(empty, /\[subagents\.models\]/);
+    assert.match(empty, /\[models\]/);
+    assert.equal(patchGrokSubagentModel(base, 'explore', null), base);
   });
 });

@@ -85,7 +85,7 @@ test('burn report has totals, subagent share and sections', () => {
   assert.match(md, /# limitcast burn report/);
   assert.match(md, /Subagents used \*\*11%\*\*/); // 112 of 1,024 tokens
   assert.match(md, /## Top projects/);
-  assert.match(burnReport([], { since: T0, now: T0 }), /No Claude Code or Codex usage/);
+  assert.match(burnReport([], { since: T0, now: T0 }), /No Claude Code, Codex or Grok usage/);
 });
 
 test('baseline is the median first-response context of main sessions only', () => {

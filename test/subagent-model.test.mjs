@@ -19,8 +19,9 @@ const NOW = Date.now();
 const spawn = (input) => ({ tool_name: 'Agent', tool_input: input, session_id: 's1' });
 
 test('validModel accepts the aliases and full ids, nothing else', () => {
-  for (const m of ['sonnet', 'opus', 'haiku', 'claude-haiku-5-5', 'Haiku']) assert.equal(validModel(m), true, m);
-  for (const m of ['gpt-5', '', 'off', 'sonnet 4', undefined, 5]) assert.equal(validModel(m), false, String(m));
+  for (const m of ['sonnet', 'opus', 'haiku', 'claude-haiku-5-5', 'Haiku', 'grok-4.6', 'grok-4.3', 'grok-4.6-build'])
+    assert.equal(validModel(m), true, m);
+  for (const m of ['gpt-5', '', 'off', 'sonnet 4', undefined, 5, 'llama-3']) assert.equal(validModel(m), false, String(m));
 });
 
 test('setSubagentModel pins and unpins a type, and a bad stored value is ignored', () => {
@@ -81,7 +82,13 @@ test('a tight window still moves a subagent pinned to Opus to Sonnet, but leaves
 test('CLI: subagent-model is Pro, validates, lists and removes', () => {
   const state = tmp('lc-model-cli-state-');
   // XDG_CONFIG_HOME too: starting a trial also writes a marker there, which must not land in the real ~/.config.
-  const env = { ...process.env, LIMITCAST_STATE: state, XDG_CONFIG_HOME: tmp('lc-model-cli-xdg-') };
+  // GROK_HOME: pinning writes [subagents.models] and must not touch the real ~/.grok.
+  const env = {
+    ...process.env,
+    LIMITCAST_STATE: state,
+    XDG_CONFIG_HOME: tmp('lc-model-cli-xdg-'),
+    GROK_HOME: tmp('lc-model-cli-grok-'),
+  };
   delete env.LIMITCAST_LICENSE;
   const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
   const run = (...a) => spawnSync('node', [bin, 'subagent-model', ...a], { env });
@@ -91,5 +98,18 @@ test('CLI: subagent-model is Pro, validates, lists and removes', () => {
   assert.equal(run('Explore', 'gpt-5').status, 1);
   assert.match(run('Explore', 'haiku').stdout.toString(), /Explore: haiku[\s\S]*Needs the guard/);
   assert.match(run().stdout.toString(), /Explore: haiku/);
+  assert.match(run('Explore', 'grok-4.3').stdout.toString(), /Explore: grok-4\.3[\s\S]*\[subagents\.models\]/);
   assert.match(run('Explore', 'off').stdout.toString(), /No subagent type is pinned/);
+});
+
+const grokSpawn = (input) => ({ toolName: 'spawn_subagent', toolInput: input, sessionId: 'g1' });
+
+test('Grok: pin rewrites only when the spawn already has a model field; types match case-insensitively', async () => {
+  fresh();
+  setSubagentModel('explore', 'grok-4.3');
+  const withField = await runGuard(grokSpawn({ subagent_type: 'Explore', prompt: 'x', model: undefined }), NOW, 30);
+  assert.equal(withField.updatedInput.model, 'grok-4.3');
+  assert.equal(withField.updatedInput.prompt, 'x');
+  assert.equal(await runGuard(grokSpawn({ subagent_type: 'explore', prompt: 'x' }), NOW, 30), null); // no model field: schema would reject a rewrite
+  assert.equal(await runGuard(grokSpawn({ subagent_type: 'explore', prompt: 'x', model: 'grok-4.6' }), NOW, 30), null); // caller chose
 });

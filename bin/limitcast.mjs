@@ -22,6 +22,7 @@ import { coldCost, coldMessage, firstWarning } from '../src/cold.mjs';
 import { forecastAll, oneClaudeAccount, resetTarget } from '../src/forecast.mjs';
 import { formatChecks } from '../src/formats.mjs';
 import {
+  applyGrokSubagentModel,
   applyGrokTrim,
   getGrokBudget,
   grokConfigPath,
@@ -100,7 +101,7 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
                                              one starts; hold the first message after the prompt
                                              cache expired (idle over 60 min, LIMITCAST_CACHE_MINUTES) and say what it costs
   limitcast budget subagents <percent>|off   hold new subagents once they used that much of the 5-hour window
-  limitcast subagent-model <type> <model>|off  run new subagents of that type on sonnet, opus, haiku or a model id
+  limitcast subagent-model <type> <model>|off  run new subagents of that type on sonnet, opus, haiku, grok-… or a model id
   limitcast plan [--days N]                  does your Claude plan fit your use? Hit-limit and headroom evidence, and the monthly price difference
   limitcast plan set <pro|max5|max20>|off    tell limitcast which Claude plan you are on
   limitcast budget grok <usd>|off            Grok 5-hour dollar cap (Grok stores spend, not a % used; the guard
@@ -361,10 +362,16 @@ if (cmd === 'status') {
   }
   const [type, model] = args;
   if (type && (model === undefined || (model !== 'off' && !validModel(model)))) {
-    console.log('Usage: limitcast subagent-model <type> <sonnet|opus|haiku|claude-id>|off\n       limitcast subagent-model            list them');
+    console.log(
+      'Usage: limitcast subagent-model <type> <sonnet|opus|haiku|claude-id|grok-id>|off\n       limitcast subagent-model            list them',
+    );
     process.exit(1);
   }
-  if (type) setSubagentModel(type, model === 'off' ? null : model);
+  if (type) {
+    const next = model === 'off' ? null : model;
+    setSubagentModel(type, next);
+    applyGrokSubagentModel(type, next);
+  }
   const pinned = Object.entries(getSubagentModels());
   console.log(pinned.length ? pinned.map(([t, m]) => `${t}: ${m}`).join('\n') : 'No subagent type is pinned to a model.');
   const ran = new Map();
@@ -376,11 +383,12 @@ if (cmd === 'status') {
         .map(([t, n]) => `${t} (${n})`)
         .join(', ')}`,
     );
-  if (pinned.length)
+  if (pinned.length) {
     console.log(
       '\nNew subagents of these types run on that model unless the spawn names one itself. Needs the guard: limitcast install --guard, then restart Claude Code.',
     );
-  else console.log('\nExample: limitcast subagent-model Explore haiku');
+    if (pinned.some(([, m]) => /^grok-/i.test(m))) console.log('Grok also writes [subagents.models] in ~/.grok/config.toml; restart Grok.');
+  } else console.log('\nExample: limitcast subagent-model Explore haiku');
   process.exit(0);
 } else if (cmd === 'budget') {
   if (!isPro()) {
