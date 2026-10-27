@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.0
 
 - **Grok status line, trim and guard.** `limitcast install` wraps `[ui.status_line]` in `~/.grok/config.toml`. `--guard` writes `~/.grok/hooks/limitcast.json` for `spawn_subagent`. `limitcast trim --grok` measures the system prompt and unused MCP servers (`--apply` / `--undo` like Codex). Grok stores spend, not a % used: the status line shows `grok 5h $X · 7d $Y` from `usage.json`; `limitcast budget grok <usd>` (Pro) turns that into a forecast the guard can block on.
 - `limitcast report --why` now splits subagent tokens by type and model and shows all new tokens by model. A subagent's type comes from the `.meta.json` file next to its transcript. Models may count differently against your limit, so these are token counts, not window shares.
