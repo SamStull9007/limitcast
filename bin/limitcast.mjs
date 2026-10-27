@@ -59,11 +59,13 @@ import {
   budgetSpent,
   getBudget,
   getSubagentModels,
+  getTodayHold,
   loadSubagents,
   logSubagent,
   receiptMessage,
   setBudget,
   setSubagentModel,
+  setTodayHold,
   subagentUsage,
   validModel,
   windowStart,
@@ -110,6 +112,8 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
   limitcast plan set <pro|max5|max20>|off    tell limitcast which Claude plan you are on
   limitcast budget grok <usd>|off            Grok 5-hour dollar cap (Grok stores spend, not a % used; the guard
                                              needs this cap to block spawn_subagent). Optional: budget grok 7d <usd>
+  limitcast budget today on|off              hold new subagents once today's share of a weekly window is used up, until
+                                             midnight (off: you only get a notification at 80% of the share; notify on)
   limitcast install --alerts                 tell you when your starting context grows, plus a weekly summary, and
                                              when one tool result is very large (about 20k tokens), with what to ask for instead
   limitcast notify on|off|test               desktop notification when a window turns NEAR, AT_RISK or HIT, or resets,
@@ -420,9 +424,25 @@ if (cmd === 'status') {
       console.log('The budget is enforced by the guard: limitcast install --guard (then restart Grok).');
     process.exit(0);
   }
+  if (args[0] === 'today') {
+    if (args[1] !== undefined && args[1] !== 'on' && args[1] !== 'off') {
+      console.log('Usage: limitcast budget today on|off');
+      process.exit(1);
+    }
+    if (args[1]) setTodayHold(args[1] === 'on');
+    console.log(
+      getTodayHold()
+        ? "Daily hold is on: the guard holds new subagents once today's share of a weekly window is used up, until midnight. Turn it off: limitcast budget today off"
+        : "Daily hold is off: you get a notification at 80% of today's share (limitcast notify on), nothing is held. Hold new subagents past it: limitcast budget today on",
+    );
+    if (getTodayHold() && !installedFeatures().guard) console.log('The hold is enforced by the guard: limitcast install --guard');
+    process.exit(0);
+  }
   const value = args[1];
   if (args[0] !== 'subagents' || (value !== undefined && value !== 'off' && !(Number(value) > 0 && Number(value) <= 100))) {
-    console.log('Usage: limitcast budget subagents <percent of the 5-hour window, 1-100>|off\n       limitcast budget grok <usd>|off');
+    console.log(
+      'Usage: limitcast budget subagents <percent of the 5-hour window, 1-100>|off\n       limitcast budget grok <usd>|off\n       limitcast budget today on|off',
+    );
     process.exit(1);
   }
   if (value !== undefined) setBudget(value === 'off' ? null : Number(value));
@@ -930,7 +950,7 @@ function freeWeeklyHint(t) {
   }
   if (t < from) return null;
   const preview = loadBlocks(t - WEEK).filter((b) => b.shadow);
-  const stopped = preview.filter((b) => !b.kind || b.kind === 'budget').length;
+  const stopped = preview.filter((b) => !b.kind || b.kind === 'budget' || b.kind === 'today').length;
   const moved = preview.filter((b) => b.kind === 'switch').length;
   const cold = preview.filter((b) => b.kind === 'cold').length;
   if (!stopped && !moved && !cold) return null;

@@ -4,7 +4,7 @@ import { grokSamples } from './grok.mjs';
 import { logBlock } from './results.mjs';
 import { readCodex } from './sources.mjs';
 import { KEEP_MS, load } from './store.mjs';
-import { budgetMessage, budgetSpent, getBudget, loadSubagents, pinnedModel, spawnNotice, windowStart } from './subagents.mjs';
+import { budgetMessage, budgetSpent, getBudget, getTodayHold, loadSubagents, pinnedModel, spawnNotice, windowStart } from './subagents.mjs';
 
 const NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok' };
 
@@ -95,6 +95,27 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
     }
   }
   if (reason) return preview ? null : reason;
+  // Today's share of a weekly window is used up: hold new subagents until local midnight, when the share starts over.
+  // Opt-in for Pro (`limitcast budget today on`; the default is a notification at 80%); a free preview records it either way.
+  // A window already at 100% is left to the tool. shortcut: Codex readings here span only 2 hours, so its share reads low.
+  const day = todayOver(src, forecasts);
+  if (day && (preview || getTodayHold())) {
+    try {
+      logBlock({
+        t: now,
+        kind: 'today',
+        src: day.src,
+        win: day.win,
+        pct: Math.round(day.today.used),
+        wall: now,
+        reset: new Date(now).setHours(24, 0, 0, 0),
+        ...(preview ? { shadow: true } : {}),
+      });
+    } catch {
+      /* a failed log must not change the decision */
+    }
+    if (!preview) return todayMessage(day);
+  }
   // Pro: hold new Claude subagents once those of this account have used their budget of the current 5-hour window.
   const budget = src === 'claude' ? getBudget() : null;
   if (budget) {
@@ -181,6 +202,20 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
     reason: `limitcast: Claude ${tight.win} limit is ${Math.round(tight.pct)}% used${tight.verdict === 'AT_RISK' ? ' and on pace to run out before it resets' : ''}; this subagent runs on Sonnet. Set LIMITCAST_ALLOW=1 to keep the main model.`,
   };
 }
+
+/**
+ * The spawning tool's weekly window when today's even share of it is used up (and the window itself is not at 100%).
+ * @param {'claude'|'codex'|'grok'|null} src
+ * @param {ReturnType<typeof import('./forecast.mjs').forecastAll>} forecasts
+ */
+function todayOver(src, forecasts) {
+  return forecasts.find((f) => f.src === src && f.today && f.today.left < 0 && f.verdict !== 'HIT' && f.verdict !== 'RESET');
+}
+
+/** @param {NonNullable<ReturnType<typeof todayOver>>} f */
+const todayMessage = (f) =>
+  `limitcast: today's share of your ${NAMES[/** @type {'claude'} */ (f.src)]} ${f.win} limit is used up (${Math.round(f.today?.used ?? 0)}% of ${Math.round(f.today?.budget ?? 0)}%). ` +
+  'New subagents are held until midnight. Turn this off: `limitcast budget today off`, or set LIMITCAST_ALLOW=1 to spawn anyway.';
 
 const SWITCH_TO = 'sonnet';
 

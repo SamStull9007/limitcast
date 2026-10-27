@@ -5,7 +5,7 @@ import { claudeAccounts, forecast } from './forecast.mjs';
 import { stateDir } from './store.mjs';
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */
-/** @typedef {{t:number, src:string, win:string, pct:number, wall:number, reset:number, sid?:string, shadow?:boolean, kind?:string, from?:string, to?:string, type?:string, tokens?:number}} Block  t, wall, reset: epoch ms; shadow: a free install's preview, not acted on; kind "switch": a subagent moved to Sonnet instead of blocked, "budget": a subagent held over the budget, "cold": a message held after the prompt cache expired (pct: its cost, tokens: context re-sent); no kind: a forecast block */
+/** @typedef {{t:number, src:string, win:string, pct:number, wall:number, reset:number, sid?:string, shadow?:boolean, kind?:string, from?:string, to?:string, type?:string, tokens?:number}} Block  t, wall, reset: epoch ms; shadow: a free install's preview, not acted on; kind "switch": a subagent moved to Sonnet instead of blocked, "budget": a subagent held over the budget, "cold": a message held after the prompt cache expired (pct: its cost, tokens: context re-sent), "today": a subagent held once today's share of a weekly window was used up (pct: used today); no kind: a forecast block */
 
 const JITTER_MS = 120_000; // Codex resets_at drifts by seconds between events
 const NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok' };
@@ -131,6 +131,7 @@ export function resultsStats({ now, days, samples, blocks, pro }) {
   const defaults = mine.filter((b) => b.kind === 'default').length;
   const colds = mine.filter((b) => b.kind === 'cold');
   const budgets = mine.filter((b) => b.kind === 'budget').length;
+  const todays = mine.filter((b) => b.kind === 'today').length;
   return {
     readings,
     hits,
@@ -142,6 +143,7 @@ export function resultsStats({ now, days, samples, blocks, pro }) {
     colds: colds.length,
     coldPct: colds.reduce((a, b) => a + b.pct, 0),
     budgets,
+    todays,
   };
 }
 
@@ -177,6 +179,7 @@ export function weeklyLine(st, savedPerSession, notResent = 0) {
   if (st.switches) parts.push(`moved ${st.switches} to Sonnet`);
   if (st.defaults) parts.push(`ran ${st.defaults} on their set model`);
   if (st.budgets) parts.push(`held ${st.budgets} over budget`);
+  if (st.todays) parts.push(`held ${st.todays} once today's share was used`);
   if (st.colds) parts.push(`caught ${st.colds} cold-cache message${st.colds === 1 ? '' : 's'}`);
   if (savedPerSession && savedPerSession > 0) parts.push(`starting context ${fmtK(savedPerSession)} tokens smaller`);
   if (notResent > 0) parts.push(`${fmtK(notResent)} tokens not re-sent`);
@@ -276,6 +279,10 @@ export function resultsReport({ now, days, samples, blocks, pro, saved, value = 
       `${pro ? 'Ran' : 'Pro would have run'} ${st.defaults} subagent${st.defaults === 1 ? '' : 's'} on the model you set for their type (limitcast subagent-model).`,
     );
   if (st.budgets) out.push(`Held ${st.budgets} subagent${st.budgets === 1 ? '' : 's'} once subagents had used their budget of the 5-hour window.`);
+  if (st.todays)
+    out.push(
+      `${pro ? 'Held' : 'Pro could have held'} ${st.todays} subagent${st.todays === 1 ? '' : 's'} once today's share of a weekly window was used up (limitcast budget today on).`,
+    );
 
   const recent = subagents.filter((e) => e.t >= now - days * 86400_000);
   if (recent.length || st.colds) {

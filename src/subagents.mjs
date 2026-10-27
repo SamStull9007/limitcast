@@ -131,6 +131,27 @@ export function setBudget(pct) {
   writeFileSync(configFile(), JSON.stringify({ ...cfg, subagentBudget: pct }));
 }
 
+/** Whether the guard holds new subagents once today's share of a weekly window is used up (`limitcast budget today on`). */
+export function getTodayHold() {
+  try {
+    return JSON.parse(readFileSync(configFile(), 'utf8')).todayHold === true;
+  } catch {
+    return false;
+  }
+}
+
+/** @param {boolean} on */
+export function setTodayHold(on) {
+  let cfg = {};
+  try {
+    cfg = JSON.parse(readFileSync(configFile(), 'utf8'));
+  } catch {
+    /* new */
+  }
+  mkdirSync(stateDir(), { recursive: true });
+  writeFileSync(configFile(), JSON.stringify({ ...cfg, todayHold: on }));
+}
+
 /** A model a subagent type can be pinned to: sonnet, opus, haiku, a claude-... id, or a grok-... id. */
 export const validModel = (/** @type {unknown} */ m) => typeof m === 'string' && /^(sonnet|opus|haiku|claude-[a-z0-9.-]+|grok-[a-z0-9.-]+)$/i.test(m);
 

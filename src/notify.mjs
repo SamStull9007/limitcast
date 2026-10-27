@@ -25,11 +25,14 @@ export function setNotify(on) {
 /**
  * Messages for windows that got worse since the last notification, or reset after reaching their limit.
  * Within one window the state only ratchets up, so a pace that wobbles around a threshold notifies once.
- * @param {{src:string, win:string, pct:number, reset:number, wall:number|null, verdict:string}[]} rows
+ * A weekly window's daily share also notifies once a day, at 80% of today's share used (key "<src>|<win>|today",
+ * reset = that day's midnight).
+ * @param {{src:string, win:string, pct:number, reset:number, wall:number|null, verdict:string, today?:{budget:number, used:number, left:number}|null}[]} rows
  * @param {Record<string, {reset:number, verdict:string}>} prev
  * @param {(ms:number)=>string} clock
+ * @param {number} [now] epoch ms
  */
-export function transitions(rows, prev, clock) {
+export function transitions(rows, prev, clock, now = Date.now()) {
   const messages = [];
   const next = { ...prev };
   for (const f of rows) {
@@ -49,6 +52,16 @@ export function transitions(rows, prev, clock) {
     if (f.verdict === 'AT_RISK' && f.wall)
       messages.push(`${name} limit is on pace to run out at ${clock(f.wall)}, before it resets at ${clock(f.reset)}.`);
     if (f.verdict === 'HIT') messages.push(`${name} limit reached. Resets ${clock(f.reset)}.`);
+  }
+  const midnight = new Date(now).setHours(0, 0, 0, 0);
+  for (const f of rows) {
+    const t = f.today;
+    const key = `${f.src}|${f.win}|today`;
+    if (!t || t.budget <= 0 || t.used < 0.8 * t.budget || f.verdict === 'HIT' || next[key]?.reset === midnight) continue;
+    next[key] = { reset: midnight, verdict: 'NEAR' };
+    messages.push(
+      `${NAMES[/** @type {'claude'} */ (f.src)] ?? f.src} ${f.win}: ${Math.round((t.used / t.budget) * 100)}% of today's share used, ${Math.max(0, Math.round(t.left))}% left today.`,
+    );
   }
   return { messages, next };
 }
