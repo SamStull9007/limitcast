@@ -43,7 +43,9 @@ import { doctor, install, installedFeatures, readSettings, settingsPath, uninsta
 import { activate, currentLicense, isPro, startTrial, trialStatus, UPGRADE_URL } from '../src/license.mjs';
 import { buildNotifierApp, loadChannels, notifierApp, notifyChanges, notifyEnabled, send, setChannel, setNotify } from '../src/notify.mjs';
 import { driftMessage, loadOverhead, recordOverhead, savedPerSession, savedSummary, snapshot } from '../src/overhead.mjs';
+import { advise, getPlan, loadPeaks, PLANS, planPrices, planStats, recordPeaks, setPlan } from '../src/plan.mjs';
 import { activatePolar, deactivatePolar, refreshDue, refreshPolar } from '../src/polar.mjs';
+import { costOf, fmtUsd } from '../src/prices.mjs';
 import { burnReport } from '../src/report.mjs';
 import { loadBlocks, logBlock, resultsReport, resultsShare, resultsStats, weeklyDue, weeklyLine } from '../src/results.mjs';
 import { claudeSamples, readCodex } from '../src/sources.mjs';
@@ -99,6 +101,8 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
                                              cache expired (idle over 60 min, LIMITCAST_CACHE_MINUTES) and say what it costs
   limitcast budget subagents <percent>|off   hold new subagents once they used that much of the 5-hour window
   limitcast subagent-model <type> <model>|off  run new subagents of that type on sonnet, opus, haiku or a model id
+  limitcast plan [--days N]                  does your Claude plan fit your use? Hit-limit and headroom evidence, and the monthly price difference
+  limitcast plan set <pro|max5|max20>|off    tell limitcast which Claude plan you are on
   limitcast budget grok <usd>|off            Grok 5-hour dollar cap (Grok stores spend, not a % used; the guard
                                              needs this cap to block spawn_subagent). Optional: budget grok 7d <usd>
   limitcast install --alerts                 tell you when your starting context grows, plus a weekly summary, and
@@ -306,6 +310,50 @@ if (cmd === 'status') {
   } catch {
     /* a hook must never break the session */
   }
+} else if (cmd === 'plan') {
+  if (!isPro()) {
+    console.log(
+      `\`limitcast plan\` is part of limitcast Pro: ${UPGRADE_URL}\nTry it free for 7 days: limitcast trial. Already bought it? limitcast activate <license-key>`,
+    );
+    process.exit(2);
+  }
+  if (args[0] === 'set') {
+    const id = args[1];
+    if (id !== 'off' && !(id in PLANS)) {
+      console.log('Usage: limitcast plan set <pro|max5|max20>|off');
+      process.exit(1);
+    }
+    setPlan(id === 'off' ? null : /** @type {keyof typeof PLANS} */ (id));
+    console.log(id === 'off' ? 'Plan forgotten.' : `Plan set to Claude ${PLANS[/** @type {keyof typeof PLANS} */ (id)].name}. Run: limitcast plan`);
+    process.exit(0);
+  }
+  const planDays = Math.max(1, Number(flag('--days') ?? 28));
+  recordPeaks(load(now - KEEP_MS), now);
+  const plan = getPlan();
+  const prices = planPrices();
+  const advice = advise(plan, planStats(loadPeaks(), now, planDays), prices);
+  const out = [
+    '# limitcast plan',
+    '',
+    `Claude plan: ${plan ? `${PLANS[plan].name}, ${fmtUsd(prices[plan])} a month` : 'not set'}`,
+    '',
+    ...advice.lines,
+  ];
+  const used = (await readUsage(now - planDays * 86400_000, {})).filter((u) => u.src === 'claude');
+  const cost = costOf(used);
+  if (plan && cost.priced) {
+    const span = Math.min(planDays, Math.max(1, (now - Math.min(...used.map((u) => u.t))) / 86400_000));
+    out.push(
+      '',
+      `At API list prices your Claude Code tokens of the last ${Math.round(span)} days would have cost ${fmtUsd(cost.total)} (about ${fmtUsd((cost.total * 30) / span)} a month at this pace), against ${fmtUsd(prices[plan])} for your plan.`,
+    );
+  }
+  out.push(
+    '',
+    '_From the peak of every 5-hour and weekly window limitcast has seen; plan prices and multipliers from claude.com/pricing, 2026-10-26._',
+  );
+  console.log(forTerminal(out.join('\n')));
+  process.exit(0);
 } else if (cmd === 'subagent-model') {
   if (!isPro()) {
     console.log(`Per-type subagent models are part of limitcast Pro: ${UPGRADE_URL}`);
@@ -889,6 +937,7 @@ function healthHint() {
 async function refreshValue() {
   const since = now - KEEP_MS;
   const claude = load(since);
+  recordPeaks(claude, now); // the long-lived record of window peaks behind `limitcast plan`
   const o = loadOverhead();
   // limitcast started watching at its first status-line reading (or first measurement), not when Codex's logs begin.
   const start = Math.min(now, o?.first.at ?? now, ...claude.map((s) => s.t));
