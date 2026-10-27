@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.0
+
+- New: `limitcast trim keep <name>[,<name>]` lists servers and skills that `trim --apply` never turns off or hides (Claude, Codex and Grok), for example `limitcast trim keep ego-browser`. `trim` shows what it would keep, and `--remove <name>` drops one.
+- New (Pro): the `today N% left` pace of a weekly window now acts. You get one notification a day at 80% of today's share, and `limitcast budget today on` makes the guard hold new subagents once today's share is used up, until local midnight. It is off by default, a window already at 100% is left to the tool, and `LIMITCAST_ALLOW=1` overrides it. Free installs see what Pro would have held in `results`.
+- `limitcast status` now says which window runs out first and where else there is room, for example "You'll hit Claude 7d first (Thu 14:00). Grok 5h still has $38."
+
 ## 0.13.1
 
 - **Fix:** the advice at the end of `limitcast report --jobs` told you to launch a job with `--setting-sources "" --strict-mcp-config`, which also drops the claude.ai connectors, so a job that reads from HubSpot or Slack would stop working. It now leads with `--settings '{"disableAllHooks": true}'` (hooks off, connectors kept; about 16k new tokens down to about 5k per start in one test) and says plainly that the harder flags drop the connectors.
