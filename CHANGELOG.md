@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.1 — 2026-10-27
+
+- **Fix:** the Grok weekly-usage request now sends `User-Agent: limitcast` instead of `Grok Build`, so it says who is asking. grok.com gave the same answer with either. `limitcast grok-usage on` and the docs no longer say the request is the one Grok Build makes: that was never verified.
+
 ## 0.17.0 — 2026-10-27
 
 - New: `limitcast grok-usage on` shows Grok's real weekly % used. Grok keeps no % on disk, so limitcast asks grok.com for your billing cycle with the login in `~/.grok/auth.json`, about every 5 minutes. It is off by default because it is the one place limitcast uses a login: the login is read in memory, sent only to grok.com (redirects refused) and never stored or logged. The readings feed `status`, the Grok status line, the guard and `doctor`, and a weekly dollar cap steps aside for them. `limitcast grok-usage off` stops it. Weekly plans only; a monthly credit plan is reported but not forecast.
