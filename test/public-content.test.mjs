@@ -18,7 +18,9 @@ const privateFiles = [
   'docs/market-positioning.md',
   'docs/pilot-participants.example.json',
 ];
-const allowedEmail = (email) => email.toLowerCase() === 'support@limitcast.dev' || email === 'a@b.co' || /@example\.(com|org|net|test)$/i.test(email);
+const ownerEmail = (email) =>
+  email.toLowerCase() === 'support@limitcast.dev' || email === 'noreply@github.com' || email.endsWith('@users.noreply.github.com');
+const allowedEmail = (email) => ownerEmail(email) || email === 'a@b.co' || /@example\.(com|org|net|test)$/i.test(email);
 
 function issues(text) {
   const found = [];
@@ -55,15 +57,11 @@ test('privacy checks catch representative spills and permit public support and f
   assert.ok(issues(['person', 'gmail.com'].join('@')).includes('unreviewed contact email'));
   assert.ok(issues('https://' + 'claude.ai/' + 'artifact/' + 'example-id').includes('private artifact link'));
   assert.ok(issues('LAUNCH' + '30').includes('internal campaign code'));
-  assert.deepEqual(issues('support@limitcast.dev buyer@example.com a@b.co'), []);
+  assert.deepEqual(issues('support@limitcast.dev buyer@example.com a@b.co noreply@github.com'), []);
 });
 
 test('owner-authored commits use the public project contact or GitHub privacy address', () => {
   const [name, author, committer] = execFileSync('git', ['log', '-1', '--format=%an%n%ae%n%ce'], { cwd: root, encoding: 'utf8' }).trim().split('\n');
   if (name !== 'Sam Stull') return;
-  for (const email of [author, committer])
-    assert.ok(
-      email === 'support@limitcast.dev' || email.endsWith('@users.noreply.github.com'),
-      'Owner commit contact must use a public project/privacy address',
-    );
+  for (const email of [author, committer]) assert.ok(ownerEmail(email), 'Owner commit contact must use a public project/privacy address');
 });
