@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.17.2 — 2026-10-27
+
+- Fix: doctor accepts Claude sessions awaiting their first assistant response and optional subscription limit fields, while still rejecting malformed readings.
+- Fix: memory checks follow plain filename citations, exclude agent policy files, and distinguish missing local links from externally indexed notes. The memory audit command checks external catalog provenance before proposing repairs.
+
 ## 0.17.1 — 2026-10-27
 
 - **Fix:** the Grok weekly-usage request now sends `User-Agent: limitcast` instead of `Grok Build`, so it says who is asking. grok.com gave the same answer with either. `limitcast grok-usage on` and the docs no longer say the request is the one Grok Build makes: that was never verified.

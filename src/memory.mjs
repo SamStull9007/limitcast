@@ -28,7 +28,7 @@ const slug = (s) => s.toLowerCase().replace(/\.md$/, '').replace(/[_\s]/g, '-');
 export function scanMemory(dir) {
   const indexPath = join(dir, 'MEMORY.md');
   if (!existsSync(indexPath)) return null;
-  const names = readdirSync(dir).filter((f) => f.endsWith('.md'));
+  const names = readdirSync(dir).filter((f) => f.endsWith('.md') && !['CLAUDE.md', 'AGENTS.md', 'CODEX.md'].includes(f));
   /** @type {Map<string, string>} */
   const text = new Map(names.map((f) => [f, readFileSync(join(dir, f), 'utf8')]));
   const index = /** @type {string} */ (text.get('MEMORY.md'));
@@ -49,6 +49,8 @@ export function scanMemory(dir) {
         }),
       // [[name]] links; one with no file yet is allowed (a note worth writing later), so never "broken".
       ...[...body.matchAll(/\[\[([^\]|#]+)/g)].map((m) => bySlug.get(slug(m[1].trim())) ?? ''),
+      // Catalogs also route to local notes by plain or backticked filename.
+      ...[...body.matchAll(/(?<![\w/.-])([A-Za-z0-9_-]+\.md)\b/g)].map((m) => (text.has(m[1]) ? m[1] : '')),
     ];
     for (const t of targets) {
       if (!text.has(t) || reached.has(t)) continue;
@@ -94,7 +96,7 @@ export function memoryCheck(s) {
     };
   const parts = [
     s.index.lines >= INDEX_LINES * 0.8 || s.index.bytes >= INDEX_BYTES * 0.8 ? 'index close to the cap' : '',
-    s.orphans.length ? `${s.orphans.length} not linked from the index` : '',
+    s.orphans.length ? `${s.orphans.length} not linked from the local index (may be externally indexed)` : '',
     s.broken.length ? `${s.broken.length} broken link${s.broken.length === 1 ? '' : 's'}` : '',
     s.big.length ? `${s.big.length} file${s.big.length === 1 ? '' : 's'} over ${BIG_LINES} lines` : '',
   ].filter(Boolean);
@@ -112,7 +114,10 @@ export function memoryReport(s, dir = '') {
     `Index: MEMORY.md ${s.index.lines} / ${INDEX_LINES} lines, ${(s.index.bytes / 1000).toFixed(1)} / 25 KB${overCap(s) ? ' (OVER: what is past the cap is never loaded)' : ''}`,
     `Topic files: ${s.files}`,
   ];
-  if (s.orphans.length) out.push(`Not linked from the index (${s.orphans.length}): ${s.orphans.join(', ')}`);
+  if (s.orphans.length)
+    out.push(
+      `Not linked from the local index (${s.orphans.length}; check external catalogs before treating these as orphans): ${s.orphans.join(', ')}`,
+    );
   if (s.broken.length) out.push(`Broken links (${s.broken.length}): ${s.broken.map((b) => `${b.from} -> ${b.target}`).join(', ')}`);
   if (s.big.length)
     out.push(

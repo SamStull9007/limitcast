@@ -75,7 +75,10 @@ test('format checks pass on current formats and flag a changed one', async () =>
       join(claudeHome, 'projects', 'p', 's.jsonl'),
       JSON.stringify({ type: 'assistant', message: { tokenUsage: { out: 1 } }, usage: 'x' }),
     );
-    writeFileSync(join(process.env.LIMITCAST_STATE, 'last-feed.json'), JSON.stringify({ at: 1, rate_limits: { five_hour: { used_percentage: 'unknown' } } }));
+    writeFileSync(
+      join(process.env.LIMITCAST_STATE, 'last-feed.json'),
+      JSON.stringify({ at: 1, rate_limits: { five_hour: { used_percentage: 'unknown' } } }),
+    );
     const bad = await formatChecks();
     assert.ok(bad.some((c) => !c.ok && /transcript has no readable usage/.test(c.line)));
     assert.ok(bad.some((c) => !c.ok && /status-line feed has unreadable rate_limits/.test(c.line)));

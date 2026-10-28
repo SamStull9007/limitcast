@@ -39,7 +39,7 @@ test('memoryCheck fails only when the index is past what Claude Code loads', () 
   assert.equal(fine.ok, true);
   assert.match(
     fine.line,
-    /2 not linked from the index, 1 broken link, 1 file over 150 lines\. Run \/limitcast:memory-audit, then \/limitcast:memory-split/,
+    /2 not linked from the local index \(may be externally indexed\), 1 broken link, 1 file over 150 lines\. Run \/limitcast:memory-audit, then \/limitcast:memory-split/,
   );
   const over = memoryCheck(scanMemory(fixture(`${'- [A](a.md)\n'.repeat(201)}`)));
   assert.equal(over.ok, false);
@@ -47,6 +47,21 @@ test('memoryCheck fails only when the index is past what Claude Code loads', () 
   const bytes = memoryCheck(scanMemory(fixture(`- ${'x'.repeat(26_000)}\n`)));
   assert.equal(bytes.ok, false);
   assert.match(memoryReport(scanMemory(fixture())), /Broken links \(1\): MEMORY\.md -> gone\.md/);
+});
+
+test('scanMemory follows plain filename citations and excludes agent policy files', () => {
+  const dir = fixture('# Memory\nSee `a.md` and b_note.md.\n');
+  writeFileSync(join(dir, 'a.md'), 'Next: c.md. External: https://example.com/d.md\n');
+  for (const name of ['CLAUDE.md', 'AGENTS.md', 'CODEX.md']) writeFileSync(join(dir, name), 'Agent policy\n'.repeat(200));
+  const s = scanMemory(dir);
+  assert.equal(s.files, 5);
+  assert.deepEqual(s.orphans.sort(), ['big.md', 'd.md']);
+  assert.deepEqual(s.broken, []);
+  assert.deepEqual(
+    s.big.map((f) => f.name),
+    ['big.md'],
+  );
+  assert.match(memoryReport(s), /check external catalogs before treating these as orphans/);
 });
 
 test('CLI: memory prints the sweep, and doctor shows the memory line for this project', () => {

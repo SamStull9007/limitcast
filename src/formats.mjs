@@ -30,7 +30,10 @@ export async function formatChecks() {
       Number.isFinite(rl?.five_hour?.used_percentage ?? rl?.seven_day?.used_percentage)
         ? { ok: true, line: 'Claude Code status-line feed: limit readings present' }
         : validFeed && noWindows
-          ? { ok: true, line: 'Claude Code status-line feed: no subscription limit readings available yet (normal before a response or without a supported subscription)' }
+          ? {
+              ok: true,
+              line: 'Claude Code status-line feed: no subscription limit readings available yet (normal before a response or without a supported subscription)',
+            }
           : { ok: false, line: 'Claude Code status-line feed has unreadable rate_limits: the format may have changed, update limitcast' },
     );
   }
