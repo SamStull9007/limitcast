@@ -202,9 +202,9 @@ export function grokSpend(now, root = grokRoot()) {
   return out;
 }
 
-// Grok weekly %, opt-in (`limitcast grok-usage on`). Grok keeps no % on disk, so limitcast asks grok.com the same billing
-// question Grok Build asks, with the login Grok already holds in auth.json. That login is read in this process, sent only to
-// grok.com, and never stored or logged.
+// Grok weekly %, opt-in (`limitcast grok-usage on`). Grok keeps no % on disk, so limitcast asks grok.com for the billing
+// cycle with the login Grok already holds in auth.json (the call TokScale makes; checked 2026-10-27, not documented by xAI).
+// That login is read in this process, sent only to grok.com, and never stored or logged.
 const QUOTA_URL = 'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig';
 const QUOTA_EVERY_MS = 5 * 60_000;
 const quotaFile = () => join(stateDir(), 'grok-quota.json');
@@ -369,7 +369,7 @@ async function askGrok(token, fetchFn) {
         'x-xai-token-auth': 'xai-grok-cli',
         accept: 'application/grpc-web+proto',
         'content-type': 'application/grpc-web+proto',
-        'user-agent': 'Grok Build',
+        'user-agent': 'limitcast', // says who is asking; grok.com gave the same answer as with a Grok client's User-Agent (checked 2026-10-27)
       },
       body: new Uint8Array([0, 0, 0, 0, 0]),
     });

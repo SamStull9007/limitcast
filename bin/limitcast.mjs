@@ -552,7 +552,7 @@ if (cmd === 'status') {
     if (arg) setGrokQuota(arg === 'on');
     if (arg === 'on')
       console.log(
-        'Grok weekly usage is on. About every 5 minutes limitcast reads the login Grok keeps in ~/.grok/auth.json and asks grok.com for your usage, the way Grok Build does. The login goes only to grok.com and is never stored or logged. Turn it off: limitcast grok-usage off',
+        'Grok weekly usage is on. About every 5 minutes limitcast reads the login Grok keeps in ~/.grok/auth.json and asks grok.com for your usage. The login goes only to grok.com and is never stored or logged. Turn it off: limitcast grok-usage off',
       );
     if (arg === 'off') console.log('Grok weekly usage is off. limitcast no longer reads your Grok login or contacts grok.com.');
     else if (grokQuotaEnabled()) {
