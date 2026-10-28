@@ -1,2 +1,13 @@
 node_modules/
 *.tgz
+
+# Private operator tools and research are maintained outside this repository.
+scripts/metrics.mjs
+scripts/launch-reminders.mjs
+scripts/pilot-metrics.mjs
+scripts/issue-license.mjs
+scripts/keygen.mjs
+docs/pilot.md
+docs/market-positioning.md
+docs/pilot-participants.example.json
+private/
