@@ -45,7 +45,7 @@ All features are now free. A guard previously installed in preview mode will enf
 npm install -g limitcast     # or: brew trust samstull9007/limitcast && brew install samstull9007/limitcast/limitcast
 limitcast onboard            # read-only: setup checks and a first useful result
 limitcast install            # free: status-line recorder
-limitcast install --guard    # also the subagent guard (free: preview only)
+limitcast install --guard    # also the subagent guard (free; holds new subagents when a limit is on pace to run out)
 limitcast doctor
 ```
 
