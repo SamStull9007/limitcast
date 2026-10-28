@@ -45,6 +45,7 @@ import { accountForecasts, bindingLine, compactHint, headroom, lastCall, lastCal
 import { htmlPage } from '../src/html.mjs';
 import { insightsReport, insightsShare, periodInsights } from '../src/insights.mjs';
 import { doctor, install, installedFeatures, readSettings, settingsPath, uninstall } from '../src/install.mjs';
+import { memoryCheck, memoryDir, memoryReport, scanMemory } from '../src/memory.mjs';
 import { buildNotifierApp, loadChannels, notifierApp, notifyChanges, notifyEnabled, send, setChannel, setNotify } from '../src/notify.mjs';
 import { onboardingReport } from '../src/onboarding.mjs';
 import { driftMessage, loadOverhead, recordOverhead, savedPerSession, savedSummary, snapshot } from '../src/overhead.mjs';
@@ -88,6 +89,7 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
   limitcast trim [--share]           tokens every session loads before you type, and how much you never use
   limitcast trim --codex             the same for Codex: AGENTS.md size and MCP servers you haven't used
   limitcast trim --grok              the same for Grok: system prompt size and MCP servers you haven't used
+  limitcast memory [dir]             check this project's auto-memory: load cap, broken links, unlinked and oversized files
   limitcast results [--days N]       limits you reached, how far ahead limitcast warned, what the guard blocked
                     [--share]        totals only, safe to post
   limitcast license                  show the MIT license status
@@ -510,8 +512,14 @@ if (cmd === 'status') {
   }
   const checks = await healthChecks();
   saveHealth(checks);
+  // Memory is per project: shown here, but kept out of the saved health that the daily background check overwrites.
+  const mem = memoryCheck(scanMemory(memoryDir()));
+  if (mem) checks.push(mem);
   for (const c of checks) console.log(`${c.ok ? '✓' : '✗'} ${c.line}`);
   process.exit(checks.every((c) => c.ok) ? 0 : 1);
+} else if (cmd === 'memory') {
+  const dir = args.find((a) => !a.startsWith('-')) ?? memoryDir();
+  console.log(memoryReport(scanMemory(dir), dir));
 } else if (cmd === 'report' || cmd === 'trim') {
   const pro = true;
   const since = now - days() * 86400_000;

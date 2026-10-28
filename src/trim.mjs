@@ -2,6 +2,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { memoryDir } from './memory.mjs';
 import { fmt } from './report.mjs';
 
 /** @typedef {import('./usage.mjs').Usage} Usage */
@@ -50,7 +51,7 @@ export function contributors({ home = homedir(), cwd = process.cwd() } = {}) {
   file(join(claudeDir, 'CLAUDE.md'), 'Global CLAUDE.md');
   if (cwd !== home) file(join(cwd, 'CLAUDE.md'), 'Project CLAUDE.md');
   file(join(home, 'CLAUDE.md'), 'Home CLAUDE.md');
-  file(join(claudeDir, 'projects', cwd.replace(/[^A-Za-z0-9]/g, '-'), 'memory', 'MEMORY.md'), 'Auto-memory index');
+  file(join(memoryDir({ home, cwd }), 'MEMORY.md'), 'Auto-memory index');
   files.sort((a, b) => b.tokens - a.tokens);
 
   const overrides = readJson(join(claudeDir, 'settings.json'))?.skillOverrides ?? {};

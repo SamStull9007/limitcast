@@ -49,7 +49,7 @@ limitcast install --guard    # also the subagent guard (free: preview only)
 limitcast doctor
 ```
 
-In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast:results` and `/limitcast:trim`: `/plugin marketplace add SamStull9007/limitcast`, then `/plugin install limitcast@limitcast`. The status-line recorder still comes from `limitcast install`.
+In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast:results`, `/limitcast:trim`, `/limitcast:memory-audit` and `/limitcast:memory-split`: `/plugin marketplace add SamStull9007/limitcast`, then `/plugin install limitcast@limitcast`. The status-line recorder still comes from `limitcast install`.
 
 `install` backs up `~/.claude/settings.json` and wraps your existing status line: it looks exactly the same, and the limitcast line (for example `limitcast: 5h 14% · 7d 18% · today 9% left`) goes on the line under it. `--guard` adds the subagent guard (all features are free). Restart Claude Code to load it. `limitcast uninstall` puts everything back.
 
@@ -75,7 +75,8 @@ In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast
 | `limitcast after-reset [--src claude/codex] [--window 5h/7d] [--detach] -- <cmd>` | Wait for the window to reset, then run the command |
 | `limitcast results --html [--out FILE]` | Results, current windows and the burn report on one page, opened in your browser |
 | `limitcast install [--guard] [--alerts]` / `uninstall` | Wire into Claude Code / restore your settings |
-| `limitcast doctor [--fix]` | Check the setup, data freshness, and that Claude Code, Codex and Grok logs are still in a format limitcast reads. Also runs daily in the background and flags problems in the status line. `--fix` re-installs with the current Node (after a Node upgrade) |
+| `limitcast doctor [--fix]` | Check the setup, data freshness, this project's auto-memory index (see `memory`), and that Claude Code, Codex and Grok logs are still in a format limitcast reads. Also runs daily in the background and flags problems in the status line (the memory line only shows when you run `doctor` yourself). `--fix` re-installs with the current Node (after a Node upgrade) |
+| `limitcast memory [dir]` | Check this project's auto-memory folder (`~/.claude/projects/<project>/memory`): how much of `MEMORY.md` fits in what Claude Code loads each session (the first 200 lines or 25 KB; anything past that is never read), broken links, topic files nothing links to, and files over 150 lines. Read-only. In Claude Code, `/limitcast:memory-audit` takes it from there (stale, contradictory and unlinked notes) and `/limitcast:memory-split` splits an oversized file into a short hub plus topic files |
 | `limitcast report [--days N] [--out FILE]` | Tokens by tool, day, project, model and session; subagent share; and the API-equivalent cost: what the tokens would cost at the API's list prices (Claude and Grok models; a subscription is not billed this way). Prices are in the code as of 2026-10-26; add or change a model in `~/.local/state/limitcast/prices.json` (`{"models": {"claude-opus-4-1": {"input": 15, "output": 75}}}`, dollars per million tokens) |
 | `limitcast report --why [--days N]` | Where your new tokens went: subagents, session starts, cache rebuilds after idle, tool results by tool, model output, and the largest single steps (Claude Code only) |
 | `limitcast report --jobs [--days N]` | The scheduled (headless) jobs that spend the most tokens just starting: runs, average start, share of all new tokens, and how to launch a job leaner (Claude Code only) |
