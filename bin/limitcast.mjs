@@ -29,9 +29,11 @@ import {
   applyGrokTrim,
   getGrokBudget,
   grokConfigPath,
+  grokHooksFile,
   grokPresent,
   grokQuotaDue,
   grokQuotaEnabled,
+  grokQuotaSamples,
   grokSamples,
   grokServers,
   grokSessionLine,
@@ -50,7 +52,7 @@ import { runGuard } from '../src/guard.mjs';
 import { accountForecasts, bindingLine, compactHint, headroom, lastCall, lastCallTokens } from '../src/hints.mjs';
 import { htmlPage } from '../src/html.mjs';
 import { insightsReport, insightsShare, periodInsights } from '../src/insights.mjs';
-import { doctor, install, installedFeatures, readSettings, settingsPath, uninstall } from '../src/install.mjs';
+import { codexHooksPath, detectedHosts, doctor, install, installedFeatures, readSettings, settingsPath, uninstall } from '../src/install.mjs';
 import { memoryCheck, memoryDir, memoryReport, scanMemory } from '../src/memory.mjs';
 import { buildNotifierApp, loadChannels, notifierApp, notifyChanges, notifyEnabled, send, setChannel, setNotify } from '../src/notify.mjs';
 import { onboardingReport } from '../src/onboarding.mjs';
@@ -88,7 +90,7 @@ const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.u
 const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok plans
 
   limitcast onboard                 read-only setup checks and a guided first useful result
-  limitcast install [--guard]        wire limitcast into Claude Code (and, with --guard, Codex and Grok); backs up settings
+  limitcast install [--host claude|codex|grok] [--guard]  wire limitcast into Claude Code (and, with --guard, Codex and Grok); backs up settings
   limitcast uninstall                remove it and restore your original status line
   limitcast doctor [--fix]           check the setup (--fix: re-install with this Node, e.g. after a Node upgrade)
   limitcast status [--json]         used, burn rate, runout time, reset, and today's share of each weekly window
@@ -161,7 +163,7 @@ const days = () => {
 
 if (cmd === 'status') {
   if (grokQuotaEnabled() && grokPresent()) await refreshGrokQuota(now);
-  const rows = forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS)), ...grokSamples(now)]), now);
+  const rows = forecastAll(oneClaudeAccount(await readSamples(now - KEEP_MS)), now);
   if (args.includes('--json')) console.log(JSON.stringify(rows, null, 2));
   else {
     console.log(rows.length ? table(rows) : 'No data yet. Run `limitcast install`, then send a message in Claude Code, Codex or Grok.');
@@ -424,7 +426,7 @@ if (cmd === 'status') {
         ? `Grok ${win} budget: $${cap}. Spent this window: $${(used ?? 0).toFixed(2)} (${Math.min(100, ((used ?? 0) / cap) * 100).toFixed(0)}%). The guard holds new spawn_subagent calls when this window is on pace to run out.`
         : `No Grok ${win} dollar cap. Spent this window: $${(used ?? 0).toFixed(2)}. Grok stores spend, not a % used; set a cap so the guard can block: limitcast budget grok 5`,
     );
-    if (getGrokBudget() && !installedFeatures().guard && grokPresent())
+    if (getGrokBudget() && !installedFeatures(grokHooksFile()).guard && grokPresent())
       console.log('The budget is enforced by the guard: limitcast install --guard (then restart Grok).');
     process.exit(0);
   }
@@ -465,12 +467,23 @@ if (cmd === 'status') {
       'limitcast prices subagents from your own limit readings, which takes about a day of use; until then nothing counts against the budget.',
     );
 } else if (cmd === 'install') {
+  const host = flag('--host');
+  if (args.includes('--host') && !['claude', 'codex', 'grok'].includes(host)) {
+    console.error('--host must be claude, codex or grok.');
+    process.exit(1);
+  }
   const wantGuard = args.includes('--guard');
   const wantAlerts = args.includes('--alerts');
-  for (const c of install({ guard: wantGuard, alerts: wantAlerts })) console.log(`✓ ${c}`);
-  console.log('Restart Claude Code, Codex and Grok to load it. Then: limitcast doctor');
-  if (wantGuard && grokPresent() && !getGrokBudget())
-    console.log('Grok stores spend, not a % used. Set a 5-hour dollar cap so the guard can block: limitcast budget grok <usd>');
+  for (const c of install({ guard: wantGuard, alerts: wantAlerts, hosts: host ? [host] : undefined })) console.log(`✓ ${c}`);
+  console.log('Restart the configured coding tools to load changes. Then: limitcast doctor');
+  if (wantGuard && (!host || host === 'claude') && detectedHosts().includes('claude'))
+    console.log(
+      'Claude protection also installs subagent receipts, Sonnet switching while capacity is tight, and a one-time cold-cache prompt hold. LIMITCAST_ALLOW=1 overrides a hold or model change.',
+    );
+  if (wantGuard && (!host || host === 'grok') && grokPresent() && !getGrokBudget() && !grokQuotaEnabled())
+    console.log(
+      'For Grok protection, enable weekly quota readings with limitcast grok-usage on, or set a spending cap with limitcast budget grok <usd>.',
+    );
   // First run: show the number that matters right away, and what comes next.
   try {
     const latest = await latestInteractiveTranscript(claudeRoot());
@@ -507,10 +520,8 @@ if (cmd === 'status') {
     /* invalid settings are explained by doctor */
   }
   const latest = await latestInteractiveTranscript(claudeRoot());
-  const providers = [];
-  if (existsSync(settingsPath()) || latest) providers.push('Claude Code');
-  if (existsSync(codexConfigPath())) providers.push('Codex');
-  if (grokPresent()) providers.push('Grok');
+  const names = { claude: 'Claude Code', codex: 'Codex', grok: 'Grok' };
+  const providers = detectedHosts().map((h) => names[h]);
   console.log(
     forTerminal(
       onboardingReport({
@@ -524,12 +535,13 @@ if (cmd === 'status') {
 } else if (cmd === 'doctor') {
   if (args.includes('--fix')) {
     // Re-install what is installed, with this Node and this copy of limitcast (after a Node upgrade, say).
-    const f = installedFeatures();
-    if (!f.statusLine) console.log('limitcast is not installed. Run `limitcast install` first.');
-    else {
-      for (const c of install({ guard: f.guard, alerts: f.alerts })) console.log(`✓ ${c}`);
-      console.log('Restart Claude Code, Codex and Grok to load it. Codex asks you to approve the guard again: start Codex and accept it.');
+    for (const host of detectedHosts()) {
+      const f = installedFeatures(host === 'codex' ? codexHooksPath() : host === 'grok' ? grokHooksFile() : settingsPath());
+      if (host === 'claude' && !f.statusLine) console.log('Claude recorder is not installed. Run limitcast install --host claude first.');
+      else if (host === 'codex' && !f.guard) console.log('Codex needs no recorder. Optional protection: limitcast install --host codex --guard');
+      else for (const c of install({ guard: f.guard, alerts: f.alerts, hosts: [host] })) console.log(`✓ ${c}`);
     }
+    console.log('Restart tools whose configuration changed. Codex may ask you to approve its updated hook.');
   }
   const checks = await healthChecks();
   saveHealth(checks);
@@ -693,7 +705,7 @@ if (cmd === 'status') {
       // Once a week, what limitcast did: shown to the user at session start, never to the model.
       if (weeklyDue(now)) {
         const since = now - 7 * 86400_000;
-        const samples = [...load(since), ...(await readCodex(since))];
+        const samples = await readSamples(since, true);
         const s = loadOverhead();
         // The daily rollup keeps the value record current; a session-start hook must not scan transcripts itself.
         const week = valuePeriod(loadValue(), since, now);
@@ -731,7 +743,7 @@ if (cmd === 'status') {
         ? savedSummary(s, 0).split('\n')[0] // the per-session drop; the value section above has the totals
         : 'Run `limitcast trim` once to record your starting context, then check back here.';
   }
-  const samples = [...load(since), ...(await readCodex(since))];
+  const samples = await readSamples(since, true);
   const blocks = loadBlocks(since);
   const value = await refreshValue();
   const totals = valueTotals(value);
@@ -749,7 +761,7 @@ if (cmd === 'status') {
     );
   else if (args.includes('--html')) {
     // results, the current windows and the burn report on one page, opened in the browser.
-    const rows = forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS))]), now);
+    const rows = forecastAll(oneClaudeAccount(await readSamples(now - KEEP_MS)), now);
     const burn = burnReport(await readUsage(since, {}), { since, now }).replace(/^(#{1,2}) /gm, '#$1 ');
     const md = [
       insightsReport(insight, pro),
@@ -787,7 +799,7 @@ if (cmd === 'status') {
       ),
     );
 } else if (cmd === 'notify') {
-  // Desktop notifications from the status line (Pro, opt-in).
+  // Desktop notifications from the status line (opt-in).
   const what = args[0];
   if (what === 'ntfy' || what === 'webhook') {
     // Phone (ntfy) or Slack/Discord: every notification also goes there; setting one turns notifications on.
@@ -878,6 +890,11 @@ if (cmd === 'status') {
   process.exit(cmd && !['help', '--help', '-h'].includes(cmd) ? 1 : 0);
 }
 
+/** All supported provider readings; reports retain opt-in history after collection is disabled. */
+async function readSamples(since, history = false) {
+  return [...load(since), ...(await readCodex(since)), ...grokSamples(now, { history }).filter((s) => s.t >= since)];
+}
+
 /** Everything `doctor` checks: setup, data freshness, and whether each tool's logs still parse. */
 async function healthChecks() {
   // Readings are only stored when they change, so freshness comes from the last feed the status line saw.
@@ -929,8 +946,8 @@ async function refreshValue() {
   recordPeaks(claude, now); // the long-lived record of window peaks behind `limitcast plan`
   const o = loadOverhead();
   // limitcast started watching at its first status-line reading (or first measurement), not when Codex's logs begin.
-  const start = Math.min(now, o?.first.at ?? now, ...claude.map((s) => s.t));
-  const v = foldEvents(loadValue(), { now, samples: [...claude, ...(await readCodex(since))], blocks: loadBlocks(since), start });
+  const start = Math.min(now, o?.first.at ?? now, ...claude.map((s) => s.t), ...grokQuotaSamples(now, true).map((s) => s.t));
+  const v = foldEvents(loadValue(), { now, samples: await readSamples(since, true), blocks: loadBlocks(since), start });
   await scanSessions(v, { root: claudeRoot(), baseline: o ? { at: o.first.at, chars: o.first.chars } : null, now });
   // Recalibrate from the last 8 days when there is enough data; keep the last good calibration otherwise.
   const usage = await readUsage(since, {});
@@ -1042,9 +1059,10 @@ function table(rows) {
     f.verdict === 'AT_RISK' ? clock(f.wall) : '-',
     clock(f.reset),
     f.today ? todayLabel(f.today) : '-',
+    `${Math.max(0, Math.round((now - f.observedAt) / 60_000))}m`,
     f.verdict,
   ]);
-  const head = ['window', 'used', 'burn', 'runs out', 'resets', 'today', 'status'];
+  const head = ['window', 'used', 'burn', 'runs out', 'resets', 'today', 'age', 'status'];
   const w = head.map((h, i) => Math.max(h.length, ...lines.map((l) => l[i].length)));
   return [head, ...lines]
     .map((l) =>
@@ -1060,7 +1078,7 @@ function table(rows) {
 function oneLine(rows) {
   const bits = rows.map(
     (f) =>
-      `${f.src === 'claude' ? '' : `${f.src} `}${f.win} ${Math.round(f.pct)}%${f.verdict === 'AT_RISK' ? ` ⚠ out ${clock(f.wall)}` : f.verdict === 'NEAR' ? ' ⚠ near limit' : f.verdict === 'HIT' ? ' ⛔' : ''}` +
+      `${f.src === 'claude' ? '' : `${f.src} `}${f.win} ${Math.round(f.pct)}%${f.verdict === 'AT_RISK' ? ` ⚠ out ${clock(f.wall)}` : f.verdict === 'NEAR' ? ' ⚠ near limit' : f.verdict === 'HIT' ? ' ⛔' : f.verdict === 'STALE' ? ` ⚠ stale (${Math.round((now - f.observedAt) / 60_000)}m old)` : ''}` +
       (f.today && f.verdict !== 'HIT' ? ` · today ${todayLabel(f.today)}` : ''),
   );
   return bits.join(' · ') || 'limitcast: waiting for data';

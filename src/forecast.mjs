@@ -7,6 +7,7 @@ const RECENT_MS = 60 * 60 * 1000;
 const NEAR_PCT = 95;
 const DAY_MS = 24 * 3600_000;
 const IMMINENT_MS = 60 * 60_000;
+const STALE_MS = 15 * 60_000;
 
 /**
  * Burn rate and limit forecast for one (src, win) series.
@@ -18,13 +19,16 @@ export function forecast(samples, now) {
   const sorted = [...samples].sort((a, b) => a.t - b.t);
   const last = sorted[sorted.length - 1];
   const resetMs = last.reset * 1000;
-  const base = { src: last.src, win: last.win, pct: last.pct, reset: resetMs, rate: null, wall: null };
+  const base = { src: last.src, win: last.win, pct: last.pct, reset: resetMs, observedAt: last.t, rate: null, wall: null };
   if (resetMs <= now) return { ...base, pct: 0, verdict: 'RESET' };
   if (last.pct >= 100) return { ...base, verdict: 'HIT' };
 
   const window = sorted.filter((s) => Math.abs(s.reset - last.reset) <= RESET_JITTER_S);
+  const len = windowMs(last.win);
+  const today = len >= DAY_MS ? allowance(window, last, now, resetMs - len) : null;
+  if (now - last.t > STALE_MS) return { ...base, verdict: 'STALE', today };
   const recent = window.filter((s) => s.t >= now - RECENT_MS);
-  const short = slopePerHour(recent.length >= 2 ? recent : window);
+  const short = slopePerHour(recent);
   // NEAR: so close to the limit that one heavy turn can finish it, even with no burn rate to go on yet.
   const calm = last.pct >= NEAR_PCT ? 'NEAR' : 'OK';
   const runout = (/** @type {number|null} */ r) => (r === null || r <= 0 ? null : last.t + ((100 - last.pct) / r) * 3600_000);
@@ -34,7 +38,6 @@ export function forecast(samples, now) {
   // A multi-day window spans nights and idle days: one busy hour projected across them predicts a runout days
   // early. Use the average pace over the last full day, idle time included, unless the last hour's pace runs
   // the window out within the hour (a burst near the end of the week must still be caught).
-  const len = windowMs(last.win);
   if (len >= DAY_MS && !(wall !== null && wall - now <= IMMINENT_MS)) {
     const from = now - DAY_MS;
     // Usage a day ago: 0% if the window began since then, else the last reading before then (or the first one).
@@ -43,7 +46,6 @@ export function forecast(samples, now) {
     rate = (last.pct - then) / 24;
     wall = runout(rate);
   }
-  const today = len >= DAY_MS ? allowance(window, last, now, resetMs - len) : null;
   if (wall === null) return { ...base, rate, verdict: calm, today };
   return { ...base, rate, wall, verdict: wall < resetMs ? 'AT_RISK' : calm, today };
 }

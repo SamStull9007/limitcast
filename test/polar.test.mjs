@@ -1,10 +1,11 @@
+import './helpers/environment.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { currentLicense } from '../src/license.mjs';
-import { activatePolar, deactivatePolar, loadPolar, POLAR_ORG_ID, polarStatus, refreshDue, refreshPolar } from '../src/polar.mjs';
+import { currentLicense } from '../scripts/legacy/license.mjs';
+import { activatePolar, deactivatePolar, loadPolar, POLAR_ORG_ID, polarStatus, refreshDue, refreshPolar } from '../scripts/legacy/polar.mjs';
 
 const fresh = () => {
   process.env.LIMITCAST_STATE = mkdtempSync(join(tmpdir(), 'lc-polar-'));

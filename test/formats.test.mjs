@@ -1,3 +1,4 @@
+import './helpers/environment.mjs';
 // Log-format contract tests: fixtures mirror the field names Claude Code, Codex and Grok write (October 2026).
 // If one of those tools changes its format, update the fixture from a real log and these tests show what broke.
 

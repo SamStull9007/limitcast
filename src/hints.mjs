@@ -2,7 +2,7 @@
 import { closeSync, openSync, readSync, statSync } from 'node:fs';
 import { claudeAccounts, forecastAll } from './forecast.mjs';
 
-// Pro hints for the status line: another account with room, and when a long session is worth compacting.
+// Status-line hints: another account with room, and when a long session is worth compacting.
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */
 
@@ -36,7 +36,9 @@ export function headroom(samples, sid, now) {
   const current = accounts.find((a) => sid && a.sids.has(sid)) ?? accounts[0];
   if (!current.rows.some((f) => TROUBLE.has(f.verdict))) return null;
   const used = (/** @type {typeof accounts[0]} */ a) => Math.max(...a.rows.map((f) => (f.verdict === 'RESET' ? 0 : f.pct)));
-  const best = accounts.filter((a) => a !== current && !a.rows.some((f) => TROUBLE.has(f.verdict))).sort((a, b) => used(a) - used(b))[0];
+  const best = accounts
+    .filter((a) => a !== current && !a.rows.some((f) => TROUBLE.has(f.verdict) || f.verdict === 'STALE'))
+    .sort((a, b) => used(a) - used(b))[0];
   if (!best) return null;
   const parts = best.rows.map((f) => `${f.win} ${f.verdict === 'RESET' ? 0 : Math.round(f.pct)}%`);
   return `⇄ other account ${parts.join(' · ')}`;

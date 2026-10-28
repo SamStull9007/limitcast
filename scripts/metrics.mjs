@@ -7,7 +7,7 @@ import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { send } from '../src/notify.mjs';
-import { POLAR_ORG_ID } from '../src/polar.mjs';
+import { POLAR_ORG_ID } from './legacy/polar.mjs';
 
 const args = process.argv.slice(2);
 const outDir = args.includes('--out') ? args[args.indexOf('--out') + 1] : join(homedir(), 'Documents', 'Side Business', 'limitcast-metrics');

@@ -44,14 +44,15 @@ All features are now free. A guard previously installed in preview mode will enf
 ```sh
 npm install -g limitcast     # or: brew trust samstull9007/limitcast && brew install samstull9007/limitcast/limitcast
 limitcast onboard            # read-only: setup checks and a first useful result
-limitcast install            # free: status-line recorder
+limitcast install            # configure detected tools; default to Claude if none exist
+limitcast install --host codex --guard  # choose just Codex; no Claude settings created
 limitcast install --guard    # also the subagent guard (free; holds new subagents when a limit is on pace to run out)
 limitcast doctor
 ```
 
 In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast:results`, `/limitcast:trim`, `/limitcast:memory-audit` and `/limitcast:memory-split`: `/plugin marketplace add SamStull9007/limitcast`, then `/plugin install limitcast@limitcast`. The status-line recorder still comes from `limitcast install`.
 
-`install` backs up `~/.claude/settings.json` and wraps your existing status line: it looks exactly the same, and the limitcast line (for example `limitcast: 5h 14% · 7d 18% · today 9% left`) goes on the line under it. `--guard` adds the subagent guard (all features are free). Restart Claude Code to load it. `limitcast uninstall` puts everything back.
+`install` configures the tools found on your machine (`--host claude|codex|grok` chooses one). For Claude it backs up `~/.claude/settings.json` and wraps your existing status line: it looks exactly the same, and the limitcast line (for example `limitcast: 5h 14% · 7d 18% · today 9% left`) goes on the line under it. `--guard` adds the subagent guard (all features are free). Restart Claude Code to load it. `limitcast uninstall` puts everything back.
 
 **Codex:** forecasts and reports need no setup (`~/.codex/sessions`, or `$CODEX_HOME/sessions`). With `--guard`, `install` also appends the guard to `~/.codex/hooks.json`, after your existing hooks so the ones you've already trusted keep their trust. Codex runs a new hook only once you approve it: start Codex and accept it. `limitcast doctor` shows whether it's trusted.
 
@@ -74,7 +75,7 @@ In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast
 | `limitcast budget grok <usd>` / `off` / `7d <usd>` | Dollar cap for Grok's aligned 5-hour window (optional 7-day cap). Turns Grok spend into a % so `status` can forecast runout and the guard can block `spawn_subagent` |
 | `limitcast after-reset [--src claude/codex] [--window 5h/7d] [--detach] -- <cmd>` | Wait for the window to reset, then run the command |
 | `limitcast results --html [--out FILE]` | Results, current windows and the burn report on one page, opened in your browser |
-| `limitcast install [--guard] [--alerts]` / `uninstall` | Wire into Claude Code / restore your settings |
+| `limitcast install [--guard] [--alerts]` / `uninstall` | Configure detected tools (`--host claude\|codex\|grok` selects one) / restore your settings |
 | `limitcast doctor [--fix]` | Check the setup, data freshness, this project's auto-memory index (see `memory`), and that Claude Code, Codex and Grok logs are still in a format limitcast reads. Also runs daily in the background and flags problems in the status line (the memory line only shows when you run `doctor` yourself). `--fix` re-installs with the current Node (after a Node upgrade) |
 | `limitcast grok-usage [on\|off]` | Grok's real weekly % used, from grok.com with the login Grok already holds (off by default; see Grok above for exactly what it reads and sends). With no argument it shows the current reading |
 | `limitcast memory [dir]` | Check this project's auto-memory folder (`~/.claude/projects/<project>/memory`): how much of `MEMORY.md` fits in what Claude Code loads each session (the first 200 lines or 25 KB; anything past that is never read), broken links, topic files nothing links to, and files over 150 lines. Read-only. In Claude Code, `/limitcast:memory-audit` takes it from there (stale, contradictory and unlinked notes) and `/limitcast:memory-split` splits an oversized file into a short hub plus topic files |
@@ -97,7 +98,9 @@ The guard is free for everyone and acts when installed with `--guard`. Blocks a 
 
 ## How the forecast works
 
-Each limit reading is saved to `~/.local/state/limitcast/samples.jsonl` when it changes (kept 8 days). The burn rate is the least-squares slope of percent used over the last hour of the current window, and the runout time is where that line reaches 100%. Windows of a day or more (the weekly one) use the average pace over the last full day, idle time included, unless the last hour's pace runs them out within the hour. **AT_RISK** means that happens before the reset; **NEAR** means 95% or more is used. Claude sessions of the same account share one history (matched by window reset times, and usage that only rises), so two accounts used in parallel never mix.
+Claude readings are saved to `~/.local/state/limitcast/samples.jsonl` when they change and at least every five minutes while unchanged (kept 8 days). Codex observations come from its logs; optional Grok weekly observations are kept in the quota cache. `status` and the dashboard show reading age. Readings older than 15 minutes are labeled `STALE`: they do not trigger pace-based holds or model changes. Explicit budgets retain their own rules. The burn rate is the least-squares slope of percent used over confirmed observations within the last hour of the current window, and the runout time is where that line reaches 100%. Windows of a day or more (the weekly one) use the average pace over the last full day, idle time included, unless the last hour's pace runs them out within the hour. **AT_RISK** means that happens before the reset; **NEAR** means 95% or more is used. Claude sessions of the same account share one history (matched by window reset times, and usage that only rises), so two accounts used in parallel never mix.
+
+Grok current windows and recorded weekly quota history are included in `results` and its dashboard. Disabling collection retains existing report history. Earlier spending-cap windows cannot be reconstructed from the current cap and remain unavailable.
 
 ## Free and open source
 
@@ -116,3 +119,5 @@ For a small consenting pilot, see [the pilot protocol](docs/pilot.md) and [dated
 ## License
 
 [MIT License](LICENSE). Copyright (c) 2026 Sam Stull. Use, modify and redistribute the software, including commercially, with the required copyright and permission notices.
+
+Developer checks: run `npm ci --ignore-scripts`, then `npm test`. Each test process uses temporary home, tool, config and state roots. The only runtime dependency is pinned `smol-toml`, used to validate configuration edits; no Python installation is required. Legacy billing operator tools live under `scripts/legacy/` and are excluded from the published package.

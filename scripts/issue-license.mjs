@@ -1,7 +1,7 @@
 // Issue a Pro license after a sale: node scripts/issue-license.mjs buyer@example.com [lifetime|annual]
 // Signs with the private key in the macOS Keychain; prints only the license key.
 import { execFileSync } from 'node:child_process';
-import { checkLicense, issueLicense } from '../src/license.mjs';
+import { checkLicense, issueLicense } from './legacy/license.mjs';
 
 const [email, term = 'annual'] = process.argv.slice(2);
 if (!email?.includes('@') || !['annual', 'lifetime'].includes(term)) {

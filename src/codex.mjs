@@ -118,10 +118,10 @@ export async function codexStartup(root = join(codexHome(), 'sessions')) {
 }
 
 /**
- * @param {{servers:{name:string, enabled:boolean|undefined}[], used:Set<string>, startup:{agentsMd:number, base:number}|null, days:number, pro:boolean, keep?:string[]}} r
+ * @param {{servers:{name:string, enabled:boolean|undefined}[], used:Set<string>, startup:{agentsMd:number, base:number}|null, days:number, pro?:boolean, keep?:string[]}} r
  *   keep: the `trim keep` list; unused servers on it are reported as kept and left out of `unused`
  */
-export function codexTrimReport({ servers, used, startup, days, pro, keep = [] }) {
+export function codexTrimReport({ servers, used, startup, days, keep = [] }) {
   const on = servers.filter((s) => s.enabled !== false);
   const idle = on.filter((s) => !used.has(norm(s.name)));
   const kept = idle.filter((s) => keep.some((k) => norm(k) === norm(s.name)));
@@ -135,9 +135,7 @@ export function codexTrimReport({ servers, used, startup, days, pro, keep = [] }
     );
   out.push(`## MCP servers: ${on.length} on, ${unused.length} not used in ${days} days`);
   if (!unused.length) out.push(kept.length ? 'Nothing else to turn off.' : 'Every server that is on was used.');
-  else if (pro)
-    out.push(...unused.map((s) => `- ${s.name}`), '', 'Turn them off: `limitcast trim --codex --apply` (backed up; `--undo` reverses it).');
-  else out.push(`Pro names them and turns them off for you: https://limitcast.dev/#pricing`);
+  else out.push(...unused.map((s) => `- ${s.name}`), '', 'Turn them off: `limitcast trim --codex --apply` (backed up; `--undo` reverses it).');
   if (kept.length) out.push('', `Would keep (your keep-list): ${kept.map((s) => s.name).join(', ')}.`);
   out.push(
     '',

@@ -3,8 +3,8 @@ import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { stateDir } from '../../src/store.mjs';
 import { loadPolar, polarStatus } from './polar.mjs';
-import { stateDir } from './store.mjs';
 
 export const UPGRADE_URL = 'https://limitcast.dev/#pricing';
 const PUBLIC_KEY = 'MCowBQYDK2VwAyEAG+4c5uaNB7IAZiAxtcyyXBEmmRkmZfWvlEFyvhmDQvA=';

@@ -1,3 +1,4 @@
+import './helpers/environment.mjs';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -67,7 +68,7 @@ test('apply backs up and undo restores the file exactly, keeping its permissions
   }
 });
 
-test('used servers and startup sizes come from the rollouts; the report names unused ones for Pro', async () => {
+test('used servers and startup sizes come from the rollouts; the free report names unused servers', async () => {
   const root = tmp('lc-cxs-');
   mkdirSync(join(root, '2026', '10', '25'), { recursive: true });
   const rows = [
@@ -86,6 +87,6 @@ test('used servers and startup sizes come from the rollouts; the report names un
   assert.match(pro.text, /~1\.0k tokens of AGENTS\.md/);
   assert.match(pro.text, /2 on, 1 not used in 7 days\n- tool-router/);
   const free = codexTrimReport({ servers, used: new Set(), startup: null, days: 7, pro: false });
-  assert.doesNotMatch(free.text, /tool-router/);
-  assert.match(free.text, /Pro names them/);
+  assert.match(free.text, /tool-router/);
+  assert.doesNotMatch(free.text, /Pro names them/);
 });

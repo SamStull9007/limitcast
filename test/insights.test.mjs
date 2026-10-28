@@ -1,3 +1,4 @@
+import './helpers/environment.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { insightsReport, insightsShare, periodInsights } from '../src/insights.mjs';

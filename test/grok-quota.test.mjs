@@ -1,3 +1,4 @@
+import './helpers/environment.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -106,6 +107,10 @@ test('refreshGrokQuota asks grok.com with the auth.x.ai login, records the weekl
       ['grok', '7d', 10, END],
     ],
   );
+  await refreshGrokQuota(NOW + 12 * 60_000, { home, fetchFn: f2 });
+  assert.equal(readGrokQuota().readings.at(-1).t, NOW + 12 * 60_000, 'unchanged quota confirms freshness');
+  assert.equal(readGrokQuota().readings.at(-1).pct, 10);
+
   assert.match(
     grokDoctor(home)
       .map((c) => c.line)

@@ -18,7 +18,7 @@
     "linux"
   ],
   "scripts": {
-    "test": "node --test"
+    "test": "node --test test/*.test.mjs"
   },
   "keywords": [
     "claude-code",
@@ -36,5 +36,8 @@
     "url": "git+https://github.com/SamStull9007/limitcast.git"
   },
   "author": "Sam Stull",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "smol-toml": "1.9.1"
+  }
 }

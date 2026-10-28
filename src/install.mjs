@@ -73,55 +73,82 @@ export function launcherTargets(path) {
   }
 }
 
+/** Hosts with local configuration or sessions; an explicit install can select a host before first use. */
+export function detectedHosts({ path = settingsPath(), codexPath = codexHooksPath(), grokDir = grokHome() } = {}) {
+  return [
+    ...(existsSync(join(path, '..')) ? ['claude'] : []),
+    ...(existsSync(join(codexPath, '..')) ? ['codex'] : []),
+    ...(grokPresent(grokDir) ? ['grok'] : []),
+  ];
+}
+
 /**
  * Add the status-line recorder (wrapping any existing status line) and, optionally, the subagent guard.
  * Idempotent; backs up settings.json first; remembers the original status line for uninstall.
  * With `guard`, Codex gets the guard too when ~/.codex exists. With `alerts`, a SessionStart hook tells you
  * (never the model) when your starting context grew.
- * @param {{guard:boolean, alerts?:boolean, path?:string, codexPath?:string, grokDir?:string, self?:string}} opts
+ * @param {{guard:boolean, alerts?:boolean, path?:string, codexPath?:string, grokDir?:string, self?:string, hosts?:string[]}} opts
  */
-export function install({ guard, alerts = false, path = settingsPath(), codexPath = codexHooksPath(), grokDir = grokHome(), self = selfCommand() }) {
-  const cfg = readSettings(path);
-  backup(path);
+export function install({
+  guard,
+  alerts = false,
+  path = settingsPath(),
+  codexPath = codexHooksPath(),
+  grokDir = grokHome(),
+  self = selfCommand(),
+  hosts,
+}) {
+  hosts ??= detectedHosts({ path, codexPath, grokDir });
+  if (!hosts.length) hosts = ['claude'];
+  if (hosts.some((h) => !['claude', 'codex', 'grok'].includes(h))) throw new Error('Unknown coding tool');
   const changes = [];
-  const current = cfg.statusLine?.command;
-  if (!current?.includes(MARK)) {
-    cfg.statusLine = {
-      ...(cfg.statusLine ?? { type: 'command' }),
-      type: 'command',
-      command: current ? `${self} statusline -- sh -c ${q(current)}` : `${self} statusline`,
-    };
-    changes.push(current ? 'wrapped your status line' : 'added a status line');
-  } else {
-    cfg.statusLine.command = current.replace(/^.*? statusline\b/, `${self} statusline`);
-    changes.push('status line already installed (command path refreshed)');
+  if (hosts.includes('claude')) {
+    const cfg = readSettings(path);
+    backup(path);
+    const current = cfg.statusLine?.command;
+    if (!current?.includes(MARK)) {
+      cfg.statusLine = {
+        ...(cfg.statusLine ?? { type: 'command' }),
+        type: 'command',
+        command: current ? `${self} statusline -- sh -c ${q(current)}` : `${self} statusline`,
+      };
+      changes.push(current ? 'wrapped your status line' : 'added a status line');
+    } else {
+      cfg.statusLine.command = current.replace(/^.*? statusline\b/, `${self} statusline`);
+      changes.push('status line already installed (command path refreshed)');
+    }
+    if (guard) {
+      upsertGuard(cfg, { matcher: 'Task|Agent', hooks: [{ type: 'command', command: `${self} guard`, timeout: 10 }] });
+      upsertHook(cfg, 'UserPromptSubmit', { hooks: [{ type: 'command', command: `${self} prompt-check`, timeout: 10 }] }, isPromptCheck);
+      upsertHook(cfg, 'SubagentStop', { matcher: '', hooks: [{ type: 'command', command: `${self} subagent-receipt`, timeout: 15 }] }, isReceipt);
+      changes.push('added the Claude Code subagent guard, subagent receipts and the cold-cache warning');
+    }
+    if (alerts) {
+      upsertHook(cfg, 'SessionStart', { matcher: '', hooks: [{ type: 'command', command: `${self} drift --hook`, timeout: 15 }] }, isAlert);
+      changes.push('added the starting-context alert');
+      upsertHook(
+        cfg,
+        'PostToolUse',
+        { matcher: 'Bash|Read|Grep|WebFetch|mcp__.*', hooks: [{ type: 'command', command: `${self} tool-check`, timeout: 10 }] },
+        isToolCheck,
+      );
+      changes.push('added the large tool-output notice');
+    }
+    writeSettings(path, cfg);
   }
-  if (guard) {
-    upsertGuard(cfg, { matcher: 'Task|Agent', hooks: [{ type: 'command', command: `${self} guard`, timeout: 10 }] });
-    upsertHook(cfg, 'UserPromptSubmit', { hooks: [{ type: 'command', command: `${self} prompt-check`, timeout: 10 }] }, isPromptCheck);
-    upsertHook(cfg, 'SubagentStop', { matcher: '', hooks: [{ type: 'command', command: `${self} subagent-receipt`, timeout: 15 }] }, isReceipt);
-    changes.push('added the Claude Code subagent guard, subagent receipts and the cold-cache warning');
-  }
-  if (alerts) {
-    upsertHook(cfg, 'SessionStart', { matcher: '', hooks: [{ type: 'command', command: `${self} drift --hook`, timeout: 15 }] }, isAlert);
-    changes.push('added the starting-context alert');
-    upsertHook(
-      cfg,
-      'PostToolUse',
-      { matcher: 'Bash|Read|Grep|WebFetch|mcp__.*', hooks: [{ type: 'command', command: `${self} tool-check`, timeout: 10 }] },
-      isToolCheck,
-    );
-    changes.push('added the large tool-output notice');
-  }
-  writeSettings(path, cfg);
-  if (guard && existsSync(join(codexPath, '..'))) {
+  if (guard && hosts.includes('codex')) {
     const codex = readSettings(codexPath);
     backup(codexPath);
     upsertGuard(codex, { matcher: CODEX_MATCHER, hooks: [{ type: 'command', command: `${self} guard`, timeout: 10 }] });
     writeSettings(codexPath, codex);
     changes.push('added the Codex subagent guard (Codex runs it after you trust it: start Codex and approve the new hook)');
   }
-  if (grokPresent(grokDir)) changes.push(...installGrok({ guard, self, home: grokDir }));
+  if (hosts.includes('codex') && !guard)
+    changes.push('Codex reads local session logs directly; optional protection: limitcast install --host codex --guard');
+  if (hosts.includes('grok')) {
+    if (!grokPresent(grokDir)) throw new Error('Grok is not configured yet; run grok once before installing its recorder.');
+    changes.push(...installGrok({ guard, self, home: grokDir }));
+  }
   return changes;
 }
 
@@ -180,7 +207,7 @@ export function uninstall({ path = settingsPath(), codexPath = codexHooksPath(),
     cfg.hooks[event] = cfg.hooks[event].filter((/** @type {any} */ h) => !mine(h));
     if (cfg.hooks[event].length < n) changes.push(`removed ${what}`);
   }
-  writeSettings(path, cfg);
+  if (existsSync(path)) writeSettings(path, cfg);
   if (existsSync(codexPath)) {
     const codex = readSettings(codexPath);
     const list = codex.hooks?.PreToolUse ?? [];
@@ -275,73 +302,85 @@ function codexGuardCheck(codexPath) {
   }
   const trusted = toml.includes(`hooks.json:pre_tool_use:${i}:0"]`);
   return trusted
-    ? { ok: true, line: 'Codex subagent guard installed and trusted' }
+    ? { ok: true, line: 'Codex subagent guard configured; saved trust entry present (runtime loading not verified)' }
     : { ok: false, line: 'Codex subagent guard installed but not trusted yet: start Codex and approve the new hook' };
 }
 
 /**
  * Health checks: settings wired, the node path in them still exists, data arriving, and the free distribution.
- * @param {{path?:string, codexPath?:string, samplesAgeMs:number|null, license?:ReturnType<typeof import('./license.mjs').currentLicense>}} info
+ * @param {{path?:string, codexPath?:string, samplesAgeMs:number|null, hosts?:string[]}} info
  * @returns {{ok:boolean, line:string}[]}
  */
-export function doctor({ path = settingsPath(), codexPath = codexHooksPath(), samplesAgeMs }) {
+export function doctor({ path = settingsPath(), codexPath = codexHooksPath(), samplesAgeMs, hosts = detectedHosts({ path, codexPath }) }) {
   /** @type {{ok:boolean, line:string}[]} */
   const out = [];
   const major = Number(process.versions.node.split('.')[0]);
   out.push({ ok: major >= 20, line: `Node ${process.versions.node}${major >= 20 ? '' : ' (need 20+)'}` });
-  let cfg = {};
-  try {
-    cfg = readSettings(path);
-  } catch (e) {
-    out.push({ ok: false, line: String(e instanceof Error ? e.message : e) });
-  }
-  const sl = /** @type {any} */ (cfg).statusLine?.command ?? '';
-  out.push({
-    ok: sl.includes(MARK),
-    line: sl.includes(MARK) ? 'Status-line recorder installed' : 'Status-line recorder missing: run `limitcast install`',
-  });
-  const launcher = /^\/bin\/sh '?([^' ]+limitcast-hook\.sh)'?/.exec(sl)?.[1];
-  const targets = launcher ? launcherTargets(launcher) : null;
-  if (sl.includes(MARK) && targets) {
-    const ok = Boolean(targets.node && existsSync(targets.node) && targets.bin && existsSync(targets.bin));
+  if (!hosts.length) out.push({ ok: true, line: 'No supported coding tools found yet; run limitcast onboard after configuring one.' });
+  if (hosts.includes('claude')) {
+    let cfg = {};
+    try {
+      cfg = readSettings(path);
+    } catch (e) {
+      out.push({ ok: false, line: String(e instanceof Error ? e.message : e) });
+    }
+    const sl = /** @type {any} */ (cfg).statusLine?.command ?? '';
     out.push({
-      ok,
-      line: ok
-        ? 'Hook launcher points at this Node and limitcast'
-        : 'Node or limitcast moved (a Node upgrade?): hooks fall back to `limitcast` on PATH. Fix: `limitcast doctor --fix`',
+      ok: sl.includes(MARK),
+      line: sl.includes(MARK) ? 'Status-line recorder installed' : 'Status-line recorder missing: run `limitcast install`',
     });
-  } else if (sl.includes(MARK)) {
-    // Installed before 0.10: settings call node directly.
-    const exe = sl.match(/^'([^']+)'|^(\S+)/);
-    const exePath = exe?.[1] ?? exe?.[2];
-    if (exePath?.startsWith('/'))
+    const launcher = /^\/bin\/sh '?([^' ]+limitcast-hook\.sh)'?/.exec(sl)?.[1];
+    const targets = launcher ? launcherTargets(launcher) : null;
+    if (sl.includes(MARK) && targets) {
+      const ok = Boolean(targets.node && existsSync(targets.node) && targets.bin && existsSync(targets.bin));
       out.push({
-        ok: existsSync(exePath),
-        line: existsSync(exePath)
-          ? 'Node path in settings exists (`limitcast doctor --fix` switches to the upgrade-proof launcher)'
-          : `Node path in settings is gone (${exePath}): run \`limitcast doctor --fix\``,
+        ok,
+        line: ok
+          ? 'Hook launcher points at this Node and limitcast'
+          : 'Node or limitcast moved (a Node upgrade?): hooks fall back to `limitcast` on PATH. Fix: `limitcast doctor --fix`',
       });
-  }
-  const hooks = /** @type {any} */ (cfg).hooks ?? {};
-  const guard = (hooks.PreToolUse ?? []).some(isGuard);
-  out.push({
-    ok: true,
-    line: guard ? 'Claude Code subagent guard installed' : 'Claude Code subagent guard not installed (optional: `limitcast install --guard`)',
-  });
-  // Installed with --guard before 0.11: the cold-cache warning and subagent receipts are missing until a re-install.
-  const newer = (hooks.UserPromptSubmit ?? []).some(isPromptCheck) && (hooks.SubagentStop ?? []).some(isReceipt);
-  if (guard && !newer)
+    } else if (sl.includes(MARK)) {
+      // Installed before 0.10: settings call node directly.
+      const exe = sl.match(/^'([^']+)'|^(\S+)/);
+      const exePath = exe?.[1] ?? exe?.[2];
+      if (exePath?.startsWith('/'))
+        out.push({
+          ok: existsSync(exePath),
+          line: existsSync(exePath)
+            ? 'Node path in settings exists (`limitcast doctor --fix` switches to the upgrade-proof launcher)'
+            : `Node path in settings is gone (${exePath}): run \`limitcast doctor --fix\``,
+        });
+    }
+    const hooks = /** @type {any} */ (cfg).hooks ?? {};
+    const guard = (hooks.PreToolUse ?? []).some(isGuard);
     out.push({
-      ok: false,
-      line: 'Cold-cache warning and subagent receipts not installed yet: run `limitcast doctor --fix`',
+      ok: true,
+      line: guard ? 'Claude Code subagent guard installed' : 'Claude Code subagent guard not installed (optional: `limitcast install --guard`)',
     });
-  if (existsSync(codexPath)) out.push(codexGuardCheck(codexPath));
-  out.push(...grokDoctor());
-  out.push(
-    samplesAgeMs === null
-      ? { ok: false, line: 'No Claude limit readings yet: send a message in Claude Code' }
-      : { ok: samplesAgeMs < 24 * 3600_000, line: `Last Claude reading ${Math.round(samplesAgeMs / 60_000)} min ago` },
-  );
+    // Installed with --guard before 0.11: the cold-cache warning and subagent receipts are missing until a re-install.
+    const newer = (hooks.UserPromptSubmit ?? []).some(isPromptCheck) && (hooks.SubagentStop ?? []).some(isReceipt);
+    if (guard && !newer)
+      out.push({
+        ok: false,
+        line: 'Cold-cache warning and subagent receipts not installed yet: run `limitcast doctor --fix`',
+      });
+    out.push(
+      samplesAgeMs === null
+        ? { ok: true, line: 'No Claude limit readings yet: awaiting a subscription reading after a normal Claude Code turn' }
+        : { ok: samplesAgeMs < 24 * 3600_000, line: `Last Claude reading ${Math.round(samplesAgeMs / 60_000)} min ago` },
+    );
+  }
+  if (hosts.includes('codex')) {
+    out.push({ ok: true, line: 'Codex uses local session logs; no Claude recorder is needed' });
+    out.push(codexGuardCheck(codexPath));
+  }
+  if (hosts.includes('grok')) {
+    try {
+      out.push(...grokDoctor());
+    } catch {
+      out.push({ ok: false, line: 'Grok config.toml is unreadable; fix its TOML before running limitcast install --host grok' });
+    }
+  }
   out.push({
     ok: true,
     line: 'Free and open source (MIT License); all features available',

@@ -1,3 +1,4 @@
+import './helpers/environment.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { onboardingReport } from '../src/onboarding.mjs';
@@ -10,11 +11,11 @@ test('new free users get an explicit, read-only path with all features free', ()
     contextTokens: null,
     providers: [],
   });
-  assert.match(text, /limitcast install`/);
+  assert.match(text, /limitcast install --host claude`/);
   assert.match(text, /preview/);
   assert.match(text, /MIT License/);
   assert.doesNotMatch(text, /checkout|bills afterward|Try Pro/);
-  assert.match(text, /Doctor checks setup; Trim analyzes context/);
+  assert.match(text, /Configure Claude Code, Codex or Grok/);
   assert.match(text, /Nothing here changes settings or uploads usage/);
 });
 

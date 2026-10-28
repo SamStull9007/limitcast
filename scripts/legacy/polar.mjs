@@ -2,7 +2,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
-import { stateDir } from './store.mjs';
+import { stateDir } from '../../src/store.mjs';
 
 // Polar's customer-portal license endpoints need no secret: they are meant for desktop apps and CLIs.
 export const POLAR_ORG_ID = 'c8fb2062-7f49-4ef0-927b-32d752e2990a';

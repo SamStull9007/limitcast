@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Forecasts label readings older than 15 minutes as stale and suspend pace-based holds/model changes. Five-minute unchanged observations distinguish idle usage from a stopped recorder.
+- Grok TOML edits preserve comments and types, support commented/indented/quoted headers, and validate before replacement using pinned smol-toml.
+- Status, historical results and the dashboard include Grok quota readings; collection can be disabled without discarding report history.
+- Installation supports selecting one host; onboarding and doctor check the tools detected and explain optional controls.
+- CLI tests isolate all user configuration and transcript roots. Legacy billing operator modules no longer ship in the runtime package.
+
 ## 0.17.2 — 2026-10-27
 
 - Fix: doctor accepts Claude sessions awaiting their first assistant response and optional subscription limit fields, while still rejecting malformed readings.

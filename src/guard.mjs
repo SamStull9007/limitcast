@@ -25,7 +25,7 @@ export function spawnSource(tool) {
  * Reason to block a new subagent, or null to allow it.
  * Blocks only when the spawning tool's own window is on pace to run out before it resets within `minutes`.
  * A window already at 100% is left to the tool: with extra usage enabled, work continues past it.
- * Grok keeps no % used on disk; `grokSamples` only exist after `limitcast budget grok`, so without a cap its spawns are never blocked.
+ * Grok uses opt-in weekly quota observations or a user-defined spending cap.
  * @param {string} tool
  * @param {ReturnType<typeof import('./forecast.mjs').forecastAll>} forecasts
  * @param {number} now epoch ms
@@ -59,7 +59,7 @@ function blockingForecast(tool, forecasts, now, minutes) {
  * @param {any} hook parsed hook input
  * @param {number} now epoch ms
  * @param {number} minutes
- * @param {{preview?:boolean}} [opts] preview: a free install; log what Pro would block, never block
+ * @param {{preview?:boolean}} [opts] preview: log the decision without applying a hold or model change
  */
 export async function runGuard(hook, now, minutes, { preview = false } = {}) {
   const tool = String(hook?.tool_name ?? hook?.toolName ?? hook?.tool ?? '');
@@ -98,7 +98,7 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
   }
   if (reason) return preview ? null : reason;
   // Today's share of a weekly window is used up: hold new subagents until local midnight, when the share starts over.
-  // Opt-in for Pro (`limitcast budget today on`; the default is a notification at 80%); a free preview records it either way.
+  // Opt-in (`limitcast budget today on`; the default is a notification at 80%); previews record it without applying it.
   // A window already at 100% is left to the tool. shortcut: Codex readings here span only 2 hours, so its share reads low.
   const day = todayOver(src, forecasts);
   if (day && (preview || getTodayHold())) {

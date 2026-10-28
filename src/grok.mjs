@@ -2,6 +2,8 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
+import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { codexServers, setEnabled } from './codex.mjs';
 import { windowMs } from './forecast.mjs';
 import { KEEP_MS, stateDir } from './store.mjs';
@@ -73,10 +75,10 @@ export function grokStartup(root = grokRoot()) {
 }
 
 /**
- * @param {{servers:{name:string, enabled:boolean|undefined}[], used:Set<string>, startup:{prompt:number, tools:number}|null, days:number, pro:boolean, keep?:string[]}} r
+ * @param {{servers:{name:string, enabled:boolean|undefined}[], used:Set<string>, startup:{prompt:number, tools:number}|null, days:number, pro?:boolean, keep?:string[]}} r
  *   keep: the `trim keep` list; unused servers on it are reported as kept and left out of `unused`
  */
-export function grokTrimReport({ servers, used, startup, days, pro, keep = [] }) {
+export function grokTrimReport({ servers, used, startup, days, keep = [] }) {
   const on = servers.filter((s) => s.enabled !== false);
   const idle = on.filter((s) => !used.has(norm(s.name)));
   const kept = idle.filter((s) => keep.some((k) => norm(k) === norm(s.name)));
@@ -90,9 +92,7 @@ export function grokTrimReport({ servers, used, startup, days, pro, keep = [] })
     );
   out.push(`## MCP servers: ${on.length} on, ${unused.length} not used in ${days} days`);
   if (!unused.length) out.push(kept.length ? 'Nothing else to turn off.' : 'Every server that is on was used.');
-  else if (pro)
-    out.push(...unused.map((s) => `- ${s.name}`), '', 'Turn them off: `limitcast trim --grok --apply` (backed up; `--undo` reverses it).');
-  else out.push(`Pro names them and turns them off for you: https://limitcast.dev/#pricing`);
+  else out.push(...unused.map((s) => `- ${s.name}`), '', 'Turn them off: `limitcast trim --grok --apply` (backed up; `--undo` reverses it).');
   if (kept.length) out.push('', `Would keep (your keep-list): ${kept.map((s) => s.name).join(', ')}.`);
   out.push(
     '',
@@ -410,7 +410,7 @@ export async function refreshGrokQuota(now, { force = false, home = grokHome(), 
       if (b.end !== null) next.reset = b.end;
       delete next.error;
       const last = next.readings[next.readings.length - 1];
-      if (next.label === 'Weekly' && b.end !== null && (!last || last.pct !== b.pct || last.reset !== b.end))
+      if (next.label === 'Weekly' && b.end !== null && (!last || last.pct !== b.pct || last.reset !== b.end || now - last.t >= QUOTA_EVERY_MS))
         next.readings = [...next.readings, { t: now, pct: b.pct, reset: b.end }];
       break;
     } catch (e) {
@@ -423,22 +423,22 @@ export async function refreshGrokQuota(now, { force = false, home = grokHome(), 
 }
 
 /** Forecast samples from the recorded weekly readings; none unless the feature is on. @param {number} now @returns {Sample[]} */
-export function grokQuotaSamples(now) {
-  if (!grokQuotaEnabled()) return [];
-  return readGrokQuota()
-    .readings.filter((r) => r.t >= now - KEEP_MS)
-    .map((r) => ({ t: r.t, src: 'grok', win: '7d', pct: r.pct, reset: r.reset }));
+export function grokQuotaSamples(now, history = false) {
+  if (!history && !grokQuotaEnabled()) return [];
+  const quota = readGrokQuota();
+  if (!history && quota.label && quota.label !== 'Weekly') return [];
+  return quota.readings.filter((r) => r.t >= now - KEEP_MS).map((r) => ({ t: r.t, src: 'grok', win: '7d', pct: r.pct, reset: r.reset }));
 }
 
 /**
  * Forecast samples for Grok: the real weekly % when `grok-usage` is on, plus spend against the user's dollar cap
  * for the windows with a cap (a weekly cap steps aside for the real %). Empty without either.
  * @param {number} now
- * @param {{root?:string, budget?:ReturnType<typeof getGrokBudget>}} [opts]
+ * @param {{root?:string, budget?:ReturnType<typeof getGrokBudget>, history?:boolean}} [opts]
  * @returns {Sample[]}
  */
-export function grokSamples(now, { root = grokRoot(), budget = getGrokBudget() } = {}) {
-  const quota = grokQuotaSamples(now);
+export function grokSamples(now, { root = grokRoot(), budget = getGrokBudget(), history = false } = {}) {
+  const quota = grokQuotaSamples(now, history);
   if (!budget) return quota;
   const since = now - windowMs('7d');
   const turns = grokCosts(root, since);
@@ -594,20 +594,21 @@ export function grokDoctor(home = grokHome()) {
  * @param {string} self
  */
 export function wrapGrokStatusLine(toml, self) {
+  parseToml(toml);
   const cmd = `${self} statusline`;
   const range = tableRange(toml, 'ui.status_line');
   if (!range) {
     const block = ['', '[ui.status_line]', 'type = "command"', `command = ${tomlString(`${cmd}`)}`, 'refresh_interval = 60', ''].join('\n');
     return `${toml.trimEnd()}${block}`;
   }
-  const keys = parseTable(range.body);
+  const keys = parseTable(range.body, 'ui.status_line');
   const current = keys.command ?? '';
   const inner = isLimitcastStatus(current) ? unwrapStatusline(current) : current;
   keys.type = 'command';
   keys.command = inner ? `${cmd} -- sh -c ${shQuote(inner)}` : cmd;
   delete keys.items; // builtin item lists are not valid on a command row
-  if (keys.refresh_interval === undefined) keys.refresh_interval = '60';
-  return toml.slice(0, range.start) + renderTable('ui.status_line', keys, range.body) + toml.slice(range.end);
+  if (keys.refresh_interval === undefined) keys.refresh_interval = 60;
+  return replaceTable(toml, range, 'ui.status_line', keys);
 }
 
 /**
@@ -669,7 +670,7 @@ export function patchGrokSubagentModel(toml, type, model) {
     if (!model) return toml;
     return `${toml.trimEnd()}\n\n[subagents.models]\n${key} = ${tomlString(model)}\n`;
   }
-  const keys = parseTable(range.body);
+  const keys = parseTable(range.body, 'subagents.models');
   if (model) keys[key] = model;
   else delete keys[key];
   if (!Object.keys(keys).length) {
@@ -677,7 +678,7 @@ export function patchGrokSubagentModel(toml, type, model) {
     const after = toml.slice(range.end).replace(/^\n+/, '');
     return after ? `${before}\n\n${after}` : `${before}\n`;
   }
-  return toml.slice(0, range.start) + renderTable('subagents.models', keys, range.body) + toml.slice(range.end);
+  return replaceTable(toml, range, 'subagents.models', keys);
 }
 
 export function grokSessionLine(feed) {
@@ -798,7 +799,7 @@ function unwrapStatusline(command) {
 /** The [ui.status_line] command value, or ''. */
 function statusLineCommand(toml) {
   const range = tableRange(toml, 'ui.status_line');
-  return range ? (parseTable(range.body).command ?? '') : '';
+  return range ? (parseTable(range.body, 'ui.status_line').command ?? '') : '';
 }
 
 /** @param {string} path */
@@ -818,53 +819,73 @@ const shQuote = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\
  * @returns {{start:number, end:number, body:string}|null}
  */
 function tableRange(toml, name) {
-  const re = new RegExp(`^\\[${name.replaceAll('.', '\\.')}\\][ \\t]*$`, 'm');
+  const parts = name
+    .split('.')
+    .map((part) => `(?:${part}|"${part}"|'${part}')`)
+    .join('[ \\t]*\\.[ \\t]*');
+  const re = new RegExp(`^[ \\t]*\\[[ \\t]*${parts}[ \\t]*\\][ \\t]*(?:#[^\\r\\n]*)?\\r?$`, 'm');
   const m = re.exec(toml);
   if (!m) return null;
   const start = m.index;
   const rest = toml.slice(start + m[0].length);
-  const next = rest.search(/\n\[/);
+  const next = rest.search(/\n[ \t]*\[/);
   const end = next < 0 ? toml.length : start + m[0].length + next;
   return { start, end, body: toml.slice(start, end) };
 }
 
-/** @param {string} body */
-function parseTable(body) {
-  /** @type {Record<string, string>} */
-  const keys = {};
-  for (const line of body.split('\n').slice(1)) {
-    const m = /^\s*([A-Za-z0-9_-]+)\s*=\s*(.*)$/.exec(line);
-    if (!m) continue;
-    keys[m[1]] = unquote(m[2].trim());
-  }
-  return keys;
+/** Parse values with their TOML types and escaping intact. */
+function parseTable(body, name) {
+  return name.split('.').reduce((v, k) => v[k], parseToml(body));
 }
 
-/** @param {string} v */
-function unquote(v) {
-  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-    const inner = v.slice(1, -1);
-    return v.startsWith('"') ? inner.replace(/\\"/g, '"').replace(/\\\\/g, '\\') : inner;
+/** Preserve untouched fields/comments; verify the entire configuration has only the intended change. */
+function replaceTable(toml, range, name, keys) {
+  const before = parseTable(range.body, name);
+  const lines = range.body.split('\n');
+  const field = /^\s*(?:([A-Za-z0-9_-]+)|"([^"]+)"|'([^']+)')\s*=/;
+  const starts = lines.flatMap((line, i) => (field.test(line) ? [i] : []));
+  const out = [lines[0]];
+  out.push(...lines.slice(1, starts[0] ?? lines.length));
+  for (let i = 0; i < starts.length; i++) {
+    const from = starts[i];
+    const match = field.exec(lines[from]);
+    const key = match[1] ?? match[2] ?? match[3];
+    const block = lines.slice(from, starts[i + 1] ?? lines.length);
+    if (!Object.hasOwn(keys, key)) {
+      out.push(...commentsIn(block));
+      continue;
+    }
+    if (isDeepStrictEqual(before[key], keys[key])) out.push(...block);
+    else {
+      const comments = commentsIn(block);
+      out.push(stringifyToml({ [key]: keys[key] }).trimEnd(), ...comments);
+    }
   }
-  return v;
+  for (const key of Object.keys(keys)) if (!Object.hasOwn(before, key)) out.push(stringifyToml({ [key]: keys[key] }).trimEnd());
+  const next = `${toml.slice(0, range.start)}${out.join('\n').trimEnd()}\n${toml.slice(range.end)}`;
+  const expected = parseToml(toml);
+  const path = name.split('.');
+  const parent = path.slice(0, -1).reduce((v, k) => v[k], expected);
+  parent[path.at(-1)] = keys;
+  if (!isDeepStrictEqual(parseToml(next), expected))
+    throw new Error(`Cannot safely edit [${name}]; leave the configuration unchanged and edit this table manually.`);
+  return next;
 }
 
-/**
- * @param {string} name
- * @param {Record<string, string>} keys
- * @param {string} previousBody
- */
-function renderTable(name, keys, previousBody) {
-  const order = [];
-  for (const line of previousBody.split('\n').slice(1)) {
-    const m = /^\s*([A-Za-z0-9_-]+)\s*=/.exec(line);
-    if (m && keys[m[1]] !== undefined && !order.includes(m[1])) order.push(m[1]);
-  }
-  for (const k of Object.keys(keys)) if (!order.includes(k)) order.push(k);
-  const lines = [`[${name}]`];
-  for (const k of order) {
-    const v = keys[k];
-    lines.push(k === 'refresh_interval' && /^\d+$/.test(v) ? `${k} = ${v}` : `${k} = ${tomlString(v)}`);
-  }
-  return `${lines.join('\n')}\n`;
+/** Keep comments outside quoted values when replacing or removing a field. */
+function commentsIn(lines) {
+  return lines.flatMap((line) => {
+    let quote = '';
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (quote === '"' && c === '\\') {
+        i++;
+        continue;
+      }
+      if (quote && c === quote) quote = '';
+      else if (!quote && (c === '"' || c === "'")) quote = c;
+      else if (!quote && c === '#') return [line.slice(i)];
+    }
+    return [];
+  });
 }

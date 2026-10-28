@@ -1,3 +1,4 @@
+import './helpers/environment.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
@@ -6,10 +7,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { checkLicense, issueLicense } from '../scripts/legacy/license.mjs';
 import { forecast } from '../src/forecast.mjs';
 import { guardDecision, runGuard, spawnSource } from '../src/guard.mjs';
 import { doctor, install, installedFeatures, launcherTargets, uninstall, wrappedCommand, writeLauncher } from '../src/install.mjs';
-import { checkLicense, issueLicense } from '../src/license.mjs';
 import { burnReport } from '../src/report.mjs';
 import { startupBreakdown } from '../src/startup.mjs';
 import { baseline, contributors, measuredSavings, savings, skillListing, startupReport, trimReport } from '../src/trim.mjs';
@@ -380,7 +381,7 @@ test('install appends the Codex guard last so trusted hooks keep their positions
   // Trust check reads Codex's config.toml for the guard's position.
   assert.ok(doctor({ path, codexPath, samplesAgeMs: 0, license: null }).some((c) => /not trusted yet/.test(c.line)));
   writeFileSync(join(codexHome, 'config.toml'), `[hooks.state."${codexPath}:pre_tool_use:2:0"]\ntrusted_hash = "sha256:x"\n`);
-  assert.ok(doctor({ path, codexPath, samplesAgeMs: 0, license: null }).some((c) => /installed and trusted/.test(c.line)));
+  assert.ok(doctor({ path, codexPath, samplesAgeMs: 0, license: null }).some((c) => /configured; saved trust entry present/.test(c.line)));
 
   uninstall({ path, codexPath });
   codex = JSON.parse(readFileSync(codexPath, 'utf8'));

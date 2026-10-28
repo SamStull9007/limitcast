@@ -1,3 +1,4 @@
+import './helpers/environment.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -5,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { isPro, startTrial, trialStatus } from '../src/license.mjs';
+import { isPro, startTrial, trialStatus } from '../scripts/legacy/license.mjs';
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
 

@@ -1,3 +1,4 @@
+import './helpers/environment.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -74,10 +75,11 @@ test('headroom: point to the other account only when the current one is in troub
   const s = (sid, win, pct, minsAgo, reset) => ({ t: now - minsAgo * 60_000, src: 'claude', win, pct, reset, sid });
   // Account A (sessions a) near its 5h limit; account B (session b) quiet. Different resets keep them apart.
   const A = [s('a', '5h', 90, 30, r5), s('a', '5h', 97, 0, r5), s('a', '7d', 40, 0, r7)];
-  const B = [s('b', '5h', 12, 60, r5 + 3600), s('b', '7d', 30, 60, r7 + 3600)];
+  const B = [s('b', '5h', 12, 5, r5 + 3600), s('b', '7d', 30, 5, r7 + 3600)];
   assert.equal(headroom([...A, ...B], 'a', now), '⇄ other account 5h 12% · 7d 30%');
   assert.equal(headroom([...A, ...B], 'b', now), null); // b is fine
   assert.equal(headroom(A, 'a', now), null); // no other account
+  assert.equal(headroom([...A, ...B.map((s) => ({ ...s, t: now - 60 * 60_000 }))], 'a', now), null); // stale headroom is unknown
 });
 
 test('long sessions: tokens re-sent per call from the transcript tail', () => {

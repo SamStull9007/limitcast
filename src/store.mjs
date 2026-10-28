@@ -7,14 +7,15 @@ import { join } from 'node:path';
 
 export const KEEP_MS = 8 * 24 * 3600_000;
 const PRUNE_BYTES = 1_000_000;
+const HEARTBEAT_MS = 5 * 60_000;
 
 export function stateDir() {
   return process.env.LIMITCAST_STATE ?? join(process.env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'), 'limitcast');
 }
 
 /**
- * Append samples whose pct or reset changed since the last one for the same series.
- * The status line fires on every message, so unchanged readings are skipped.
+ * Record changes and a five-minute heartbeat for unchanged usage. A sample's timestamp
+ * is a confirmed observation, so idle usage and a stopped recorder remain distinguishable.
  * @param {Sample[]} samples
  */
 export function record(samples) {
@@ -22,7 +23,7 @@ export function record(samples) {
   const dir = stateDir();
   mkdirSync(dir, { recursive: true });
   const lastPath = join(dir, 'last.json');
-  /** @type {Record<string, {pct:number, reset:number}>} */
+  /** @type {Record<string, {pct:number, reset:number, t?:number}>} */
   let last = {};
   try {
     last = JSON.parse(readFileSync(lastPath, 'utf8'));
@@ -32,12 +33,12 @@ export function record(samples) {
   const key = (/** @type {Sample} */ s) => `${s.src}:${s.win}:${s.sid ?? ''}`;
   const fresh = samples.filter((s) => {
     const prev = last[key(s)];
-    return !prev || prev.pct !== s.pct || prev.reset !== s.reset;
+    return !prev || prev.pct !== s.pct || prev.reset !== s.reset || s.t - (prev.t ?? 0) >= HEARTBEAT_MS;
   });
   if (!fresh.length) return;
   const file = join(dir, 'samples.jsonl');
   appendFileSync(file, `${fresh.map((s) => JSON.stringify(s)).join('\n')}\n`);
-  for (const s of fresh) last[key(s)] = { pct: s.pct, reset: s.reset };
+  for (const s of fresh) last[key(s)] = { pct: s.pct, reset: s.reset, t: s.t };
   writeFileSync(lastPath, JSON.stringify(last));
   if (statSync(file).size > PRUNE_BYTES)
     writeFileSync(
