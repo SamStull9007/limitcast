@@ -30,6 +30,8 @@ import {
   getGrokBudget,
   grokConfigPath,
   grokPresent,
+  grokQuotaDue,
+  grokQuotaEnabled,
   grokSamples,
   grokServers,
   grokSessionLine,
@@ -37,7 +39,11 @@ import {
   grokStartup,
   grokTrimReport,
   grokUsedServers,
+  readGrokQuota,
+  refreshGrokQuota,
   setGrokBudget,
+  setGrokQuota,
+  touchGrokQuota,
   undoGrokTrim,
 } from '../src/grok.mjs';
 import { runGuard } from '../src/guard.mjs';
@@ -89,6 +95,7 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
   limitcast trim [--share]           tokens every session loads before you type, and how much you never use
   limitcast trim --codex             the same for Codex: AGENTS.md size and MCP servers you haven't used
   limitcast trim --grok              the same for Grok: system prompt size and MCP servers you haven't used
+  limitcast grok-usage [on|off]      Grok's weekly % used, from grok.com with the login Grok holds (off by default)
   limitcast memory [dir]             check this project's auto-memory: load cap, broken links, unlinked and oversized files
   limitcast results [--days N]       limits you reached, how far ahead limitcast warned, what the guard blocked
                     [--share]        totals only, safe to post
@@ -153,6 +160,7 @@ const days = () => {
 };
 
 if (cmd === 'status') {
+  if (grokQuotaEnabled() && grokPresent()) await refreshGrokQuota(now);
   const rows = forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS)), ...grokSamples(now)]), now);
   if (args.includes('--json')) console.log(JSON.stringify(rows, null, 2));
   else {
@@ -164,6 +172,10 @@ if (cmd === 'status') {
       console.log(
         `other Claude account (last used ${clock(a.lastSeen)}): ${a.rows.map((f) => `${f.win} ${f.verdict === 'RESET' ? 0 : Math.round(f.pct)}%${f.verdict === 'OK' || f.verdict === 'RESET' ? '' : ` ${f.verdict}`}`).join(' · ')}`,
       );
+    const gq = grokQuotaEnabled() ? readGrokQuota() : null;
+    if (gq && !gq.ok) console.log(`grok: weekly usage unavailable (${gq.error ?? 'no reading yet'})`);
+    else if (gq?.label && gq.label !== 'Weekly')
+      console.log(`grok: your plan reports ${gq.label.toLowerCase()} usage (${Math.round(gq.pct ?? 0)}% used), which limitcast does not forecast`);
     const spend = grokSpendLine(now);
     if (spend) console.log(spend);
     else if (existsSync(grokRoot()) && !rows.some((f) => f.src === 'grok'))
@@ -196,6 +208,15 @@ if (cmd === 'status') {
         const ctx = compactHint(lastCallTokens(feed.transcript_path));
         if (ctx) hints.push(ctx);
       }
+    }
+  } catch {
+    /* never break the status line */
+  }
+  try {
+    // Grok's weekly % comes from grok.com (opt-in); refresh it in the background so no status line waits on the network.
+    if (grokQuotaDue(now)) {
+      touchGrokQuota(now);
+      spawn(process.execPath, [fileURLToPath(import.meta.url), 'grok-usage', '--refresh'], { detached: true, stdio: 'ignore' }).unref();
     }
   } catch {
     /* never break the status line */
@@ -517,6 +538,33 @@ if (cmd === 'status') {
   if (mem) checks.push(mem);
   for (const c of checks) console.log(`${c.ok ? '✓' : '✗'} ${c.line}`);
   process.exit(checks.every((c) => c.ok) ? 0 : 1);
+} else if (cmd === 'grok-usage') {
+  const arg = args.find((a) => !a.startsWith('-'));
+  if (args.includes('--refresh')) {
+    await refreshGrokQuota(now, { force: true }); // the background refresh the status line starts
+  } else if (arg && arg !== 'on' && arg !== 'off') {
+    console.log('usage: limitcast grok-usage [on|off]');
+    process.exit(2);
+  } else if (arg === 'on' && !grokPresent()) {
+    console.log('Grok is not installed here (no ~/.grok), so there is no usage to read.');
+    process.exit(1);
+  } else {
+    if (arg) setGrokQuota(arg === 'on');
+    if (arg === 'on')
+      console.log(
+        'Grok weekly usage is on. About every 5 minutes limitcast reads the login Grok keeps in ~/.grok/auth.json and asks grok.com for your usage, the way Grok Build does. The login goes only to grok.com and is never stored or logged. Turn it off: limitcast grok-usage off',
+      );
+    if (arg === 'off') console.log('Grok weekly usage is off. limitcast no longer reads your Grok login or contacts grok.com.');
+    else if (grokQuotaEnabled()) {
+      const q = await refreshGrokQuota(now, { force: arg === 'on' });
+      console.log(
+        q.ok
+          ? `Grok ${q.label?.toLowerCase()}: ${Math.round(q.pct ?? 0)}% used${q.reset ? `, resets ${new Date(q.reset * 1000).toLocaleString()}` : ''}`
+          : `Grok usage unavailable: ${q.error ?? 'no reading yet'}`,
+      );
+      if (!q.ok) process.exit(1);
+    } else console.log('Grok weekly usage is off. Turn it on: limitcast grok-usage on');
+  }
 } else if (cmd === 'memory') {
   const dir = args.find((a) => !a.startsWith('-')) ?? memoryDir();
   console.log(memoryReport(scanMemory(dir), dir));

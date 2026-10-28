@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- New: `limitcast grok-usage on` shows Grok's real weekly % used. Grok keeps no % on disk, so limitcast asks grok.com for your billing cycle (the request Grok Build makes) with the login in `~/.grok/auth.json`, about every 5 minutes. It is off by default because it is the one place limitcast uses a login: the login is read in memory, sent only to grok.com (redirects refused) and never stored or logged. The readings feed `status`, the Grok status line, the guard and `doctor`, and a weekly dollar cap steps aside for them. `limitcast grok-usage off` stops it. Weekly plans only; a monthly credit plan is reported but not forecast.
+
 ## 0.16.0 — 2026-10-27
 
 - New: `limitcast memory [dir]` checks this project's auto-memory folder: how much of `MEMORY.md` fits in what Claude Code loads every session (the first 200 lines or 25 KB), broken links, topic files nothing links to, and files over 150 lines. `limitcast doctor` shows the same as one line and fails it only when the index is past the cap.

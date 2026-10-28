@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { codexServers, setEnabled } from './codex.mjs';
 import { windowMs } from './forecast.mjs';
-import { stateDir } from './store.mjs';
+import { KEEP_MS, stateDir } from './store.mjs';
 import { grokRoot } from './usage.mjs';
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */
@@ -202,21 +202,252 @@ export function grokSpend(now, root = grokRoot()) {
   return out;
 }
 
+// Grok weekly %, opt-in (`limitcast grok-usage on`). Grok keeps no % on disk, so limitcast asks grok.com the same billing
+// question Grok Build asks, with the login Grok already holds in auth.json. That login is read in this process, sent only to
+// grok.com, and never stored or logged.
+const QUOTA_URL = 'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig';
+const QUOTA_EVERY_MS = 5 * 60_000;
+const quotaFile = () => join(stateDir(), 'grok-quota.json');
+
+/** @typedef {{at:number, ok:boolean, error?:string, label?:string, pct?:number, reset?:number, readings:{t:number, pct:number, reset:number}[]}} QuotaState */
+
+export function grokQuotaEnabled() {
+  try {
+    return JSON.parse(readFileSync(configFile(), 'utf8')).grokQuota === true;
+  } catch {
+    return false;
+  }
+}
+
+/** @param {boolean} on */
+export function setGrokQuota(on) {
+  let cfg = {};
+  try {
+    cfg = JSON.parse(readFileSync(configFile(), 'utf8'));
+  } catch {
+    /* new */
+  }
+  mkdirSync(stateDir(), { recursive: true });
+  writeFileSync(configFile(), JSON.stringify({ ...cfg, grokQuota: on }));
+}
+
+/** @returns {QuotaState} */
+export function readGrokQuota() {
+  try {
+    return { at: 0, ok: false, readings: [], ...JSON.parse(readFileSync(quotaFile(), 'utf8')) };
+  } catch {
+    return { at: 0, ok: false, readings: [] };
+  }
+}
+
+/** @param {QuotaState} s */
+function writeGrokQuota(s) {
+  mkdirSync(stateDir(), { recursive: true });
+  writeFileSync(quotaFile(), JSON.stringify(s));
+}
+
+/** True when the feature is on, Grok is installed, and the last attempt is older than the refresh interval. */
+export function grokQuotaDue(now, home = grokHome()) {
+  return grokQuotaEnabled() && grokPresent(home) && now - readGrokQuota().at >= QUOTA_EVERY_MS;
+}
+
+/** Mark an attempt before a background refresh starts, so a burst of status lines starts only one. */
+export function touchGrokQuota(now) {
+  writeGrokQuota({ ...readGrokQuota(), at: now });
+}
+
 /**
- * Forecast samples from Grok spend against the user's dollar cap. Empty without a budget: there is no % to judge.
+ * Protobuf fields of one message as [field, value, wireType]: varints as numbers, length-delimited as Buffers,
+ * fixed32 as its 4 bytes. Stops quietly at a truncated message.
+ * @param {Buffer} buf
+ * @returns {Generator<[number, any, number]>}
+ */
+function* fields(buf) {
+  let pos = 0;
+  const varint = () => {
+    let r = 0;
+    let mul = 1;
+    while (pos < buf.length) {
+      const b = buf[pos++];
+      r += (b & 0x7f) * mul;
+      if (!(b & 0x80)) return r;
+      mul *= 128;
+    }
+    return null;
+  };
+  while (pos < buf.length) {
+    const key = varint();
+    if (key === null) return;
+    const field = Math.floor(key / 8);
+    const wire = key % 8;
+    if (wire === 0) {
+      const v = varint();
+      if (v === null) return;
+      yield [field, v, 0];
+    } else if (wire === 1) {
+      if (pos + 8 > buf.length) return;
+      pos += 8;
+    } else if (wire === 2) {
+      const len = varint();
+      if (len === null || pos + len > buf.length) return;
+      yield [field, buf.subarray(pos, pos + len), 2];
+      pos += len;
+    } else if (wire === 5) {
+      if (pos + 4 > buf.length) return;
+      yield [field, buf.subarray(pos, pos + 4), 5];
+      pos += 4;
+    } else return;
+  }
+}
+
+/** Seconds of a protobuf Timestamp. @param {Buffer} msg */
+const timestamp = (msg) => {
+  for (const [f, v, w] of fields(msg)) if (f === 1 && w === 0) return /** @type {number} */ (v);
+  return null;
+};
+
+/**
+ * The billing cycle from a gRPC-web `GetGrokCreditsConfig` reply: % used and the cycle's start and end (epoch seconds).
+ * Null when the reply holds no percentage.
+ * @param {Uint8Array} body
+ * @returns {{pct:number, start:number|null, end:number|null}|null}
+ */
+export function parseGrokBilling(body) {
+  const buf = Buffer.from(body);
+  for (let pos = 0; pos + 5 <= buf.length; ) {
+    const flag = buf[pos];
+    const len = buf.readUInt32BE(pos + 1);
+    pos += 5;
+    if (pos + len > buf.length) return null;
+    const payload = buf.subarray(pos, pos + len);
+    pos += len;
+    if (flag & 0x80) continue; // trailers
+    for (const [f, cfg, w] of fields(payload)) {
+      if (f !== 1 || w !== 2) continue;
+      let pct = null;
+      let start = null;
+      let end = null;
+      for (const [g, v, ww] of fields(cfg)) {
+        if (g === 1 && ww === 5) {
+          const x = v.readFloatLE(0);
+          if (Number.isFinite(x)) pct = Math.min(100, Math.max(0, x));
+        } else if (g === 4 && ww === 2) start = timestamp(v);
+        else if (g === 5 && ww === 2) end = timestamp(v);
+      }
+      if (pct !== null) return { pct, start, end };
+    }
+  }
+  return null;
+}
+
+/** Grok's logins from auth.json, the auth.x.ai one first. @param {string} home */
+function grokTokens(home) {
+  try {
+    const doc = JSON.parse(readFileSync(join(home, 'auth.json'), 'utf8'));
+    return Object.entries(doc ?? {})
+      .filter(([, v]) => typeof (/** @type {any} */ (v)?.key) === 'string' && /** @type {any} */ (v).key)
+      .sort(([a], [b]) => Number(b.includes('auth.x.ai')) - Number(a.includes('auth.x.ai')))
+      .map(([, v]) => /** @type {string} */ (/** @type {any} */ (v).key));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * @param {string} token
+ * @param {typeof fetch} fetchFn
+ */
+async function askGrok(token, fetchFn) {
+  let r;
+  try {
+    r = await fetchFn(QUOTA_URL, {
+      method: 'POST',
+      redirect: 'error', // the login must never follow a redirect to another host
+      signal: AbortSignal.timeout(8000),
+      headers: {
+        authorization: `Bearer ${token}`,
+        'x-xai-token-auth': 'xai-grok-cli',
+        accept: 'application/grpc-web+proto',
+        'content-type': 'application/grpc-web+proto',
+        'user-agent': 'Grok Build',
+      },
+      body: new Uint8Array([0, 0, 0, 0, 0]),
+    });
+  } catch {
+    throw new Error('could not reach grok.com');
+  }
+  if (r.status === 401 || r.status === 403) throw new Error('Grok login expired: run `grok login`');
+  if (!r.ok) throw new Error(`grok.com answered HTTP ${r.status}`);
+  return parseGrokBilling(new Uint8Array(await r.arrayBuffer()));
+}
+
+/**
+ * Ask grok.com for the weekly % (at most every 5 minutes unless `force`), keep the reading, and say what happened.
+ * Never throws: a failure is recorded in the state for `status` and `doctor`.
+ * @param {number} now
+ * @param {{force?:boolean, home?:string, fetchFn?:typeof fetch}} [opts]
+ * @returns {Promise<QuotaState>}
+ */
+export async function refreshGrokQuota(now, { force = false, home = grokHome(), fetchFn = fetch } = {}) {
+  const prev = readGrokQuota();
+  if (!force && now - prev.at < QUOTA_EVERY_MS) return prev;
+  /** @type {QuotaState} */
+  const next = { ...prev, at: now, ok: false };
+  delete next.error;
+  const tokens = grokTokens(home);
+  if (!tokens.length) next.error = 'no Grok login found: run `grok login`';
+  for (const token of tokens) {
+    try {
+      const b = await askGrok(token, fetchFn);
+      if (!b) {
+        next.error = 'grok.com sent a billing reply limitcast does not recognise';
+        continue;
+      }
+      const days = b.start !== null && b.end !== null ? Math.trunc((b.end - b.start) / 86400) : null;
+      next.label = days !== null && days >= 6 && days <= 8 ? 'Weekly' : days !== null && days >= 27 && days <= 33 ? 'Monthly' : 'Credits';
+      next.ok = true;
+      next.pct = b.pct;
+      if (b.end !== null) next.reset = b.end;
+      delete next.error;
+      const last = next.readings[next.readings.length - 1];
+      if (next.label === 'Weekly' && b.end !== null && (!last || last.pct !== b.pct || last.reset !== b.end))
+        next.readings = [...next.readings, { t: now, pct: b.pct, reset: b.end }];
+      break;
+    } catch (e) {
+      next.error = e instanceof Error ? e.message : 'unknown error';
+    }
+  }
+  next.readings = next.readings.filter((r) => r.t >= now - KEEP_MS);
+  writeGrokQuota(next);
+  return next;
+}
+
+/** Forecast samples from the recorded weekly readings; none unless the feature is on. @param {number} now @returns {Sample[]} */
+export function grokQuotaSamples(now) {
+  if (!grokQuotaEnabled()) return [];
+  return readGrokQuota()
+    .readings.filter((r) => r.t >= now - KEEP_MS)
+    .map((r) => ({ t: r.t, src: 'grok', win: '7d', pct: r.pct, reset: r.reset }));
+}
+
+/**
+ * Forecast samples for Grok: the real weekly % when `grok-usage` is on, plus spend against the user's dollar cap
+ * for the windows with a cap (a weekly cap steps aside for the real %). Empty without either.
  * @param {number} now
  * @param {{root?:string, budget?:ReturnType<typeof getGrokBudget>}} [opts]
  * @returns {Sample[]}
  */
 export function grokSamples(now, { root = grokRoot(), budget = getGrokBudget() } = {}) {
-  if (!budget) return [];
+  const quota = grokQuotaSamples(now);
+  if (!budget) return quota;
   const since = now - windowMs('7d');
   const turns = grokCosts(root, since);
   /** @type {Sample[]} */
-  const out = [];
+  const out = [...quota];
   for (const win of /** @type {const} */ (['5h', '7d'])) {
     const cap = budget[win];
     if (!(cap > 0)) continue;
+    if (win === '7d' && quota.length) continue;
     const start = alignedStart(now, win);
     const reset = (start + windowMs(win)) / 1000;
     let spent = 0;
@@ -334,10 +565,18 @@ export function grokDoctor(home = grokHome()) {
     line: guard ? 'Grok subagent guard installed' : 'Grok subagent guard not installed (optional: `limitcast install --guard`)',
   });
   const budget = getGrokBudget();
-  if (guard && !budget)
+  if (grokQuotaEnabled()) {
+    const q = readGrokQuota();
+    const ago = q.at ? `${Math.max(0, Math.round((Date.now() - q.at) / 60_000))} min ago` : 'not yet';
+    out.push(
+      q.ok
+        ? { ok: true, line: `Grok ${q.label?.toLowerCase() ?? 'usage'}: ${Math.round(q.pct ?? 0)}% used (checked ${ago})` }
+        : { ok: false, line: `Grok usage unavailable (checked ${ago}): ${q.error ?? 'no reading yet'}` },
+    );
+  } else if (guard && !budget)
     out.push({
       ok: true,
-      line: 'Grok has no % limit on disk: set a 5-hour dollar cap so the guard can block (`limitcast budget grok <usd>`)',
+      line: 'Grok has no % limit on disk: turn on the weekly % with `limitcast grok-usage on`, or set a 5-hour dollar cap so the guard can block (`limitcast budget grok <usd>`)',
     });
   else if (budget)
     out.push({
