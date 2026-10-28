@@ -209,6 +209,56 @@ test.describe({ concurrency: 1 }, () => {
     assert.doesNotMatch(claudeOut, /grok 5h/);
   });
 
+  test('statusline: Grok feed puts Claude windows on a separate labeled line', () => {
+    const home = tmp('lc-grok-mix-');
+    const state = tmp('lc-grok-mix-state-');
+    const claude = tmp('lc-grok-mix-claude-');
+    const xdg = tmp('lc-grok-mix-xdg-');
+    writeFileSync(join(state, 'value.at'), String(Date.now()));
+    const reset = Math.floor(Date.now() / 1000) + 4 * 24 * 3600;
+    const t0 = Date.now() - 2 * 3600_000;
+    writeFileSync(
+      join(state, 'samples.jsonl'),
+      `${[
+        { t: t0, src: 'claude', win: '5h', pct: 27, reset: reset - 3 * 24 * 3600, sid: 'c1' },
+        { t: t0, src: 'claude', win: '7d', pct: 40, reset, sid: 'c1' },
+        { t: Date.now(), src: 'claude', win: '7d', pct: 48, reset, sid: 'c1' },
+        { t: t0, src: 'grok', win: '7d', pct: 9, reset },
+        { t: Date.now(), src: 'grok', win: '7d', pct: 10, reset },
+        { t: Date.now(), src: 'grok', win: '5h', pct: 10, reset: Math.floor(Date.now() / 1000) + 3600 },
+      ]
+        .map((s) => JSON.stringify(s))
+        .join('\n')}\n`,
+    );
+    const env = {
+      ...process.env,
+      GROK_HOME: home,
+      LIMITCAST_STATE: state,
+      CLAUDE_CONFIG_DIR: claude,
+      XDG_CONFIG_HOME: xdg,
+    };
+    const out = execFileSync('node', [bin, 'statusline'], {
+      input: JSON.stringify({ model: { display_name: 'Grok 4.6' }, context_window: { used_percentage: 12 } }),
+      env,
+    }).toString();
+    const lines = out.trimEnd().split('\n');
+    const lc = lines.filter((l) => l.startsWith('limitcast'));
+    assert.equal(lc.length, 2, out);
+    assert.match(lc[0], /^limitcast: /);
+    assert.match(lc[0], /grok 7d 10%/);
+    assert.doesNotMatch(lc[0], /48%/);
+    assert.doesNotMatch(lc[0], /5h 27%/);
+    assert.match(lc[1], /^limitcast claude: /);
+    assert.match(lc[1], /5h 27%/);
+    assert.match(lc[1], /7d 48%/);
+    assert.doesNotMatch(lc[1], /grok /);
+    assert.equal(lc.filter((l) => l.includes('today')).length, 2);
+    assert.ok(
+      lc.every((l) => (l.match(/today/g) || []).length <= 1),
+      out,
+    );
+  });
+
   test('patchGrokSubagentModel writes, updates and removes [subagents.models]', () => {
     const base = '[models]\ndefault = "grok-4.6"\n';
     const added = patchGrokSubagentModel(base, 'Explore', 'grok-4.3');

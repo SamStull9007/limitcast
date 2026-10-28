@@ -229,7 +229,12 @@ if (cmd === 'status') {
     // Grok spend/forecast stays on the Grok status line. Claude's feed has rate_limits; mixing the two
     // would print grok $ on Claude Code and break "waiting for data" when there are no Claude readings.
     const grokExtra = grokOwn ? grokSamples(now) : [];
-    line = statusBits(forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...grokExtra], sid), now), grokOwn ? grokSpendLine(now) : '', hints);
+    line = statusLines(
+      forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...grokExtra], sid), now),
+      grokOwn ? grokSpendLine(now) : '',
+      hints,
+      grokOwn ? 'grok' : 'claude',
+    ).join('\n');
   } catch {
     /* never break the status line */
   }
@@ -238,11 +243,11 @@ if (cmd === 'status') {
     // Your status line stays as it was; limitcast adds its own line under it (status scripts often printf without a newline).
     const yours = r.stdout?.toString() ?? '';
     process.stdout.write(yours && !yours.endsWith('\n') ? `${yours}\n` : yours);
-    console.log(`limitcast: ${line}`);
+    emitStatus(line);
     process.exit(r.status ?? 1);
   }
   if (grokOwn) console.log(grokOwn);
-  console.log(`limitcast: ${line}`);
+  emitStatus(line);
 } else if (cmd === 'guard') {
   // The installed guard protects all users; LIMITCAST_ALLOW=1 remains the explicit override.
   if (process.env.LIMITCAST_ALLOW === '1') process.exit(0);
@@ -1056,29 +1061,52 @@ function table(rows) {
     .join('\n');
 }
 
-/** @param {ReturnType<typeof forecastAll>} rows */
-function oneLine(rows) {
-  const bits = rows.map(
-    (f) =>
-      `${f.src === 'claude' ? '' : `${f.src} `}${f.win} ${Math.round(f.pct)}%${f.verdict === 'AT_RISK' ? ` ⚠ out ${clock(f.wall)}` : f.verdict === 'NEAR' ? ' ⚠ near limit' : f.verdict === 'HIT' ? ' ⛔' : ''}` +
-      (f.today && f.verdict !== 'HIT' ? ` · today ${todayLabel(f.today)}` : ''),
+/**
+ * One window on a status-line row. Host Grok/Codex windows keep their src prefix;
+ * a labeled `limitcast claude:` / `limitcast grok:` row does not repeat it.
+ * @param {NonNullable<ReturnType<typeof forecastAll>>[number]} f
+ * @param {boolean} labeled
+ */
+function windowBit(f, labeled = false) {
+  const name = labeled || f.src === 'claude' ? '' : `${f.src} `;
+  return (
+    `${name}${f.win} ${Math.round(f.pct)}%` +
+    (f.verdict === 'AT_RISK' ? ` ⚠ out ${clock(f.wall)}` : f.verdict === 'NEAR' ? ' ⚠ near limit' : f.verdict === 'HIT' ? ' ⛔' : '') +
+    (f.today && f.verdict !== 'HIT' ? ` · today ${todayLabel(f.today)}` : '')
   );
-  return bits.join(' · ') || 'limitcast: waiting for data';
 }
 
 /**
- * Status-line body: forecasts, Grok spend when there is no cap, then hints. No "waiting for data" when spend is known.
+ * Status-line rows: one provider per line, Grok spend on the Grok row, then hints on the host row.
  * @param {ReturnType<typeof forecastAll>} rows
  * @param {string} spend
  * @param {string[]} hints
+ * @param {string} host
  */
-function statusBits(rows, spend, hints) {
-  const core = oneLine(rows);
-  const parts = [];
-  if (core !== 'limitcast: waiting for data') parts.push(core.replace(/^limitcast: /, ''));
-  if (spend) parts.push(spend);
-  parts.push(...hints);
-  return parts.join(' · ') || 'waiting for data';
+function statusLines(rows, spend, hints, host = 'claude') {
+  const order = host === 'grok' ? ['grok', 'claude', 'codex'] : ['claude', 'codex', 'grok'];
+  /** @type {string[]} */
+  const lines = [];
+  for (const src of order) {
+    const group = rows.filter((f) => f.src === src);
+    if (!group.length && !(src === 'grok' && spend)) continue;
+    const labeled = src !== host;
+    const bits = group.map((f) => windowBit(f, labeled));
+    if (src === 'grok' && spend) bits.push(spend);
+    if (!bits.length) continue;
+    const tag = src === host ? 'limitcast' : `limitcast ${src}`;
+    lines.push(`${tag}: ${bits.join(' · ')}`);
+  }
+  if (hints.length) {
+    if (lines.length) lines[0] += ` · ${hints.join(' · ')}`;
+    else lines.push(`limitcast: ${hints.join(' · ')}`);
+  }
+  return lines.length ? lines : ['limitcast: waiting for data'];
+}
+
+/** Print limitcast rows. `limitcast claude:` already has the prefix; `waiting for data` does not. */
+function emitStatus(line) {
+  console.log(line.startsWith('limitcast') ? line : `limitcast: ${line}`);
 }
 
 /** Grok spend line when no dollar cap is set (a cap becomes a forecast row instead). */
