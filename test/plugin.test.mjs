@@ -9,7 +9,7 @@ test('the plugin pins the same limitcast version as package.json', () => {
   const { version } = JSON.parse(read('package.json'));
   assert.equal(JSON.parse(read('plugin/.claude-plugin/plugin.json')).version, version);
   for (const f of readdirSync(new URL('plugin/commands/', root))) {
-    const pins = [...read(`plugin/commands/${f}`).matchAll(/limitcast@([\w.-]+)/g)].map((m) => m[1]);
+    const pins = [...read(`plugin/commands/${f}`).matchAll(/(?:limitcast@|\/limitcast-)(\d+\.\d+\.\d+)(?:\.tgz)?/g)].map((m) => m[1]);
     assert.ok(pins.length > 0, f);
     for (const p of pins) assert.equal(p, version, f);
   }
