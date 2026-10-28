@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.16.0 — 2026-10-27
 
 - New: `limitcast memory [dir]` checks this project's auto-memory folder: how much of `MEMORY.md` fits in what Claude Code loads every session (the first 200 lines or 25 KB), broken links, topic files nothing links to, and files over 150 lines. `limitcast doctor` shows the same as one line and fails it only when the index is past the cap.
 - New plugin commands: `/limitcast:memory-audit` (stale, broken, unlinked and contradictory notes; proposes fixes, changes nothing until you agree) and `/limitcast:memory-split` (an oversized memory file into a short hub plus topic files, after you approve the boundary).
