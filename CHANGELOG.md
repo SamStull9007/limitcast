@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.3 — 2026-10-28
+
+- Fix: the Grok status line prints one line per tool. Claude and Grok windows no longer share one unlabeled row (two 7d figures and two daily shares). Host windows stay on `limitcast:`; Claude on Grok is `limitcast claude:`.
+
 ## 0.17.2 — 2026-10-27
 
 - Fix: doctor accepts Claude sessions awaiting their first assistant response and optional subscription limit fields, while still rejecting malformed readings.
