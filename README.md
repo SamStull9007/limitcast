@@ -42,7 +42,7 @@ All features are now free. A guard previously installed in preview mode will enf
 ## Install
 
 ```sh
-npm install -g https://github.com/SamStull9007/limitcast/releases/download/v0.16.0/limitcast-0.16.0.tgz     # or: brew trust samstull9007/limitcast && brew install samstull9007/limitcast/limitcast
+npm install -g limitcast     # or: brew trust samstull9007/limitcast && brew install samstull9007/limitcast/limitcast
 limitcast onboard            # read-only: setup checks and a first useful result
 limitcast install            # free: status-line recorder
 limitcast install --guard    # also the subagent guard (free: preview only)
