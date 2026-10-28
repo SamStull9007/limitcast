@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.17.0 — 2026-10-27
 
 - New: `limitcast grok-usage on` shows Grok's real weekly % used. Grok keeps no % on disk, so limitcast asks grok.com for your billing cycle (the request Grok Build makes) with the login in `~/.grok/auth.json`, about every 5 minutes. It is off by default because it is the one place limitcast uses a login: the login is read in memory, sent only to grok.com (redirects refused) and never stored or logged. The readings feed `status`, the Grok status line, the guard and `doctor`, and a weekly dollar cap steps aside for them. `limitcast grok-usage off` stops it. Weekly plans only; a monthly credit plan is reported but not forecast.
 

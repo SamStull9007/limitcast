@@ -1,6 +1,6 @@
 {
   "name": "limitcast",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "Stretch your Claude Code plan: measure what every session loads before you type, cut what you never use, and stop runaway subagents before they burn your window.",
   "type": "module",
   "bin": {
