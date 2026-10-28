@@ -79,7 +79,7 @@ test('a tight window still moves a subagent pinned to Opus to Sonnet, but leaves
   assert.equal((await runGuard(spawn({ subagent_type: 'Explore' }), NOW, 30)).updatedInput.model, 'haiku');
 });
 
-test('CLI: subagent-model is Pro, validates, lists and removes', () => {
+test('CLI: subagent-model is free, validates, lists and removes', () => {
   const state = tmp('lc-model-cli-state-');
   // XDG_CONFIG_HOME too: starting a trial also writes a marker there, which must not land in the real ~/.config.
   // GROK_HOME: pinning writes [subagents.models] and must not touch the real ~/.grok.
@@ -92,7 +92,7 @@ test('CLI: subagent-model is Pro, validates, lists and removes', () => {
   delete env.LIMITCAST_LICENSE;
   const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
   const run = (...a) => spawnSync('node', [bin, 'subagent-model', ...a], { env });
-  assert.equal(run('Explore', 'haiku').status, 2); // free
+  assert.equal(run('Explore', 'haiku').status, 0); // no key required
   assert.equal(spawnSync('node', [bin, 'trial'], { env }).status, 0);
   assert.equal(run('Explore').status, 1);
   assert.equal(run('Explore', 'gpt-5').status, 1);

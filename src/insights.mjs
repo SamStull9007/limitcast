@@ -84,7 +84,7 @@ export function insightsReport(r, pro) {
       out.push(`Previous equal period: estimated ${fmtBig(r.previousContext)} context tokens not re-sent. Neither figure measures cash savings.`);
     else out.push('Previous-period comparison: unavailable until two complete periods have been observed.');
   }
-  out.push('', '| Protection event | Applied | Free preview: would have acted |', '|---|---:|---:|');
+  out.push('', '| Protection event | Applied | Historical preview: would have acted |', '|---|---:|---:|');
   for (const [kind, label] of Object.entries(ACTIONS)) out.push(`| ${label} | ${r.actions[kind].actual} | ${r.actions[kind].preview} |`);
   out.push(
     '',
@@ -98,13 +98,13 @@ export function insightsReport(r, pro) {
   else if (r.actions.cold.actual || r.actions.cold.preview)
     out.push('- Before resuming a long idle Claude session, consider `/compact`; a warning alone does not reduce its input.');
   else if (claude.fresh > 0)
-    out.push('- Run `limitcast report --why` (Pro) to find the largest sources of new Claude tokens before changing a budget or model.');
+    out.push('- Run `limitcast report --why` to find the largest sources of new Claude tokens before changing a budget or model.');
   else out.push('- Check `limitcast status` before a heavy run; each provider has its own limits.');
   if (!held && !previewed)
     out.push('- No protection actions recorded. `limitcast onboard` distinguishes missing setup from a period that needed no intervention.');
   if (!pro && previewed)
     out.push(
-      `- Pro would have acted on ${previewed} recorded event(s). Try it with limitcast trial (7 days, no card), then limitcast install --guard --alerts.`,
+      `- ${previewed} historical preview event(s) were recorded. All features are now free; enable protection with limitcast install --guard --alerts.`,
     );
   out.push('- Share voluntarily with `limitcast results --share`; nothing is uploaded automatically.');
   return out.join('\n');
@@ -120,7 +120,7 @@ export function insightsShare(r, pro) {
     );
   const actual = Object.values(r.actions).reduce((n, a) => n + a.actual, 0);
   const preview = Object.values(r.actions).reduce((n, a) => n + a.preview, 0);
-  parts.push(`${actual} applied protection events; ${preview} free-preview events (${r.attempts} unidentified attempts)`);
+  parts.push(`${actual} applied protection events; ${preview} historical-preview events (${r.attempts} unidentified attempts)`);
   if (pro && r.contextAvailable) parts.push(`estimated ${fmtBig(r.context.tokens)} Claude context tokens not re-sent this period vs baseline`);
   if (pro && !r.contextAvailable) parts.push('Claude context estimate unavailable');
   return `Voluntary capacity check-in, ${r.days} days: ${parts.join('; ')}. No prompts, project names or account IDs. https://limitcast.dev`;

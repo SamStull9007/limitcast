@@ -1,3 +1,5 @@
+> Status update, 2026-10-27: Limitcast 0.15.0 is free under MIT. This earlier commercial assessment/pilot is retained as research history; paid-plan, trial and renewal targets are superseded. Current community feedback is voluntary and does not require payment.
+
 # Founding-user pilot
 
 Owner: Sam. Begin with ten observed installations, then recruit toward fifty heavy agent users with recurring capacity pain.

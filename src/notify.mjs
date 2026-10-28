@@ -2,7 +2,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { isPro } from './license.mjs';
 import { stateDir } from './store.mjs';
 
 // Desktop notifications (Pro, opt-in): one per change of state, raised from the status line.
@@ -97,7 +96,7 @@ export function notifyChanges(rows, clock) {
 export function send(message) {
   // Pro: the same message to the phone (ntfy) or a chat webhook, by a detached curl so no hook waits on the network.
   try {
-    if (isPro()) for (const a of remoteArgs(loadChannels(), message)) run('curl', a);
+    for (const a of remoteArgs(loadChannels(), message)) run('curl', a);
   } catch {
     /* a broken channel config must not stop the desktop notification */
   }

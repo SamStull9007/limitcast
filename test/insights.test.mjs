@@ -54,9 +54,9 @@ test('shared output contains totals only and free does not claim paid savings', 
   assert.equal(r.providers[1].activeDays, 1);
   const share = insightsShare(r, false);
   assert.doesNotMatch(share, /acme|private|secret-id|context tokens not re-sent/);
-  assert.match(share, /1 free-preview/);
+  assert.match(share, /1 historical-preview/);
   assert.match(insightsReport(r, true), /Codex\/Grok context savings: unavailable/);
-  assert.match(insightsReport(r, false), /Pro would have acted/);
+  assert.match(insightsReport(r, false), /historical preview event/);
 });
 
 test('missing context baseline is unavailable rather than zero saved tokens', () => {

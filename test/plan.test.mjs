@@ -133,7 +133,7 @@ test('the plan you set and the prices you override', () => {
   assert.equal(PLANS.max20.mult, 20);
 });
 
-test('CLI: plan is Pro; set validates; with readings it recommends the next plan and shows the API-equivalent value', () => {
+test('CLI: plan is free; set validates; with readings it recommends the next plan and shows the API-equivalent value', () => {
   const state = tmp('lc-plan-cli-state-');
   const claudeDir = tmp('lc-plan-cli-claude-');
   // XDG_CONFIG_HOME too: starting a trial also writes a marker there, which must not land in the real ~/.config.
@@ -141,7 +141,7 @@ test('CLI: plan is Pro; set validates; with readings it recommends the next plan
   delete env.LIMITCAST_LICENSE;
   const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
   const run = (...a) => spawnSync('node', [bin, ...a], { env });
-  assert.equal(run('plan').status, 2);
+  assert.equal(run('plan').status, 0);
   assert.equal(run('trial').status, 0);
   assert.equal(run('plan', 'set', 'platinum').status, 1);
   assert.match(run('plan', 'set', 'max5').stdout.toString(), /Plan set to Claude Max 5x/);

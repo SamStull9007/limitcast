@@ -82,7 +82,7 @@ test('whyReport points to the jobs report when there are headless runs', () => {
   assert.doesNotMatch(whyReport(attribute(session('cli')), { since: 0, now: T0 + 1, calib: null }), /report --jobs/);
 });
 
-test('CLI: report --jobs is Pro and lists each job from the transcripts', () => {
+test('CLI: report --jobs is free and lists each job from the transcripts', () => {
   const claudeDir = tmp('lc-jobs-claude-');
   mkdirSync(join(claudeDir, 'projects', 'p'), { recursive: true });
   const now = Date.now() - 60_000;
@@ -110,8 +110,8 @@ test('CLI: report --jobs is Pro and lists each job from the transcripts', () => 
   delete env.LIMITCAST_LICENSE;
   const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
   const free = spawnSync('node', [bin, 'report', '--jobs'], { env });
-  assert.equal(free.status, 2);
-  assert.match(free.stdout.toString(), /limitcast Pro/);
+  assert.equal(free.status, 0);
+  assert.doesNotMatch(free.stdout.toString(), /part of limitcast Pro/);
   assert.equal(spawnSync('node', [bin, 'trial'], { env }).status, 0);
   const pro = spawnSync('node', [bin, 'report', '--jobs'], { env });
   assert.equal(pro.status, 0, pro.stderr.toString());

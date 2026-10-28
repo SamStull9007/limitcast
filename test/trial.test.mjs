@@ -18,7 +18,7 @@ test('trial: 7 days of Pro, once per machine, even after the state dir is cleare
     const D = 86400_000;
     const t0 = Date.now();
     assert.equal(trialStatus(t0), null);
-    assert.equal(isPro(), false);
+    assert.equal(isPro(), true);
     assert.deepEqual(startTrial(t0), { ok: true, active: true, ends: t0 + 7 * D });
     assert.equal(isPro(), true);
     assert.equal(startTrial(t0 + D).ok, false); // once
@@ -36,13 +36,13 @@ test('trial: 7 days of Pro, once per machine, even after the state dir is cleare
   }
 });
 
-test('CLI: trial unlocks Pro commands; free status line stays quiet without preview data', () => {
+test('CLI: legacy trial commands report free availability without starting a trial', () => {
   const env = { ...process.env, LIMITCAST_STATE: tmp('lc-trial-cli-'), XDG_CONFIG_HOME: tmp('lc-trial-cfg2-'), CODEX_HOME: tmp('lc-trial-cx-') };
   delete env.LIMITCAST_LICENSE;
   const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
-  assert.match(execFileSync('node', [bin, 'license'], { env }).toString(), /Try Pro free for 7 days, no card: limitcast trial/);
-  assert.match(execFileSync('node', [bin, 'trial'], { env }).toString(), /Pro trial on: 7 days/);
-  assert.match(execFileSync('node', [bin, 'license'], { env }).toString(), /Pro trial: 7 days left/);
+  assert.match(execFileSync('node', [bin, 'license'], { env }).toString(), /MIT License/);
+  assert.match(execFileSync('node', [bin, 'trial'], { env }).toString(), /no license key, account or trial is required/);
+  assert.match(execFileSync('node', [bin, 'license'], { env }).toString(), /All features are available/);
   assert.match(execFileSync('node', [bin, 'notify', 'off'], { env }).toString(), /Notifications are off/); // a Pro command now works
-  assert.match(execFileSync('node', [bin, 'trial'], { env }).toString(), /already running/);
+  assert.match(execFileSync('node', [bin, 'trial'], { env }).toString(), /All features are available/);
 });

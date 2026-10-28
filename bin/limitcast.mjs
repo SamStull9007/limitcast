@@ -45,12 +45,10 @@ import { accountForecasts, bindingLine, compactHint, headroom, lastCall, lastCal
 import { htmlPage } from '../src/html.mjs';
 import { insightsReport, insightsShare, periodInsights } from '../src/insights.mjs';
 import { doctor, install, installedFeatures, readSettings, settingsPath, uninstall } from '../src/install.mjs';
-import { activate, currentLicense, isPro, startTrial, trialStatus, UPGRADE_URL } from '../src/license.mjs';
 import { buildNotifierApp, loadChannels, notifierApp, notifyChanges, notifyEnabled, send, setChannel, setNotify } from '../src/notify.mjs';
 import { onboardingReport } from '../src/onboarding.mjs';
 import { driftMessage, loadOverhead, recordOverhead, savedPerSession, savedSummary, snapshot } from '../src/overhead.mjs';
 import { advise, getPlan, loadPeaks, PLANS, planPrices, planStats, recordPeaks, setPlan } from '../src/plan.mjs';
-import { activatePolar, deactivatePolar, refreshDue, refreshPolar } from '../src/polar.mjs';
 import { costOf, fmtUsd } from '../src/prices.mjs';
 import { burnReport } from '../src/report.mjs';
 import { loadBlocks, logBlock, resultsReport, resultsShare, resultsStats, weeklyDue, weeklyLine } from '../src/results.mjs';
@@ -84,19 +82,17 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
 
   limitcast onboard                 read-only setup checks and a guided first useful result
   limitcast install [--guard]        wire limitcast into Claude Code (and, with --guard, Codex and Grok); backs up settings
-                                     (without Pro the guard is a preview: it records what it would block, never blocks)
   limitcast uninstall                remove it and restore your original status line
   limitcast doctor [--fix]           check the setup (--fix: re-install with this Node, e.g. after a Node upgrade)
-  limitcast trial                    Pro free for 7 days on this computer, no card
   limitcast status [--json]         used, burn rate, runout time, reset, and today's share of each weekly window
   limitcast trim [--share]           tokens every session loads before you type, and how much you never use
   limitcast trim --codex             the same for Codex: AGENTS.md size and MCP servers you haven't used
   limitcast trim --grok              the same for Grok: system prompt size and MCP servers you haven't used
   limitcast results [--days N]       limits you reached, how far ahead limitcast warned, what the guard blocked
                     [--share]        totals only, safe to post
-  limitcast license                  show the license and re-check it with Polar
+  limitcast license                  show the MIT license status
 
-  Pro (${UPGRADE_URL})
+  All features are free (MIT License)
   limitcast trim [--days N] [--share]        names what to cut and what each costs
                                              (--share: totals only, no names, safe to post)
   limitcast trim --apply / --undo            hide those skills and turn off those MCP servers (backed up, reversible)
@@ -129,16 +125,14 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
   limitcast report [--days N] [--out FILE]   tokens by tool, day, project, model and session
   limitcast report --why [--days N]          where the new tokens went: subagents, session starts, cache rebuilds, tool results
   limitcast report --jobs [--days N]         the scheduled (headless) jobs that spend the most tokens just starting
-  (status line, Pro: points to another account with room, and suggests /compact past ~150k tokens a call)
-  limitcast activate <license-key>           unlock Pro on this computer (online once; then a weekly check, offline up to 30 days)
-  limitcast deactivate                       free this computer's activation to use the key elsewhere
+  (status line: points to another account with room, and suggests /compact past ~150k tokens a call)
 
   Used by Claude Code, Codex and Grok (set up by install)
   limitcast statusline [-- <cmd...>]  record limit readings, then run your status-line command
-  limitcast guard                     PreToolUse hook (Pro)
-  limitcast prompt-check              UserPromptSubmit hook: the cold-cache warning (Pro)
-  limitcast subagent-receipt          SubagentStop hook: what the subagent cost (Pro)
-  limitcast drift [--hook]            SessionStart hook: compare starting context with the last session (Pro)
+  limitcast guard                     PreToolUse hook
+  limitcast prompt-check              UserPromptSubmit hook: the cold-cache warning
+  limitcast subagent-receipt          SubagentStop hook: what the subagent cost
+  limitcast drift [--hook]            SessionStart hook: compare starting context with the last session
 `;
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -156,11 +150,6 @@ const days = () => {
   return Math.max(1, n);
 };
 
-// Interactive commands re-check a Polar license weekly; hooks (statusline, guard, drift --hook) never touch the network.
-if (['report', 'trim', 'saved', 'results', 'drift', 'doctor', 'license'].includes(cmd) && !args.includes('--hook')) {
-  await refreshPolar({ force: cmd === 'license' }).catch(() => null);
-}
-
 if (cmd === 'status') {
   const rows = forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS)), ...grokSamples(now)]), now);
   if (args.includes('--json')) console.log(JSON.stringify(rows, null, 2));
@@ -168,12 +157,11 @@ if (cmd === 'status') {
     console.log(rows.length ? table(rows) : 'No data yet. Run `limitcast install`, then send a message in Claude Code, Codex or Grok.');
     const binds = bindingLine(rows, getGrokBudget(), clock);
     if (binds) console.log(`\n${binds}`);
-    // Pro: the other Claude accounts limitcast has current readings for (the table shows the latest one).
-    if (isPro())
-      for (const a of accountForecasts(load(now - KEEP_MS), now).slice(1))
-        console.log(
-          `other Claude account (last used ${clock(a.lastSeen)}): ${a.rows.map((f) => `${f.win} ${f.verdict === 'RESET' ? 0 : Math.round(f.pct)}%${f.verdict === 'OK' || f.verdict === 'RESET' ? '' : ` ${f.verdict}`}`).join(' · ')}`,
-        );
+    // the other Claude accounts limitcast has current readings for (the table shows the latest one).
+    for (const a of accountForecasts(load(now - KEEP_MS), now).slice(1))
+      console.log(
+        `other Claude account (last used ${clock(a.lastSeen)}): ${a.rows.map((f) => `${f.win} ${f.verdict === 'RESET' ? 0 : Math.round(f.pct)}%${f.verdict === 'OK' || f.verdict === 'RESET' ? '' : ` ${f.verdict}`}`).join(' · ')}`,
+      );
     const spend = grokSpendLine(now);
     if (spend) console.log(spend);
     else if (existsSync(grokRoot()) && !rows.some((f) => f.src === 'grok'))
@@ -191,13 +179,11 @@ if (cmd === 'status') {
     sid = feed?.session_id;
     record(claudeSamples(feed, now));
     saveFeedShape(feed);
-    // Hook-only Pro users never run an interactive command, so the weekly Polar check starts here, detached.
-    if (refreshDue(now)) spawn(process.execPath, [fileURLToPath(import.meta.url), 'license'], { detached: true, stdio: 'ignore' }).unref();
     // Readings are kept 8 days; the daily rollup folds what they showed into the long-term value record.
     if (dailyDue(now)) spawn(process.execPath, [fileURLToPath(import.meta.url), 'rollup'], { detached: true, stdio: 'ignore' }).unref();
     const health = healthHint();
     if (health) hints.push(health);
-    if (isPro()) {
+    {
       const samples = load(now - KEEP_MS);
       if (notifyEnabled()) notifyChanges(forecastAll(oneClaudeAccount([...samples, ...grokSamples(now)], sid), now), clock);
       const room = headroom(samples, sid, now);
@@ -208,9 +194,6 @@ if (cmd === 'status') {
         const ctx = compactHint(lastCallTokens(feed.transcript_path));
         if (ctx) hints.push(ctx);
       }
-    } else {
-      const week = freeWeeklyHint(now);
-      if (week) hints.push(week);
     }
   } catch {
     /* never break the status line */
@@ -238,10 +221,10 @@ if (cmd === 'status') {
   if (grokOwn) console.log(grokOwn);
   console.log(`limitcast: ${line}`);
 } else if (cmd === 'guard') {
-  // Blocking is Pro; without a valid license the guard only previews (logs what Pro would block) and allows everything.
+  // The installed guard protects all users; LIMITCAST_ALLOW=1 remains the explicit override.
   if (process.env.LIMITCAST_ALLOW === '1') process.exit(0);
   try {
-    const d = await runGuard(JSON.parse(readStdin()), now, Number(process.env.LIMITCAST_GUARD_MINUTES ?? 30), { preview: !isPro() });
+    const d = await runGuard(JSON.parse(readStdin()), now, Number(process.env.LIMITCAST_GUARD_MINUTES ?? 30), { preview: false });
     if (typeof d === 'string') {
       console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: d } }));
     } else if (d && 'notice' in d) {
@@ -266,14 +249,14 @@ if (cmd === 'status') {
   }
 } else if (cmd === 'prompt-check') {
   // UserPromptSubmit hook: hold the first message after the prompt cache expired, once, with its cost.
-  // Pro blocks; free only records what Pro would have held. Fails open.
+  // The opt-in hook warns once and fails open on errors.
   try {
     const hook = JSON.parse(readStdin());
     const path = hook?.transcript_path;
     const last = process.env.LIMITCAST_ALLOW !== '1' && typeof path === 'string' && existsSync(path) ? lastCall(path) : null;
     const c = coldCost(hook?.prompt, last, now, { minutes: Number(process.env.LIMITCAST_CACHE_MINUTES ?? 60), calib: loadValue().calib });
     if (c && last && firstWarning(String(hook.session_id), last.t)) {
-      const pro = isPro();
+      const pro = true;
       logBlock({
         t: now,
         kind: 'cold',
@@ -292,10 +275,10 @@ if (cmd === 'status') {
     /* a hook must never stop a prompt by failing */
   }
 } else if (cmd === 'tool-check') {
-  // PostToolUse hook (Pro, installed with --alerts): tell the user, once per tool per session, about a very large tool
+  // PostToolUse hook (installed with --alerts): tell the user, once per tool per session, about a very large tool
   // result and what to ask for next time. Never reaches the model.
   try {
-    if (isPro()) {
+    {
       const hook = JSON.parse(readStdin());
       const name = String(hook?.tool_name ?? '');
       const notice = name ? toolNotice(name, hook?.tool_response, loadValue().calib, Number(process.env.LIMITCAST_TOOL_TOKENS) || undefined) : null;
@@ -325,19 +308,13 @@ if (cmd === 'status') {
           read: u.read,
           ...(pct === null ? {} : { pct }),
         });
-        if (isPro()) console.log(JSON.stringify({ systemMessage: receiptMessage(hook.agent_type, u, pct) }));
+        console.log(JSON.stringify({ systemMessage: receiptMessage(hook.agent_type, u, pct) }));
       }
     }
   } catch {
     /* a hook must never break the session */
   }
 } else if (cmd === 'plan') {
-  if (!isPro()) {
-    console.log(
-      `\`limitcast plan\` is part of limitcast Pro: ${UPGRADE_URL}\nTry it free for 7 days: limitcast trial. Already bought it? limitcast activate <license-key>`,
-    );
-    process.exit(2);
-  }
   if (args[0] === 'set') {
     const id = args[1];
     if (id !== 'off' && !(id in PLANS)) {
@@ -376,10 +353,6 @@ if (cmd === 'status') {
   console.log(forTerminal(out.join('\n')));
   process.exit(0);
 } else if (cmd === 'subagent-model') {
-  if (!isPro()) {
-    console.log(`Per-type subagent models are part of limitcast Pro: ${UPGRADE_URL}`);
-    process.exit(2);
-  }
   const [type, model] = args;
   if (type && (model === undefined || (model !== 'off' && !validModel(model)))) {
     console.log(
@@ -411,10 +384,6 @@ if (cmd === 'status') {
   } else console.log('\nExample: limitcast subagent-model Explore haiku');
   process.exit(0);
 } else if (cmd === 'budget') {
-  if (!isPro()) {
-    console.log(`Budgets are part of limitcast Pro: ${UPGRADE_URL}`);
-    process.exit(2);
-  }
   if (args[0] === 'grok') {
     const win = args[1] === '7d' || args[1] === '5h' ? args[1] : '5h';
     const value = args[1] === '7d' || args[1] === '5h' ? args[2] : args[1];
@@ -475,13 +444,7 @@ if (cmd === 'status') {
 } else if (cmd === 'install') {
   const wantGuard = args.includes('--guard');
   const wantAlerts = args.includes('--alerts');
-  if (wantGuard && !isPro()) {
-    console.log(
-      `Without Pro the subagent guard runs as a preview: it never blocks, it records what Pro would have blocked (see \`limitcast results\`). Pro: ${UPGRADE_URL}`,
-    );
-  }
-  if (wantAlerts && !isPro()) console.log(`Alerts and the weekly summary are part of limitcast Pro (${UPGRADE_URL}). Skipping them.`);
-  for (const c of install({ guard: wantGuard, alerts: wantAlerts && isPro() })) console.log(`✓ ${c}`);
+  for (const c of install({ guard: wantGuard, alerts: wantAlerts })) console.log(`✓ ${c}`);
   console.log('Restart Claude Code, Codex and Grok to load it. Then: limitcast doctor');
   if (wantGuard && grokPresent() && !getGrokBudget())
     console.log('Grok stores spend, not a % used. Set a 5-hour dollar cap so the guard can block: limitcast budget grok <usd>');
@@ -508,9 +471,7 @@ if (cmd === 'status') {
   } catch {
     /* no transcripts yet */
   }
-  console.log(
-    `In a week, \`limitcast results\` shows every limit you hit and how far ahead limitcast warned you.${isPro() ? '' : ' Try Pro free for 7 days, no card: limitcast trial'}`,
-  );
+  console.log(`In a week, \`limitcast results\` shows every limit you hit and how far ahead limitcast warned you.`);
 } else if (cmd === 'uninstall') {
   const changes = uninstall();
   console.log(changes.length ? changes.map((c) => `✓ ${c}`).join('\n') : 'Nothing to remove.');
@@ -532,7 +493,6 @@ if (cmd === 'status') {
       onboardingReport({
         checks,
         features,
-        pro: isPro(),
         providers,
         contextTokens: latest ? latest.pieces.reduce((n, p) => n + p.chars, 0) / 4 : null,
       }),
@@ -544,7 +504,7 @@ if (cmd === 'status') {
     const f = installedFeatures();
     if (!f.statusLine) console.log('limitcast is not installed. Run `limitcast install` first.');
     else {
-      for (const c of install({ guard: f.guard && isPro(), alerts: f.alerts && isPro() })) console.log(`✓ ${c}`);
+      for (const c of install({ guard: f.guard, alerts: f.alerts })) console.log(`✓ ${c}`);
       console.log('Restart Claude Code, Codex and Grok to load it. Codex asks you to approve the guard again: start Codex and accept it.');
     }
   }
@@ -553,13 +513,7 @@ if (cmd === 'status') {
   for (const c of checks) console.log(`${c.ok ? '✓' : '✗'} ${c.line}`);
   process.exit(checks.every((c) => c.ok) ? 0 : 1);
 } else if (cmd === 'report' || cmd === 'trim') {
-  const pro = isPro();
-  if (!pro && cmd === 'report') {
-    console.log(
-      `\`limitcast ${cmd}\` is part of limitcast Pro: ${UPGRADE_URL}\nTry it free for 7 days: limitcast trial. Already bought it? limitcast activate <license-key>`,
-    );
-    process.exit(2);
-  }
+  const pro = true;
   const since = now - days() * 86400_000;
   if (cmd === 'trim' && args[0] === 'keep') {
     // The keep-list: servers and skills `trim --apply` never touches (Claude, Codex and Grok). Free to manage; apply is Pro.
@@ -576,11 +530,7 @@ if (cmd === 'status') {
     process.exit(0);
   }
   if (cmd === 'trim' && args.includes('--codex')) {
-    // Codex: AGENTS.md and the MCP servers in ~/.codex/config.toml. Free counts them; Pro names them and turns them off.
-    if ((args.includes('--apply') || args.includes('--undo')) && !pro) {
-      console.log(`\`limitcast trim --codex --apply\` is part of limitcast Pro: ${UPGRADE_URL}`);
-      process.exit(2);
-    }
+    // Codex: AGENTS.md and the MCP servers in ~/.codex/config.toml.
     if (args.includes('--undo')) {
       const e = undoCodexTrim();
       console.log(
@@ -605,10 +555,6 @@ if (cmd === 'status') {
     process.exit(0);
   }
   if (cmd === 'trim' && args.includes('--grok')) {
-    if ((args.includes('--apply') || args.includes('--undo')) && !pro) {
-      console.log(`\`limitcast trim --grok --apply\` is part of limitcast Pro: ${UPGRADE_URL}`);
-      process.exit(2);
-    }
     if (args.includes('--undo')) {
       const e = undoGrokTrim();
       console.log(
@@ -652,27 +598,15 @@ if (cmd === 'status') {
     // Prefer the measured starting context of the latest interactive session; older Claude Code logs fall back to estimates.
     const latest = await latestInteractiveTranscript(claudeRoot());
     if (latest) recordOverhead(snapshot(latest));
-    // Free: the measured totals without names (the --share view); Pro names what to cut.
-    if (!pro && !latest) {
-      console.log(`\`limitcast trim\` needs one Claude Code session first. Naming what to cut is Pro: ${UPGRADE_URL}`);
-      process.exit(2);
-    }
+    // The share view omits private names; the local view includes actionable detail.
     if (args.includes('--apply') || args.includes('--undo')) {
-      if (!pro) {
-        console.log(
-          `\`limitcast trim --apply\` is part of limitcast Pro: ${UPGRADE_URL}\nTry it free for 7 days: limitcast trial. Already bought it? limitcast activate <license-key>`,
-        );
-        process.exit(2);
-      }
       console.log(args.includes('--undo') ? undoMessage(undoTrim()) : applyMessage(latest, used));
       process.exit(0);
     }
     const keep = getKeep();
-    if (latest && (args.includes('--share') || !pro)) text = shareSummary(baseline(usage), latest, used, days(), keep);
+    if (latest && args.includes('--share')) text = shareSummary(baseline(usage), latest, used, days(), keep);
     else text = latest ? startupReport(baseline(usage), latest, used, days(), keep) : trimReport(baseline(usage), contributors(), used, days());
-    if (!pro)
-      text += `\n\nPro names each item and what it costs, so you can cut it: ${UPGRADE_URL}\nTry it free for 7 days: limitcast trial. Already bought it? limitcast activate <license-key>`;
-    else if (latest && !args.includes('--share')) {
+    if (latest && !args.includes('--share')) {
       const still = stillLoading(latest);
       text += still.length
         ? `\n\nStill loading after \`trim --apply\`: ${still.join(', ')}. A Claude Code session that was running may have rewritten ~/.claude.json; quit Claude Code and run \`limitcast trim --apply\` again.`
@@ -689,10 +623,6 @@ if (cmd === 'status') {
 } else if (cmd === 'drift') {
   // SessionStart hook: tells the user (systemMessage, never the model's context) when starting context grew.
   const hook = args.includes('--hook');
-  if (!isPro()) {
-    if (!hook) console.log(`\`limitcast drift\` is part of limitcast Pro: ${UPGRADE_URL}`);
-    process.exit(hook ? 0 : 2);
-  }
   try {
     const latest = await latestInteractiveTranscript(claudeRoot());
     const d = latest ? recordOverhead(snapshot(latest)) : null;
@@ -723,10 +653,6 @@ if (cmd === 'status') {
     if (!hook) throw e; // a hook must never break session start
   }
 } else if (cmd === 'saved') {
-  if (!isPro()) {
-    console.log(`\`limitcast saved\` is part of limitcast Pro: ${UPGRADE_URL}`);
-    process.exit(2);
-  }
   const latest = await latestInteractiveTranscript(claudeRoot());
   if (latest) recordOverhead(snapshot(latest));
   const s = loadOverhead();
@@ -734,10 +660,10 @@ if (cmd === 'status') {
     forTerminal(s ? savedSummary(s, await countInteractiveSince(claudeRoot(), s.first.at)) : 'Nothing measured yet. Run `limitcast trim` first.'),
   );
 } else if (cmd === 'results') {
-  // Free shows limits reached, how far ahead limitcast warned, and the guard preview; Pro adds real blocks and savings.
-  const pro = isPro();
+  // Historical previews remain separate from applied controls.
+  const pro = true;
   const since = now - days() * 86400_000;
-  let saved = `Pro tracks how much your starting context shrinks and what that saves: ${UPGRADE_URL}`;
+  let saved = '';
   let perSession = null;
   if (pro) {
     const latest = await latestInteractiveTranscript(claudeRoot());
@@ -766,11 +692,7 @@ if (cmd === 'status') {
         insightsShare(insight, pro),
     );
   else if (args.includes('--html')) {
-    // Pro: results, the current windows and the burn report on one page, opened in the browser.
-    if (!pro) {
-      console.log(`The HTML dashboard is part of limitcast Pro: ${UPGRADE_URL}`);
-      process.exit(2);
-    }
+    // results, the current windows and the burn report on one page, opened in the browser.
     const rows = forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS))]), now);
     const burn = burnReport(await readUsage(since, {}), { since, now }).replace(/^(#{1,2}) /gm, '#$1 ');
     const md = [
@@ -810,10 +732,6 @@ if (cmd === 'status') {
     );
 } else if (cmd === 'notify') {
   // Desktop notifications from the status line (Pro, opt-in).
-  if (!isPro()) {
-    console.log(`Desktop notifications are part of limitcast Pro: ${UPGRADE_URL}`);
-    process.exit(2);
-  }
   const what = args[0];
   if (what === 'ntfy' || what === 'webhook') {
     // Phone (ntfy) or Slack/Discord: every notification also goes there; setting one turns notifications on.
@@ -853,10 +771,6 @@ if (cmd === 'status') {
     );
 } else if (cmd === 'after-reset') {
   // Run a command once a window has reset: queue the heavy job instead of watching the clock.
-  if (!isPro()) {
-    console.log(`\`limitcast after-reset\` is part of limitcast Pro: ${UPGRADE_URL}`);
-    process.exit(2);
-  }
   const sep = args.indexOf('--');
   const command = sep >= 0 ? args.slice(sep + 1) : [];
   const src = flag('--src') ?? 'claude';
@@ -899,41 +813,8 @@ if (cmd === 'status') {
   } catch {
     /* next time */
   }
-} else if (cmd === 'activate') {
-  // Signed offline keys start with LC1.; anything else is a Polar license key.
-  const key = args[0] ?? '';
-  const res = key.startsWith('LC1.') ? activate(key) : await activatePolar(key);
-  console.log(res.ok ? `✓ limitcast Pro activated${res.claims.e ? ` for ${res.claims.e}` : ''}` : `✗ ${res.reason}`);
-  process.exit(res.ok ? 0 : 1);
-} else if (cmd === 'deactivate') {
-  const res = await deactivatePolar();
-  console.log(res.ok ? '✓ This machine is deactivated; the key can be used on another computer.' : `✗ ${res.reason}`);
-  process.exit(res.ok ? 0 : 1);
-} else if (cmd === 'license') {
-  const l = currentLicense();
-  console.log(l === null ? trialLine() : l.ok ? `Pro: ${l.claims.e}` : `License problem: ${l.reason}`);
-} else if (cmd === 'trial') {
-  // Pro for 7 days on this machine, no card, once.
-  if (currentLicense()?.ok) {
-    console.log('You already have Pro.');
-    process.exit(0);
-  }
-  const t = startTrial(now);
-  if (!t.ok) {
-    console.log(t.active ? `Your Pro trial is already running, until ${clock(t.ends)}.` : trialLine());
-    process.exit(t.active ? 0 : 2);
-  }
-  console.log(
-    [
-      `✓ Pro trial on: 7 days, until ${new Date(t.ends).toLocaleDateString()}. No card, nothing to cancel.`,
-      'Try it:',
-      '  limitcast install --guard --alerts   block runaway subagents, move them to Sonnet when a window is tight',
-      '  limitcast trim --apply               cut the context you never use (limitcast trim --undo reverses it)',
-      '  limitcast notify on                  a desktop notification before you hit a limit',
-      '  limitcast results                    what it did for you, any time',
-      `Keep Pro after the trial: ${UPGRADE_URL}`,
-    ].join('\n'),
-  );
+} else if (['activate', 'deactivate', 'license', 'trial'].includes(cmd)) {
+  console.log('limitcast is free and open source under the MIT License. All features are available; no license key, account or trial is required.');
 } else if (cmd === '--version' || cmd === '-v') {
   console.log(VERSION);
 } else {
@@ -941,7 +822,7 @@ if (cmd === 'status') {
   process.exit(cmd && !['help', '--help', '-h'].includes(cmd) ? 1 : 0);
 }
 
-/** Everything `doctor` checks: setup, data freshness, license, and whether each tool's logs still parse. */
+/** Everything `doctor` checks: setup, data freshness, and whether each tool's logs still parse. */
 async function healthChecks() {
   // Readings are only stored when they change, so freshness comes from the last feed the status line saw.
   let latest = 0;
@@ -950,9 +831,7 @@ async function healthChecks() {
   } catch {
     /* never fed */
   }
-  const license = currentLicense();
-  const checks = doctor({ samplesAgeMs: latest ? now - latest : null, license });
-  if (license === null && trialStatus(now)) checks.push({ ok: true, line: trialLine() });
+  const checks = doctor({ samplesAgeMs: latest ? now - latest : null });
   return [...checks, ...(await formatChecks())];
 }
 
@@ -973,51 +852,8 @@ function saveHealth(checks) {
   mkdirSync(stateDir(), { recursive: true });
   writeFileSync(file, JSON.stringify({ at: now, failed }));
   const fresh = failed.filter((l) => !before.includes(l));
-  if (fresh.length && isPro() && notifyEnabled()) send(`limitcast needs a fix: ${fresh[0]} Run: limitcast doctor`);
+  if (fresh.length && notifyEnabled()) send(`limitcast needs a fix: ${fresh[0]} Run: limitcast doctor`);
   return failed;
-}
-
-/**
- * Free installs: for one day a week, what the guard preview saw Pro would have done, e.g.
- * "this week Pro would have stopped 2 subagents and moved 5 to Sonnet · limitcast trial". Silent when it's nothing.
- * @param {number} t epoch ms
- */
-function freeWeeklyHint(t) {
-  const file = join(stateDir(), 'free-weekly.json');
-  let from = 0;
-  try {
-    from = JSON.parse(readFileSync(file, 'utf8')).from ?? 0;
-  } catch {
-    /* first run: start the clock */
-  }
-  const WEEK = 7 * 86400_000;
-  if (!from || t >= from + 86400_000) {
-    // First run starts a week out; afterwards the next day-long showing is a week after this one.
-    from = from ? from + Math.ceil((t - from - 86400_000 + 1) / WEEK) * WEEK : t + WEEK;
-    mkdirSync(stateDir(), { recursive: true });
-    writeFileSync(file, JSON.stringify({ from }));
-  }
-  if (t < from) return null;
-  const preview = loadBlocks(t - WEEK).filter((b) => b.shadow);
-  const stopped = preview.filter((b) => !b.kind || b.kind === 'budget' || b.kind === 'today').length;
-  const moved = preview.filter((b) => b.kind === 'switch').length;
-  const cold = preview.filter((b) => b.kind === 'cold').length;
-  if (!stopped && !moved && !cold) return null;
-  const parts = [
-    stopped ? `stopped ${stopped} subagent${stopped === 1 ? '' : 's'}` : '',
-    moved ? `moved ${moved} to Sonnet` : '',
-    cold ? `caught ${cold} cold-cache message${cold === 1 ? '' : 's'}` : '',
-  ].filter(Boolean);
-  return `this week Pro would have ${parts.join(' and ')} · limitcast trial`;
-}
-
-/** Free tier, a running trial, or an ended one, in one line. */
-function trialLine() {
-  const t = trialStatus(now);
-  if (!t) return `Free tier. Try Pro free for 7 days, no card: limitcast trial. Buy: ${UPGRADE_URL}`;
-  if (t.active)
-    return `Pro trial: ${Math.ceil((t.ends - now) / 86400_000)} days left (until ${new Date(t.ends).toLocaleDateString()}). Keep Pro: ${UPGRADE_URL}`;
-  return `Pro trial ended ${new Date(t.ends).toLocaleDateString()}. Keep Pro: ${UPGRADE_URL}`;
 }
 
 /** The status-line hint while the last health check found something to fix. */
@@ -1057,7 +893,7 @@ async function refreshValue() {
   const change = limitChange(v.calibHistory ?? []);
   if (change && (!v.limitChange || now - v.limitChange.at > 7 * 86400_000)) {
     v.limitChange = { ...change, at: now };
-    if (isPro() && notifyEnabled()) send(limitChangeMessage(change));
+    if (notifyEnabled()) send(limitChangeMessage(change));
   }
   saveValue(v);
   return v;

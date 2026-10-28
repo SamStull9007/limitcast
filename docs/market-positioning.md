@@ -1,3 +1,5 @@
+> Status update, 2026-10-27: Limitcast 0.15.0 is free under MIT. This earlier commercial assessment/pilot is retained as research history; paid-plan, trial and renewal targets are superseded. Current community feedback is voluntary and does not require payment.
+
 # Market position and customer evidence
 
 Research date: 27 October 2026. This is a documented-capability comparison, not an exhaustive market search or verified retention.

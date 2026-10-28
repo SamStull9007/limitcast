@@ -69,7 +69,8 @@ export function activate(key) {
   return res;
 }
 
-export const isPro = () => currentLicense()?.ok === true || trialStatus()?.active === true;
+// Compatibility for old integrations; feature access no longer depends on billing state.
+export const isPro = () => true;
 
 const TRIAL_MS = 7 * 86400_000;
 const trialFile = () => join(stateDir(), 'trial.json');

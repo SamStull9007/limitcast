@@ -24,7 +24,7 @@ test('onboard on a clean machine is read-only and offers a useful first step', (
   const { root, run, env } = setup();
   const text = run('onboard');
   assert.match(text, /limitcast install/);
-  assert.match(text, /Free — protection records previews/);
+  assert.match(text, /Free and open source/);
   assert.deepEqual(readdirSync(root), []);
   assert.equal(existsSync(join(env.XDG_CONFIG_HOME, 'limitcast', 'trial-used')), false);
 });
@@ -48,11 +48,13 @@ test('results integrates usage, previews and legacy state without free savings c
   );
   const text = run('results');
   assert.match(text, /Your capacity report/);
-  assert.match(text, /Pro would have acted/);
-  assert.doesNotMatch(text, /Estimated 1\.0k|context reduction: \*\*estimated/);
+  assert.match(text, /preview/);
+  assert.match(text, /Claude context reduction: unavailable/);
+  assert.match(text, /legacy session record/);
+  assert.doesNotMatch(text, /context reduction: \*\*estimated/);
   const share = run('results', '--share');
   assert.match(share, /Voluntary capacity check-in/);
-  assert.doesNotMatch(share, /private-secret|context tokens not re-sent/);
+  assert.doesNotMatch(share, /private-secret/);
   run('trial');
   const pro = run('results');
   assert.match(pro, /legacy session record/);

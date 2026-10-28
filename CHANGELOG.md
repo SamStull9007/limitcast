@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.0 — 2026-10-27
+
+- All features are now free and open source under the MIT License, copyright Sam Stull.
+- Removed subscription/trial requirements and runtime billing-service checks. Existing activation commands are harmless compatibility messages; old local license files are left untouched.
+- Previously installed preview guards now enforce forecasts and enabled budgets; `LIMITCAST_ALLOW=1` remains the override.
+- Guards, model controls, budgets, trimming, alerts, notifications and dashboards work without a key. Controls remain opt-in, with existing keep-lists, undo and overrides.
+- Added guided read-only onboarding, accurate weekly capacity reporting, private share totals and local pilot measurement.
+
+
 ## Unreleased
 
 - Read-only `limitcast onboard` guides setup, personal findings, trial choices, restarts and safe controls without changing settings.

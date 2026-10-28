@@ -25,6 +25,6 @@ The slash commands only read. They change nothing.
 - `~/.claude/settings.json`: wraps your status line so it also records limit readings (your status line looks the same), and with `--guard` or `--alerts` adds a PreToolUse hook (the subagent guard) and a SessionStart hook (starting-context alerts). The file is backed up first.
 - `~/.codex/hooks.json`, with `--guard`: appends the Codex subagent guard after your existing hooks. Codex asks you to approve it.
 - `~/.grok/config.toml` and `~/.grok/hooks/limitcast.json`: wraps the Grok status line; `--guard` matches `spawn_subagent`. Grok spend becomes a forecast after `limitcast budget grok <usd>`.
-- `limitcast trim --apply` (Pro) hides unused skills from the model (`skillOverrides` in `~/.claude/settings.json`; `/name` still works) and turns off unused MCP servers for a project (`disabledMcpServers` in `~/.claude.json`, the list the `/mcp` toggle writes). Both files are backed up, and `limitcast trim --undo` reverses exactly what it changed.
+- `limitcast trim --apply` hides unused skills from the model (`skillOverrides` in `~/.claude/settings.json`; `/name` still works) and turns off unused MCP servers for a project (`disabledMcpServers` in `~/.claude.json`, the list the `/mcp` toggle writes). Both files are backed up, and `limitcast trim --undo` reverses exactly what it changed.
 
 `limitcast uninstall` restores your original settings. limitcast's own state lives in `~/.local/state/limitcast/`.

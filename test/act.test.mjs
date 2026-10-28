@@ -100,7 +100,7 @@ test('HTML: headings, lists, tables with right-aligned numbers, escaped text', (
   assert.match(html, /<pre>win {2}5h<\/pre>/);
 });
 
-test('model guard: a tight window runs new Claude subagents on Sonnet; free only records it', async () => {
+test('model guard: a tight window runs new Claude subagents on Sonnet; explicit preview only records it', async () => {
   const state = tmp('lc-switch-');
   const prev = process.env.LIMITCAST_STATE;
   process.env.LIMITCAST_STATE = state;
@@ -137,22 +137,13 @@ test('model guard: a tight window runs new Claude subagents on Sonnet; free only
   assert.equal(switchable('sonnet'), false);
 });
 
-test('CLI: Pro gates and the status line hint when wrapping a status line', () => {
+test('CLI: free features and the status line hint when wrapping a status line', () => {
   const state = tmp('lc-act-');
   const env = { ...process.env, LIMITCAST_STATE: state, CODEX_HOME: join(state, 'nocodex'), GROK_HOME: join(state, 'nogrok') };
   delete env.LIMITCAST_LICENSE;
   const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
-  for (const args of [
-    ['notify', 'on'],
-    ['after-reset', '--', 'true'],
-    ['results', '--html'],
-  ]) {
-    assert.throws(
-      () => execFileSync('node', [bin, ...args], { env, stdio: 'pipe' }),
-      (e) => e.status === 2,
-      args.join(' '),
-    );
-  }
+  assert.match(execFileSync('node', [bin, 'notify', 'off'], { env }).toString(), /Notifications are off/);
+  assert.match(execFileSync('node', [bin, 'results', '--html', '--no-open', '--out', join(state, 'dashboard.html')], { env }).toString(), /Wrote/);
   // Free: the wrapped status line is passed through untouched, with limitcast's line under it.
   const out = execFileSync('node', [bin, 'statusline', '--', 'echo', 'mine'], { input: '{}', env }).toString();
   assert.equal(out, 'mine\nlimitcast: waiting for data\n');

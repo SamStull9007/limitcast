@@ -235,29 +235,29 @@ test('doctor reports missing setup and stale data', () => {
   writeFileSync(path, '{}');
   const checks = doctor({ path, samplesAgeMs: null, license: null });
   assert.ok(checks.some((c) => !c.ok && /recorder missing/.test(c.line)));
-  assert.ok(checks.some((c) => /Free tier/.test(c.line)));
+  assert.ok(checks.some((c) => /Free and open source/.test(c.line)));
   // A Polar key has no end date for Lifetime or a subscription, so doctor must not call it lifetime.
   const polar = doctor({ path, samplesAgeMs: 0, license: { ok: true, claims: { e: 'b@x', p: 'polar', i: 0, x: 0 } } });
-  assert.ok(polar.some((c) => c.line === 'Pro: b@x, last checked with Polar 1970-01-01'));
+  assert.ok(polar.some((c) => c.line.includes('all features available')));
   const signed = doctor({ path, samplesAgeMs: 0, license: { ok: true, claims: { e: 'b@x', p: 'pro', i: 0, x: 0 } } });
-  assert.ok(signed.some((c) => c.line === 'Pro: b@x, lifetime'));
+  assert.ok(signed.some((c) => c.line.includes('all features available')));
 });
 
-test('CLI: Pro commands are gated; version and help work', () => {
+test('CLI: formerly paid commands are free; version and help work', () => {
   const env = { ...process.env, LIMITCAST_STATE: tmp('lc-cli-'), LIMITCAST_LICENSE: '' };
   delete env.LIMITCAST_LICENSE;
   const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
   const r = spawnSync('node', [bin, 'report'], { env });
-  assert.equal(r.status, 2);
-  assert.match(r.stdout.toString(), /limitcast Pro/);
+  assert.equal(r.status, 0);
+  assert.doesNotMatch(r.stdout.toString(), /part of limitcast Pro/);
   assert.match(execFileSync('node', [bin, '--version'], { env }).toString(), /^\d+\.\d+\.\d+/);
   assert.match(execFileSync('node', [bin, 'help'], { env }).toString(), /limitcast install/);
   const bad = spawnSync('node', [bin, 'activate', 'LC1.bad.key'], { env });
-  assert.equal(bad.status, 1);
+  assert.equal(bad.status, 0);
   assert.match(execFileSync('node', [bin, 'help'], { env }).toString(), /limitcast license/);
 });
 
-test('CLI: free trim shows the measured totals without names, then the upgrade', () => {
+test('CLI: free trim includes item names; --share keeps them private', () => {
   const claudeDir = tmp('lc-free-trim-');
   mkdirSync(join(claudeDir, 'projects', 'p'), { recursive: true });
   const att = (attachment) => JSON.stringify({ type: 'attachment', attachment });
@@ -275,13 +275,15 @@ test('CLI: free trim shows the measured totals without names, then the upgrade',
   const r = spawnSync('node', [bin, 'trim'], { env });
   const out = r.stdout.toString();
   assert.equal(r.status, 0, r.stderr.toString());
-  assert.match(out, /before I type/);
-  assert.match(out, /Pro names each item/);
-  assert.doesNotMatch(out, /secret-skill|private-mcp/);
+  assert.match(out, /before your first message/);
+  assert.doesNotMatch(out, /Pro names each item/);
+  assert.match(out, /secret-skill|private-mcp/);
+  const shared = execFileSync('node', [bin, 'trim', '--share'], { env }).toString();
+  assert.doesNotMatch(shared, /secret-skill|private-mcp/);
   // Without any session there is nothing to measure: say so, then the upgrade.
   const none = spawnSync('node', [bin, 'trim'], { env: { ...env, CLAUDE_CONFIG_DIR: tmp('lc-empty-') } });
-  assert.equal(none.status, 2);
-  assert.match(none.stdout.toString(), /needs one Claude Code session/);
+  assert.equal(none.status, 0);
+  assert.doesNotMatch(none.stdout.toString(), /upgrade|part of limitcast Pro/);
 });
 
 // ---- Codex and Grok ----
@@ -399,7 +401,7 @@ test('install skips Codex when it is not installed', () => {
   );
 });
 
-test('guard hook: blocks a Codex spawn on pace to run out, allows Grok, reads camelCase input; CLI needs Pro', async () => {
+test('guard hook: blocks a Codex spawn on pace to run out, allows Grok, reads camelCase input; CLI is free', async () => {
   const codexHome = tmp('lc-cli-codex-');
   const day = join(codexHome, 'sessions', '2026', '10', '24');
   mkdirSync(day, { recursive: true });
@@ -425,23 +427,27 @@ test('guard hook: blocks a Codex spawn on pace to run out, allows Grok, reads ca
   const env = { ...process.env, CODEX_HOME: codexHome, LIMITCAST_STATE: tmp('lc-cli-st-') };
   delete env.LIMITCAST_LICENSE;
   const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
-  assert.equal(execFileSync('node', [bin, 'guard'], { input: JSON.stringify({ tool_name: 'collaborationspawn_agent' }), env }).toString(), '');
+  assert.equal(
+    JSON.parse(execFileSync('node', [bin, 'guard'], { input: JSON.stringify({ tool_name: 'collaborationspawn_agent' }), env }).toString())
+      .hookSpecificOutput.permissionDecision,
+    'deny',
+  );
 });
 
-test('install --guard without Pro installs the guard as a preview; --alerts stays Pro', () => {
+test('install --guard --alerts installs all requested features without a key', () => {
   const claudeDir = tmp('lc-free-claude-');
   const env = { ...process.env, CLAUDE_CONFIG_DIR: claudeDir, CODEX_HOME: tmp('lc-free-codex-'), LIMITCAST_STATE: tmp('lc-free-st-') };
   delete env.LIMITCAST_LICENSE;
   const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
   const out = execFileSync('node', [bin, 'install', '--guard', '--alerts'], { env }).toString();
-  assert.match(out, /runs as a preview: it never blocks/);
-  assert.match(out, /Alerts and the weekly summary are part of limitcast Pro/);
+  assert.doesNotMatch(out, /runs as a preview/);
+  assert.match(out, /starting-context alert/);
   const cfg = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf8'));
   // Hooks go through the upgrade-proof launcher in the state dir.
   assert.match(cfg.statusLine.command, /^\/bin\/sh \S+limitcast-hook\.sh statusline$/);
   assert.match(JSON.stringify(cfg.hooks?.PreToolUse), /limitcast-hook\.sh guard/);
-  assert.equal(cfg.hooks?.SessionStart, undefined);
-  assert.match(out, /Try Pro free for 7 days, no card: limitcast trial/);
+  assert.ok(cfg.hooks?.SessionStart?.length);
+  assert.doesNotMatch(out, /Try Pro|checkout/);
 });
 
 test('launcher: runs this copy, falls back to limitcast on PATH, then to your own status line', () => {

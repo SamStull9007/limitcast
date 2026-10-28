@@ -110,7 +110,7 @@ test('items turned off by apply that still load in a later session are reported'
   }
 });
 
-test('plugins, transcript cwd, and the Pro gate on --apply', () => {
+test('plugins, transcript cwd, and free --apply without a transcript', () => {
   const dir = tmp('lc-plug-');
   const install = join(dir, 'cache', 'greptile');
   mkdirSync(install, { recursive: true });
@@ -130,8 +130,5 @@ test('plugins, transcript cwd, and the Pro gate on --apply', () => {
   const env = { ...process.env, CLAUDE_CONFIG_DIR: claudeDir, LIMITCAST_STATE: tmp('lc-gate-st-'), CODEX_HOME: tmp('lc-gate-cx-') };
   delete env.LIMITCAST_LICENSE;
   const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
-  assert.throws(
-    () => execFileSync('node', [bin, 'trim', '--apply'], { env, stdio: 'pipe' }),
-    (e) => e.status === 2,
-  );
+  assert.match(execFileSync('node', [bin, 'trim', '--apply'], { env }).toString(), /needs one Claude Code session first/);
 });

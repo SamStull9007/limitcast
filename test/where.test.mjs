@@ -153,7 +153,7 @@ test('burn report ranks sessions by new tokens, not by cached reads', () => {
   assert.match(heaviest, /\| new tokens \| share \|/);
 });
 
-test('CLI: report --why is Pro; with a trial it reads the transcripts', () => {
+test('CLI: report --why is free and reads the transcripts', () => {
   const claudeDir = tmp('lc-why-claude-');
   mkdirSync(join(claudeDir, 'projects', 'p'), { recursive: true });
   const ev = (id, mins, usage, content = []) =>
@@ -179,8 +179,8 @@ test('CLI: report --why is Pro; with a trial it reads the transcripts', () => {
   delete env.LIMITCAST_LICENSE;
   const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
   const free = spawnSync('node', [bin, 'report', '--why'], { env });
-  assert.equal(free.status, 2);
-  assert.match(free.stdout.toString(), /limitcast Pro/);
+  assert.equal(free.status, 0);
+  assert.doesNotMatch(free.stdout.toString(), /part of limitcast Pro/);
   assert.equal(spawnSync('node', [bin, 'trial'], { env }).status, 0);
   const pro = spawnSync('node', [bin, 'report', '--why'], { env });
   assert.equal(pro.status, 0, pro.stderr.toString());

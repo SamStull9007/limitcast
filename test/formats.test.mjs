@@ -136,19 +136,11 @@ test('install --alerts adds one SessionStart hook; uninstall removes only it', (
   assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')).hooks.SessionStart, [mine]);
 });
 
-test('CLI: drift and saved are Pro; the drift hook stays silent without a license', () => {
+test('CLI: drift and saved are free; empty drift hooks stay silent', () => {
   const env = { ...process.env, LIMITCAST_STATE: tmp('lc-cli-drift-'), CLAUDE_CONFIG_DIR: tmp('lc-cli-cc-') };
   delete env.LIMITCAST_LICENSE;
   const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
   assert.equal(execFileSync('node', [bin, 'drift', '--hook'], { env }).toString(), '');
-  for (const cmd of ['drift', 'saved']) {
-    let out = '';
-    try {
-      execFileSync('node', [bin, cmd], { env });
-    } catch (e) {
-      out = e.stdout.toString();
-      assert.equal(e.status, 2);
-    }
-    assert.match(out, /part of limitcast Pro/);
-  }
+  assert.match(execFileSync('node', [bin, 'drift'], { env }).toString(), /No interactive Claude Code session/);
+  assert.match(execFileSync('node', [bin, 'saved'], { env }).toString(), /Nothing measured yet/);
 });

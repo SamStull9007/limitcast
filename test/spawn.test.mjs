@@ -49,7 +49,7 @@ test('runGuard: a Pro spawn gets the notice; a preview, Codex and an unknown his
   assert.equal(await runGuard({ ...spawn, tool_name: 'Read' }, NOW, 30), null);
 });
 
-test('CLI: the guard hook prints the notice as a systemMessage for Pro only', () => {
+test('CLI: the guard hook prints the notice as a systemMessage without a license', () => {
   const state = tmp('lc-spawn-cli-state-');
   const entries = [0.8, 1.5, 2.5].map((pct, i) => JSON.stringify({ ...run('Explore', pct, i), t: Date.now() - 60_000 }));
   writeFileSync(join(state, 'subagents.jsonl'), `${entries.join('\n')}\n`);
@@ -61,7 +61,7 @@ test('CLI: the guard hook prints the notice as a systemMessage for Pro only', ()
   const input = JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_input: { subagent_type: 'Explore' }, session_id: 's1' });
   const free = spawnSync('node', [bin, 'guard'], { env, input });
   assert.equal(free.status, 0);
-  assert.equal(free.stdout.toString(), '');
+  assert.match(free.stdout.toString(), /systemMessage/);
   assert.equal(spawnSync('node', [bin, 'trial'], { env }).status, 0);
   const pro = spawnSync('node', [bin, 'guard'], { env, input });
   assert.equal(pro.status, 0, pro.stderr.toString());

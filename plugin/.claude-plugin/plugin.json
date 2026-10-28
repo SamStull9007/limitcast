@@ -1,10 +1,19 @@
 {
   "name": "limitcast",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "Usage-limit status, results and trim for Claude Code",
-  "author": { "name": "Sam Stull", "url": "https://limitcast.dev" },
+  "author": {
+    "name": "Sam Stull",
+    "url": "https://limitcast.dev"
+  },
   "homepage": "https://limitcast.dev",
   "repository": "https://github.com/SamStull9007/limitcast",
-  "license": "Elastic-2.0",
-  "keywords": ["usage-limits", "rate-limits", "tokens", "status-line", "subagents"]
+  "license": "MIT",
+  "keywords": [
+    "usage-limits",
+    "rate-limits",
+    "tokens",
+    "status-line",
+    "subagents"
+  ]
 }

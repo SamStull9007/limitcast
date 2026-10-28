@@ -280,11 +280,11 @@ function codexGuardCheck(codexPath) {
 }
 
 /**
- * Health checks: settings wired, the node path in them still exists, data arriving, license state.
- * @param {{path?:string, codexPath?:string, samplesAgeMs:number|null, license:ReturnType<typeof import('./license.mjs').currentLicense>}} info
+ * Health checks: settings wired, the node path in them still exists, data arriving, and the free distribution.
+ * @param {{path?:string, codexPath?:string, samplesAgeMs:number|null, license?:ReturnType<typeof import('./license.mjs').currentLicense>}} info
  * @returns {{ok:boolean, line:string}[]}
  */
-export function doctor({ path = settingsPath(), codexPath = codexHooksPath(), samplesAgeMs, license }) {
+export function doctor({ path = settingsPath(), codexPath = codexHooksPath(), samplesAgeMs }) {
   /** @type {{ok:boolean, line:string}[]} */
   const out = [];
   const major = Number(process.versions.node.split('.')[0]);
@@ -332,7 +332,7 @@ export function doctor({ path = settingsPath(), codexPath = codexHooksPath(), sa
   const newer = (hooks.UserPromptSubmit ?? []).some(isPromptCheck) && (hooks.SubagentStop ?? []).some(isReceipt);
   if (guard && !newer)
     out.push({
-      ok: !license?.ok,
+      ok: false,
       line: 'Cold-cache warning and subagent receipts not installed yet: run `limitcast doctor --fix`',
     });
   if (existsSync(codexPath)) out.push(codexGuardCheck(codexPath));
@@ -343,16 +343,8 @@ export function doctor({ path = settingsPath(), codexPath = codexHooksPath(), sa
       : { ok: samplesAgeMs < 24 * 3600_000, line: `Last Claude reading ${Math.round(samplesAgeMs / 60_000)} min ago` },
   );
   out.push({
-    ok: license?.ok !== false,
-    line: license === null ? 'Free tier' : license.ok ? `Pro: ${license.claims.e}${proTerm(license.claims)}` : `License problem: ${license.reason}`,
+    ok: true,
+    line: 'Free and open source (MIT License); all features available',
   });
   return out;
-}
-
-/** @param {{p:string, i:number, x:number}} c */
-function proTerm(c) {
-  const day = (/** @type {number} */ s) => new Date(s * 1000).toISOString().slice(0, 10);
-  if (c.x) return `, ${c.p === 'polar' ? 'valid until' : 'renews'} ${day(c.x)}`;
-  // A Polar key has no end date for Lifetime or an active subscription; the weekly check is what keeps it honest.
-  return c.p === 'polar' ? `, last checked with Polar ${day(c.i)}` : ', lifetime';
 }

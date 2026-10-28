@@ -84,7 +84,7 @@ test('report --why: what to try names the big steps and the sources with a tip',
   assert.doesNotMatch(md, /- Bash/); // results averaging about 100 tokens are not worth a tip
 });
 
-test('CLI: the tool-check hook prints the notice for Pro, once per tool per session', () => {
+test('CLI: the tool-check hook prints the notice without a license, once per tool per session', () => {
   const state = tmp('lc-tool-cli-state-');
   // XDG_CONFIG_HOME too: starting a trial also writes a marker there, which must not land in the real ~/.config.
   const env = { ...process.env, LIMITCAST_STATE: state, XDG_CONFIG_HOME: tmp('lc-tool-cli-xdg-') };
@@ -93,7 +93,6 @@ test('CLI: the tool-check hook prints the notice for Pro, once per tool per sess
   const hook = (tool, size, sid = 's1') =>
     JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: tool, tool_input: {}, tool_response: { stdout: 'x'.repeat(size) }, session_id: sid });
   const run = (input) => spawnSync('node', [bin, 'tool-check'], { env, input });
-  assert.equal(run(hook('Bash', 100_000)).stdout.toString(), ''); // free: nothing
   assert.equal(spawnSync('node', [bin, 'trial'], { env }).status, 0);
   const first = run(hook('Bash', 100_000));
   assert.equal(first.status, 0, first.stderr.toString());
