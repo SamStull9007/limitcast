@@ -75,12 +75,39 @@ test('format checks pass on current formats and flag a changed one', async () =>
       join(claudeHome, 'projects', 'p', 's.jsonl'),
       JSON.stringify({ type: 'assistant', message: { tokenUsage: { out: 1 } }, usage: 'x' }),
     );
-    writeFileSync(join(process.env.LIMITCAST_STATE, 'last-feed.json'), JSON.stringify({ at: 1, limits: {} }));
+    writeFileSync(join(process.env.LIMITCAST_STATE, 'last-feed.json'), JSON.stringify({ at: 1, rate_limits: { five_hour: { used_percentage: 'unknown' } } }));
     const bad = await formatChecks();
     assert.ok(bad.some((c) => !c.ok && /transcript has no readable usage/.test(c.line)));
-    assert.ok(bad.some((c) => !c.ok && /status-line feed has no rate_limits/.test(c.line)));
+    assert.ok(bad.some((c) => !c.ok && /status-line feed has unreadable rate_limits/.test(c.line)));
   } finally {
     for (const k of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'GROK_HOME']) process.env[k] = prev[k];
+  }
+});
+
+test('format checks allow optional limits and transcripts awaiting their first response', async () => {
+  const prev = { ...process.env };
+  const claudeHome = tmp('lc-fmt-pending-');
+  const state = tmp('lc-fmt-pending-state-');
+  mkdirSync(join(claudeHome, 'projects', 'p'), { recursive: true });
+  const transcript = join(claudeHome, 'projects', 'p', 's.jsonl');
+  writeFileSync(transcript, JSON.stringify({ type: 'ai-title', title: 'New session' }));
+  Object.assign(process.env, { CLAUDE_CONFIG_DIR: claudeHome, LIMITCAST_STATE: state });
+  try {
+    for (const rate_limits of [undefined, null, {}, { spend_limit: { used_percentage: 5 } }]) {
+      writeFileSync(join(state, 'last-feed.json'), JSON.stringify({ at: 1, keys: ['session_id'], rate_limits }));
+      const checks = await formatChecks();
+      assert.ok(checks.find((c) => /no subscription limit readings available/.test(c.line))?.ok);
+      assert.ok(checks.find((c) => /no assistant usage yet/.test(c.line))?.ok);
+    }
+    writeFileSync(join(state, 'last-feed.json'), '{broken');
+    assert.ok((await formatChecks()).some((c) => !c.ok && /status-line feed/.test(c.line)));
+    writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { tokenUsage: { out: 1 } } }));
+    assert.ok((await formatChecks()).some((c) => !c.ok && /transcript has no readable usage/.test(c.line)));
+  } finally {
+    for (const k of ['CLAUDE_CONFIG_DIR', 'LIMITCAST_STATE']) {
+      if (prev[k] === undefined) delete process.env[k];
+      else process.env[k] = prev[k];
+    }
   }
 });
 

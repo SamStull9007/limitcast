@@ -16,16 +16,22 @@ export async function formatChecks() {
 
   const feedPath = join(stateDir(), 'last-feed.json');
   if (existsSync(feedPath)) {
-    let rl = null;
+    let feed;
     try {
-      rl = JSON.parse(readFileSync(feedPath, 'utf8')).rate_limits;
+      feed = JSON.parse(readFileSync(feedPath, 'utf8'));
     } catch {
       /* unreadable: reported below */
     }
+    const rl = feed?.rate_limits;
+    // Claude omits subscription windows before a response, after reset, or without a supported subscription.
+    const noWindows = rl == null || (typeof rl === 'object' && !Array.isArray(rl) && !('five_hour' in rl) && !('seven_day' in rl));
+    const validFeed = feed && typeof feed === 'object' && !Array.isArray(feed);
     out.push(
       Number.isFinite(rl?.five_hour?.used_percentage ?? rl?.seven_day?.used_percentage)
         ? { ok: true, line: 'Claude Code status-line feed: limit readings present' }
-        : { ok: false, line: 'Claude Code status-line feed has no rate_limits: the format may have changed, update limitcast' },
+        : validFeed && noWindows
+          ? { ok: true, line: 'Claude Code status-line feed: no subscription limit readings available yet (normal before a response or without a supported subscription)' }
+          : { ok: false, line: 'Claude Code status-line feed has unreadable rate_limits: the format may have changed, update limitcast' },
     );
   }
 
@@ -35,7 +41,9 @@ export async function formatChecks() {
     out.push(
       found
         ? { ok: true, line: 'Claude Code transcripts: usage records readable' }
-        : { ok: false, line: `Claude Code transcript has no readable usage records (${claude}): the format may have changed, update limitcast` },
+        : !(await findLine(claude, '"assistant"', (ev) => ev?.type === 'assistant'))
+          ? { ok: true, line: 'Claude Code: latest session has no assistant usage yet (normal before its first response)' }
+          : { ok: false, line: `Claude Code transcript has no readable usage records (${claude}): the format may have changed, update limitcast` },
     );
   }
 
