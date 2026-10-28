@@ -1,13 +1,13 @@
 ---
 description: Split an oversized auto-memory file into a short hub plus topic files (limitcast)
 argument-hint: [memory file]
-allowed-tools: Bash(npx -y --package=https://github.com/SamStull9007/limitcast/releases/download/v0.16.0/limitcast-0.16.0.tgz limitcast memory *), Read, Grep, Glob
+allowed-tools: Bash(npx -y limitcast@0.16.0 memory *), Read, Grep, Glob
 ---
 Split an oversized or mixed-topic auto-memory file into a short hub plus topic files, so a task that needs one fact reads one small file. Target: $ARGUMENTS (if blank, pick from the sweep below).
 
 Mechanical sweep from limitcast:
 
-!`npx -y --package=https://github.com/SamStull9007/limitcast/releases/download/v0.16.0/limitcast-0.16.0.tgz limitcast memory 2>&1 || true`
+!`npx -y limitcast@0.16.0 memory 2>&1 || true`
 
 If the sweep says there is no auto-memory index, say so and stop.
 

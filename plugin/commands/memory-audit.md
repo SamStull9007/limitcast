@@ -1,12 +1,12 @@
 ---
 description: Audit this project's auto-memory for stale, broken and oversized notes (limitcast)
-allowed-tools: Bash(npx -y --package=https://github.com/SamStull9007/limitcast/releases/download/v0.16.0/limitcast-0.16.0.tgz limitcast memory *), Read, Grep, Glob
+allowed-tools: Bash(npx -y limitcast@0.16.0 memory *), Read, Grep, Glob
 ---
 Audit this project's Claude Code auto-memory. It is read-only until the user agrees to a change.
 
 Mechanical sweep from limitcast:
 
-!`npx -y --package=https://github.com/SamStull9007/limitcast/releases/download/v0.16.0/limitcast-0.16.0.tgz limitcast memory 2>&1 || true`
+!`npx -y limitcast@0.16.0 memory 2>&1 || true`
 
 If the sweep says there is no auto-memory index, say so and stop. Otherwise read MEMORY.md and the topic files it lists, then check:
 
