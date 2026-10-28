@@ -109,7 +109,7 @@ Created by **Sam Stull**. The project and its history remain available as a port
 
 Protection events retain the tier at decision time. Host operation IDs deduplicate retries when supplied; older/unidentified events remain labeled attempts. Forecast history is replayed from readings and does not prove that a notification was delivered. Controls cannot establish how many interruptions were prevented.
 
-For a small consenting pilot, see [the pilot protocol](docs/pilot.md) and [dated market assessment](docs/market-positioning.md). From a repository checkout, `node scripts/pilot-metrics.mjs participants.json` aggregates operator-recorded activation, eligible day-7/day-30 retention and verified renewals locally; it does not recruit people or collect telemetry.
+Operational automation, contact lists and internal research are maintained outside this public repository. Reports remain local, and sharing totals is voluntary.
 
 ## License
 
