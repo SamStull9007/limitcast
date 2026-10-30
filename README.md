@@ -17,6 +17,8 @@
 
 <p align="center"><code>npm install -g limitcast</code></p>
 
+> **Follow Limitcast:** select **Watch → Custom → Releases** for updates. Enable email delivery in your GitHub notification settings to get release emails. [How to subscribe](docs/community.md#get-release-emails) · [Join Discussions](https://github.com/SamStull9007/limitcast/discussions)
+
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
   <a href="#see-it-in-action">Demo</a> ·
@@ -166,7 +168,7 @@ Context reductions are estimates against a recorded baseline, not measured causa
 
 ## Build with us
 
-Found a rough edge or have an idea? [Open an issue](https://github.com/SamStull9007/limitcast/issues). Contributions are welcome.
+Found a rough edge? [Report a bug](https://github.com/SamStull9007/limitcast/issues/new/choose). Ask questions in [Q&A](https://github.com/SamStull9007/limitcast/discussions/categories/q-a), propose improvements in [Ideas](https://github.com/SamStull9007/limitcast/discussions/categories/ideas), or [try it for a week](docs/community.md#try-it-for-a-week) and share a reviewed check-in. [Contributions are welcome](CONTRIBUTING.md).
 
 ```sh
 git clone https://github.com/SamStull9007/limitcast.git

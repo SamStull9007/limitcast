@@ -140,12 +140,21 @@ export function savings(c, used) {
  * @param {ReturnType<typeof contributors>} c
  * @param {Activity} used
  * @param {number} days
+ * @param {boolean} [share] totals only, including when no startup transcript is available
  */
-export function trimReport(base, c, used, days) {
+export function trimReport(base, c, used, days, share = false) {
   const s = savings(c, used);
   const fileTokens = c.files.reduce((a, f) => a + f.tokens, 0);
   const visible = c.skills.filter((k) => !k.hidden);
   const listing = visible.reduce((a, k) => a + k.tokens, 0);
+  if (share)
+    return [
+      base ? `Claude starting context: ${fmt(base.median)} tokens across ${base.sessions} sessions.` : 'Claude starting context: unavailable.',
+      `Estimated removable skill listings: ~${fmt(s.skillTokens)} tokens per session.`,
+      `Unused in ${days} days: ${s.unusedSkills.length} skills, ${s.unusedMcp.length} MCP servers (server sizes unavailable).`,
+      `Instruction files: ${c.files.length}, ~${fmt(fileTokens)} tokens. Visible skill listings: ~${fmt(listing)} tokens.`,
+      'Totals only; no configuration names or paths. https://limitcast.dev',
+    ].join('\n');
   const lines = ['# limitcast trim', ''];
   if (base) {
     lines.push(

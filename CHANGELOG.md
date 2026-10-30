@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Fix: `trim --share` keeps configuration names and paths private when no measured startup transcript is available, and honors totals-only output for Codex and Grok. Sharing cannot be combined with keep-list edits, apply, or undo.
+- Community: release-email instructions, Discussions, tester guidance, contribution and issue/PR templates, and a weekly maintainer draft reminder.
+
 ## 0.17.3 — 2026-10-28
 
 - Fix: the Grok status line prints one line per tool. Claude and Grok windows no longer share one unlabeled row (two 7d figures and two daily shares). Host windows stay on `limitcast:`; Claude on Grok is `limitcast claude:`.

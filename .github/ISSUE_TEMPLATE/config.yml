@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Setup help and questions
+    url: https://github.com/SamStull9007/limitcast/discussions/categories/q-a
+    about: Ask for help using sanitized details.
+  - name: Ideas and feature requests
+    url: https://github.com/SamStull9007/limitcast/discussions/categories/ideas
+    about: Describe the problem you want Limitcast to solve.

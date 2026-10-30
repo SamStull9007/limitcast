@@ -1,0 +1,33 @@
+name: Weekly community draft
+on:
+  schedule:
+    - cron: '17 16 * * 5'
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: weekly-community-draft
+  cancel-in-progress: false
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Open one maintainer draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MAINTAINER: ${{ github.repository_owner }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list --state open --search '"Weekly community update draft" in:title' --json number --jq 'length')
+          if [ "$existing" -gt 0 ]; then
+            echo 'An open weekly draft already exists; leaving it unchanged.'
+            exit 0
+          fi
+          gh issue create \
+            --title "Weekly community update draft — $(date -u +%F)" \
+            --body-file .github/weekly-update.md \
+            --assignee "$MAINTAINER"

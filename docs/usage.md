@@ -75,6 +75,8 @@ In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast
 
 ### Subagent guard
 
+The next release fixes `trim --share` fallback and provider summaries to omit configuration names and paths, and rejects combining sharing with keep-list edits, `--apply`, or `--undo`. This fix is currently on `main`, not in npm 0.17.3. For voluntary public check-ins on 0.17.3, use `results --share` and review the output before posting.
+
 The guard is free for everyone and acts when installed with `--guard`. Blocks a new subagent only when the spawning tool's window is on pace to run out before it resets, within 30 minutes (`LIMITCAST_GUARD_MINUTES`). A window already at 100% is left to Claude Code, so extra usage keeps working. `LIMITCAST_ALLOW=1` overrides. If the guard itself fails, it allows the call.
 
 `install --guard` also adds two more hooks. A SubagentStop hook prices each finished subagent from its own transcript and shows you the receipt (never the model); `limitcast budget` and `results` use the same record. A UserPromptSubmit hook holds the first message after the prompt cache expired, once per pause, when the session re-sends 100k+ tokens; messages from background agents and `/compact` or `/clear` are never held. Installed `--guard` before 0.11? Run `limitcast doctor --fix` to add them.

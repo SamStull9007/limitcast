@@ -576,6 +576,10 @@ if (cmd === 'status') {
 } else if (cmd === 'report' || cmd === 'trim') {
   const pro = true;
   const since = now - days() * 86400_000;
+  if (cmd === 'trim' && args.includes('--share') && (args[0] === 'keep' || args.includes('--apply') || args.includes('--undo'))) {
+    console.error('--share is read-only; run keep, --apply, or --undo separately.');
+    process.exit(1);
+  }
   if (cmd === 'trim' && args[0] === 'keep') {
     // The keep-list: servers and skills `trim --apply` never touches (Claude, Codex and Grok). Free to manage; apply is Pro.
     const drop = args[1] === '--remove';
@@ -600,7 +604,11 @@ if (cmd === 'status') {
       process.exit(0);
     }
     if (!existsSync(codexConfigPath())) {
-      console.log(`No Codex setup found (${codexConfigPath()}). Set CODEX_HOME if Codex keeps it elsewhere.`);
+      console.log(
+        args.includes('--share')
+          ? 'Codex context summary: unavailable (no setup found).'
+          : `No Codex setup found (${codexConfigPath()}). Set CODEX_HOME if Codex keeps it elsewhere.`,
+      );
       process.exit(0);
     }
     const servers = codexServers(readFileSync(codexConfigPath(), 'utf8'));
@@ -612,7 +620,12 @@ if (cmd === 'status') {
           ? `✓ Turned off ${changed.length} Codex MCP servers (enabled = false in ${codexConfigPath()}): ${changed.map((s) => s.name).join(', ')}\nTakes effect in your next Codex session. Undo: limitcast trim --codex --undo`
           : 'Nothing to turn off: every server that is on was used or is on your keep-list.') + keptNote(r.kept),
       );
-    } else console.log(forTerminal(r.text));
+    } else
+      console.log(
+        args.includes('--share')
+          ? `Codex trim: ${r.unused.length} unused MCP servers, ${r.kept.length} kept. Totals only; no names or paths. https://limitcast.dev`
+          : forTerminal(r.text),
+      );
     process.exit(0);
   }
   if (cmd === 'trim' && args.includes('--grok')) {
@@ -624,7 +637,11 @@ if (cmd === 'status') {
       process.exit(0);
     }
     if (!existsSync(grokConfigPath())) {
-      console.log(`No Grok setup found (${grokConfigPath()}). Set GROK_HOME if Grok keeps it elsewhere.`);
+      console.log(
+        args.includes('--share')
+          ? 'Grok context summary: unavailable (no setup found).'
+          : `No Grok setup found (${grokConfigPath()}). Set GROK_HOME if Grok keeps it elsewhere.`,
+      );
       process.exit(0);
     }
     const r = grokTrimReport({
@@ -642,7 +659,12 @@ if (cmd === 'status') {
           ? `✓ Turned off ${changed.length} Grok MCP servers (enabled = false in ${grokConfigPath()}): ${changed.map((s) => s.name).join(', ')}\nTakes effect in your next Grok session. Undo: limitcast trim --grok --undo`
           : 'Nothing to turn off: every server that is on was used or is on your keep-list.') + keptNote(r.kept),
       );
-    } else console.log(forTerminal(r.text));
+    } else
+      console.log(
+        args.includes('--share')
+          ? `Grok trim: ${r.unused.length} unused MCP servers, ${r.kept.length} kept. Totals only; no names or paths. https://limitcast.dev`
+          : forTerminal(r.text),
+      );
     process.exit(0);
   }
   /** @type {import('../src/trim.mjs').Activity} */
@@ -666,7 +688,10 @@ if (cmd === 'status') {
     }
     const keep = getKeep();
     if (latest && args.includes('--share')) text = shareSummary(baseline(usage), latest, used, days(), keep);
-    else text = latest ? startupReport(baseline(usage), latest, used, days(), keep) : trimReport(baseline(usage), contributors(), used, days());
+    else
+      text = latest
+        ? startupReport(baseline(usage), latest, used, days(), keep)
+        : trimReport(baseline(usage), contributors(), used, days(), args.includes('--share'));
     if (latest && !args.includes('--share')) {
       const still = stillLoading(latest);
       text += still.length
