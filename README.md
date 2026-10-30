@@ -3,10 +3,10 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/limitcast"><img src="https://img.shields.io/npm/v/limitcast?style=flat-square&amp;color=167b5b&amp;label=npm" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/limitcast"><code>npm · limitcast</code></a>
   <a href="https://github.com/SamStull9007/limitcast/actions/workflows/ci.yml"><img src="https://github.com/SamStull9007/limitcast/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-167b5b?style=flat-square" alt="MIT license"></a>
-  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-20%2B-526573?style=flat-square" alt="Node.js 20 or newer"></a>
+  <a href="LICENSE"><code>MIT license</code></a>
+  <a href="https://nodejs.org"><code>Node.js 20+</code></a>
 </p>
 
 <p align="center">
