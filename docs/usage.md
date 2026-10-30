@@ -73,9 +73,11 @@ In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast
 | `install --alerts` | A SessionStart hook that tells you (never the model) when your starting context grew ~1k+ tokens, and what grew, plus a one-line weekly summary of what limitcast did |
 | `limitcast license` | Show the free MIT license status; no network call |
 
-### Subagent guard
+### Sharing summaries
 
 The next release fixes `trim --share` fallback and provider summaries to omit configuration names and paths, and rejects combining sharing with keep-list edits, `--apply`, or `--undo`. This fix is currently on `main`, not in npm 0.17.3. For voluntary public check-ins on 0.17.3, use `results --share` and review the output before posting.
+
+### Subagent guard
 
 The guard is free for everyone and acts when installed with `--guard`. Blocks a new subagent only when the spawning tool's window is on pace to run out before it resets, within 30 minutes (`LIMITCAST_GUARD_MINUTES`). A window already at 100% is left to Claude Code, so extra usage keeps working. `LIMITCAST_ALLOW=1` overrides. If the guard itself fails, it allows the call.
 

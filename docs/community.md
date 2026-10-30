@@ -11,7 +11,7 @@ This uses your existing GitHub account. Limitcast does not collect your email ad
 - [Announcements](https://github.com/SamStull9007/limitcast/discussions/categories/announcements): shipped improvements and concise weekly progress notes.
 - [Q&A](https://github.com/SamStull9007/limitcast/discussions/categories/q-a): setup and troubleshooting.
 - [Ideas](https://github.com/SamStull9007/limitcast/discussions/categories/ideas): explain the problem you want solved and help prioritize it.
-- [Show and tell](https://github.com/SamStull9007/limitcast/discussions/categories/show-and-tell): useful setups and voluntary, reviewed findings.
+- [Show your setup](https://github.com/SamStull9007/limitcast/discussions/categories/show-your-setup): useful setups and voluntary, reviewed findings.
 
 ## Try it for a week
 
@@ -20,7 +20,7 @@ We are looking for an initial cohort of 20 people who regularly use Claude Code,
 1. Install the current release and run `limitcast onboard` and `limitcast doctor`.
 2. Run `limitcast status` and `limitcast trim` locally. Enable hooks or apply changes only if you choose; restart your coding tool and approve hooks when required.
 3. After seven days, review `limitcast results` locally. If you want to share totals, use `limitcast results --share`, inspect every line, and remove anything you do not want public.
-4. Post a check-in in Show and tell: which tool you use, whether the first result helped, what confused you, and whether you still use Limitcast.
+4. Post a check-in in Show your setup: which tool you use, whether the first result helped, what confused you, and whether you still use Limitcast.
 
 Do not post prompts, credentials, account IDs, private project paths, configuration files, raw transcripts, or customer information. Context reductions are estimates, not proof of financial savings.
 
