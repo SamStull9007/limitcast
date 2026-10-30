@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="300" viewBox="0 0 640 300" role="img" aria-labelledby="title desc">
+  <title id="title">Guard — hold new subagents when capacity is tight</title>
+  <desc id="desc">Illustrative guard decision: a new subagent is held when Claude's five-hour limit is 93 percent used and forecast to run out in about 21 minutes. Existing agents continue.</desc>
+  <rect width="640" height="300" rx="16" fill="#101c25"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <text x="30" y="46" fill="#76efc2" font-size="25" font-weight="650">Keep the work already running.</text>
+    <text x="30" y="80" fill="#b4c6cc" font-size="19" font-family="ui-monospace, SFMono-Regular, Consolas, monospace">$ limitcast install --guard</text>
+    <path d="M30 103h580" stroke="#31444e"/>
+    <rect x="30" y="124" width="580" height="106" rx="10" fill="#24251f" stroke="#77643e"/>
+    <circle cx="56" cy="153" r="6" fill="#f5c879"/>
+    <text x="75" y="161" fill="#f5c879" font-size="25" font-weight="650">New spawn held</text>
+    <text x="49" y="198" fill="#f0f6f5" font-size="21">Claude 5h: 93% used · out in ~21 min</text>
+    <text x="30" y="274" fill="#b4c6cc" font-size="17">Illustrative decision · existing agents continue</text>
+  </g>
+</svg>

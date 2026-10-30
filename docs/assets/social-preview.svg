@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">limitcast — Make room for your next idea.</title>
+  <desc id="desc">Free and open source usage forecasting, subagent protection, and context trimming for Claude Code, Codex, and Grok.</desc>
+  <rect width="1280" height="640" fill="#101c25"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <rect x="72" y="66" width="46" height="46" rx="12" fill="#76efc2"/>
+    <path d="M84 99V80M84 99h23M91 93l7-9 10-6" fill="none" stroke="#10251e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="136" y="102" fill="#f0f6f5" font-size="40" font-weight="650" letter-spacing="-1">limitcast</text>
+    <text x="73" y="243" fill="#f0f6f5" font-size="72" font-weight="700" letter-spacing="-2.5">Make room for</text>
+    <text x="73" y="327" fill="#76efc2" font-size="72" font-weight="700" letter-spacing="-2.5">your next idea.</text>
+    <text x="76" y="390" fill="#b4c6cc" font-size="28">Forecast limits. Guard agents. Trim context.</text>
+    <g transform="translate(785 179)">
+      <rect width="420" height="250" rx="16" fill="#101c23" stroke="#31444e"/>
+      <path d="M26 75h368M26 125h368M26 175h368M26 225h368" stroke="#293c46"/>
+      <path d="M26 75h368" stroke="#f5c879" stroke-width="2" stroke-dasharray="5 7"/>
+      <text x="326" y="28" fill="#f5c879" font-size="17">LIMIT</text>
+      <path d="M28 212C91 206 121 180 162 153S213 127 239 111" fill="none" stroke="#76efc2" stroke-width="4" stroke-linecap="round"/>
+      <path d="M239 111l100-69" stroke="#76efc2" stroke-width="3" stroke-dasharray="5 9" stroke-linecap="round"/>
+      <circle cx="239" cy="111" r="6" fill="#76efc2"/>
+    </g>
+    <path d="M76 480h1128" stroke="#31444e"/>
+    <text x="76" y="528" fill="#f0f6f5" font-size="25">Claude Code · Codex · Grok</text>
+    <text x="76" y="576" fill="#b4c6cc" font-size="19" letter-spacing="1.5">FREE &amp; OPEN SOURCE · RUNS LOCALLY</text>
+    <text x="1204" y="576" text-anchor="end" fill="#76efc2" font-size="24">limitcast.dev</text>
+  </g>
+</svg>

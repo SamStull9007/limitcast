@@ -1,5 +1,8 @@
 <p align="center">
+  <picture>
+    <source media="(max-width: 600px)" srcset="docs/assets/banner-mobile.svg">
   <img src="docs/assets/banner.svg" alt="limitcast — Make room for your next idea. Forecast limits, guard agents, and trim context across Claude Code, Codex, and Grok." width="100%">
+  </picture>
 </p>
 
 <p align="center">
@@ -18,6 +21,7 @@
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
   <a href="#see-it-in-action">Demo</a> ·
+  <a href="docs/tour.md">Visual tour</a> ·
   <a href="docs/usage.md">Full guide</a> ·
   <a href="https://limitcast.dev">Website</a> ·
   <a href="CHANGELOG.md">Changelog</a>
@@ -80,18 +84,13 @@ The status-line recorder still comes from `limitcast install`.
 
 ## See it in action
 
+**[Take the illustrated tour →](docs/tour.md)** Forecast your windows, give subagents a budget, and inspect what you load.
+
 ![Limitcast status, trim, and results running in a terminal](https://limitcast.dev/demo.gif)
 
 ### Find the context you carry into every session
 
-```text
-$ limitcast trim
-Your recorded Claude Code sessions start at 102.7k tokens before your first message.
-
-Estimated removable context: ~6.2k tokens per session (6% of your starting context)
-- Disable 9 MCP servers you haven't used in 14 days (~0.9k): postman, context7, ...
-- Hide 66 skills from the model (~5.3k): dataviz, block-kit, ...
-```
+[![Illustrative trim finding: 102.7 thousand starting tokens, with 6.2 thousand estimated removable. Inspect before applying changes.](docs/assets/trim.svg)](docs/tour.md#inspect-what-you-load)
 
 Illustrative output; your findings depend on your local sessions. `trim` inspects first. Use `trim keep <name>` to protect essentials, `trim --apply` to make the changes, and `trim --undo` to reverse them.
 

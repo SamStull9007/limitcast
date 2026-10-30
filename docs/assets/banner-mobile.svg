@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="350" viewBox="0 0 480 350" role="img" aria-labelledby="title desc">
+  <title id="title">limitcast — Make room for your next idea.</title>
+  <desc id="desc">Forecast limits, guard agents, and trim context. Free and open source for Claude Code, Codex, and Grok.</desc>
+  <rect width="480" height="350" rx="18" fill="#101c25"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <rect x="32" y="32" width="32" height="32" rx="8" fill="#76efc2"/>
+    <path d="M41 55V42M41 55h16M46 51l5-6 6-4" fill="none" stroke="#10251e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="77" y="56" font-size="28" font-weight="650" fill="#f0f6f5">limitcast</text>
+    <text x="32" y="125" font-size="43" font-weight="700" letter-spacing="-1.5" fill="#f0f6f5">Make room for</text>
+    <text x="32" y="178" font-size="43" font-weight="700" letter-spacing="-1.5" fill="#76efc2">your next idea.</text>
+    <text x="34" y="219" font-size="19" fill="#b4c6cc">Forecast limits. Guard agents. Trim context.</text>
+    <path d="M34 253h412" stroke="#31444e"/>
+    <text x="34" y="284" font-size="19" fill="#f0f6f5">Claude Code · Codex · Grok</text>
+    <text x="34" y="318" font-size="16" fill="#b4c6cc">Free &amp; open source · Runs locally</text>
+  </g>
+</svg>

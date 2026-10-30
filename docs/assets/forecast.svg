@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="300" viewBox="0 0 640 300" role="img" aria-labelledby="title desc">
+  <title id="title">Forecast — see which usage window runs out first</title>
+  <desc id="desc">Illustrative status: Claude five-hour usage is 71 percent and forecast to run out at 16:40 before its 17:00 reset. Codex five-hour usage is 22 percent.</desc>
+  <rect width="640" height="300" rx="16" fill="#101c25"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <text x="30" y="46" fill="#76efc2" font-size="25" font-weight="650">See the limit before you hit it.</text>
+    <text x="30" y="80" fill="#b4c6cc" font-size="19" font-family="ui-monospace, SFMono-Regular, Consolas, monospace">$ limitcast status</text>
+    <path d="M30 103h580" stroke="#31444e"/>
+    <text x="30" y="140" fill="#f0f6f5" font-size="23">Claude 5h</text>
+    <text x="228" y="140" fill="#f5c879" font-size="25" font-weight="650">71%</text>
+    <text x="335" y="140" fill="#f5c879" font-size="21">out 16:40</text>
+    <text x="495" y="140" fill="#b4c6cc" font-size="19">reset 17:00</text>
+    <rect x="30" y="156" width="580" height="8" rx="4" fill="#293c46"/>
+    <rect x="30" y="156" width="412" height="8" rx="4" fill="#f5c879"/>
+    <text x="30" y="205" fill="#f0f6f5" font-size="23">Codex 5h</text>
+    <text x="228" y="205" fill="#76efc2" font-size="25" font-weight="650">22%</text>
+    <text x="335" y="205" fill="#76efc2" font-size="21">room to work</text>
+    <rect x="30" y="221" width="580" height="8" rx="4" fill="#293c46"/>
+    <rect x="30" y="221" width="128" height="8" rx="4" fill="#76efc2"/>
+    <text x="30" y="274" fill="#b4c6cc" font-size="17">Illustrative data · forecasts depend on observed usage</text>
+  </g>
+</svg>
