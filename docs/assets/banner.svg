@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="440" viewBox="0 0 1280 440" role="img" aria-labelledby="title description">
+  <title id="title">limitcast — Make room for your next idea.</title>
+  <desc id="description">A local CLI for forecasting AI coding limits, guarding subagents, and trimming context. An illustrative usage curve approaches a limit, with a forecast extending ahead of current usage.</desc>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1">
+      <stop stop-color="#101c25"/>
+      <stop offset="1" stop-color="#091116"/>
+    </linearGradient>
+    <linearGradient id="area" x2="0" y2="1">
+      <stop stop-color="#76efc2" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#76efc2" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="440" rx="20" fill="url(#background)"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <g transform="translate(56 52)">
+      <rect width="34" height="34" rx="9" fill="#76efc2"/>
+      <path d="M9 24V11M9 24h17M14 20l5-6 7-5" fill="none" stroke="#10251e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="48" y="25" font-size="29" font-weight="650" letter-spacing="-.8" fill="#f0f6f5">limitcast</text>
+    </g>
+    <text x="56" y="163" font-size="54" font-weight="700" letter-spacing="-2" fill="#f0f6f5">Make room for</text>
+    <text x="56" y="226" font-size="54" font-weight="700" letter-spacing="-2" fill="#76efc2">your next idea.</text>
+    <text x="58" y="272" font-size="21" fill="#b4c6cc">Forecast limits. Guard agents. Trim context.</text>
+    <path d="M58 312h492" stroke="#2a3c45"/>
+    <text x="58" y="349" font-size="17" fill="#d9e5e8">Claude Code</text>
+    <circle cx="180" cy="343" r="2" fill="#76efc2"/>
+    <text x="198" y="349" font-size="17" fill="#d9e5e8">Codex</text>
+    <circle cx="269" cy="343" r="2" fill="#76efc2"/>
+    <text x="287" y="349" font-size="17" fill="#d9e5e8">Grok</text>
+    <text x="58" y="390" font-size="14" letter-spacing="2" fill="#9bb1b9">FREE &amp; OPEN SOURCE · RUNS LOCALLY</text>
+    <g transform="translate(658 52)">
+      <rect width="566" height="336" rx="14" fill="#101c23" stroke="#31444e"/>
+      <path d="M0 47h566" stroke="#31444e"/>
+      <g fill="#708995"><circle cx="23" cy="24" r="4"/><circle cx="39" cy="24" r="4"/><circle cx="55" cy="24" r="4"/></g>
+      <text x="79" y="30" font-size="15" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" fill="#b4c6cc">$ limitcast status</text>
+      <text x="32" y="85" font-size="12" letter-spacing="2" fill="#a5b9c2">SEE THE LIMIT BEFORE YOU HIT IT</text>
+      <g stroke="#293c46" stroke-width="1"><path d="M32 135h500M32 181h500M32 227h500M32 273h500"/></g>
+      <path d="M32 135h500" stroke="#f5c879" stroke-width="1.5" stroke-dasharray="4 6"/>
+      <text x="487" y="124" font-size="13" fill="#f5c879">LIMIT</text>
+      <path d="M32 260C80 255 100 246 139 235S203 216 236 199 277 182 308 165V273H32Z" fill="url(#area)"/>
+      <path d="M32 260C80 255 100 246 139 235S203 216 236 199 277 182 308 165" fill="none" stroke="#76efc2" stroke-width="3.5" stroke-linecap="round"/>
+      <path d="M308 165L422 108" fill="none" stroke="#76efc2" stroke-width="2.5" stroke-dasharray="5 7" stroke-linecap="round"/>
+      <path d="M308 115v158" stroke="#708995" stroke-dasharray="3 6"/>
+      <circle cx="308" cy="165" r="6" fill="#76efc2" stroke="#101c23" stroke-width="3"/>
+      <text x="32" y="301" font-size="13" fill="#b4c6cc">RECORDED USAGE</text>
+      <text x="295" y="301" font-size="13" fill="#f0f6f5">NOW</text>
+      <text x="414" y="301" font-size="13" fill="#76efc2">FORECAST</text>
+    </g>
+    <text x="1223" y="416" text-anchor="end" font-size="12" fill="#9bb1b9">Illustration · not live usage</text>
+  </g>
+</svg>
