@@ -704,7 +704,7 @@ if (cmd === 'status') {
   const out = flag('--out');
   if (out) {
     writeFileSync(out, `${text}\n`);
-    console.log(`Wrote ${out}`);
+    console.log(cmd === 'trim' && args.includes('--share') ? 'Wrote shared summary.' : `Wrote ${out}`);
   } else console.log(forTerminal(text));
 } else if (cmd === 'drift') {
   // SessionStart hook: tells the user (systemMessage, never the model's context) when starting context grew.

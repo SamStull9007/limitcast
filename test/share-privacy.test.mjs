@@ -41,6 +41,11 @@ test('CLI sharing covers fallback, provider setup, missing setup, and rejects mu
     assert.equal(r.stdout.includes(root), false);
     assert.match(r.stdout, /unavailable|Totals only/);
   }
+  const exported = join(root, 'private-export.md');
+  const exportResult = run('--share', '--out', exported);
+  assert.equal(exportResult.status, 0);
+  assert.equal(exportResult.stdout, 'Wrote shared summary.\n');
+  assert.doesNotMatch(readFileSync(exported, 'utf8'), /private-export/);
   mkdirSync(env.LIMITCAST_STATE, { recursive: true });
   const keep = join(env.LIMITCAST_STATE, 'config.json');
   writeFileSync(keep, JSON.stringify({ trimKeep: ['private-server'] }));
