@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(max-width: 600px)" srcset="docs/assets/banner-mobile.svg">
-    <img src="docs/assets/banner.svg" alt="limitcast — Make room for your next idea. Forecast limits, guard agents, and trim context across Claude Code, Codex, and Grok." width="100%">
-  </picture>
+  <img src="docs/assets/emblem.png" alt="Limitcast forecast gauge connected to Claude Code, Codex, and Grok provider badges" width="420">
 </p>
 
 <p align="center">
@@ -13,10 +10,12 @@
 </p>
 
 <p align="center">
-  <strong>Get more work from your AI coding plan.</strong><br>
+  <strong>See the limit. Stay ahead.</strong><br>
   See when your usage window will run out, control subagent burn,<br>
   and remove starting context you never use.
 </p>
+
+<p align="center"><code>npm install -g limitcast</code></p>
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
@@ -87,13 +86,22 @@ The status-line recorder still comes from `limitcast install`.
 
 **[Take the illustrated tour →](docs/tour.md)** Forecast your windows, give subagents a budget, and inspect what you load.
 
+![Actual Limitcast CLI output in a framed terminal: usage forecasts, project and model reports, and a capacity summary. Synthetic demo data.](docs/assets/showcase.png)
+
+<p align="center"><sub>Actual CLI output, arranged for readability · synthetic demo data · estimates are not measured financial savings</sub></p>
+
+<details>
+<summary><strong>Watch the recorded terminal walkthrough</strong></summary>
+
 ![Limitcast status, trim, and results running in a terminal](https://limitcast.dev/demo.gif)
+
+</details>
 
 ### Find the context you carry into every session
 
-[![Illustrative trim finding: 102.7 thousand starting tokens, with 6.2 thousand estimated removable. Inspect before applying changes.](docs/assets/trim.svg)](docs/tour.md#inspect-what-you-load)
+Run `limitcast trim` to inspect what your sessions load. It names unused skills and servers and estimates their starting-context cost.
 
-Illustrative output; your findings depend on your local sessions. `trim` inspects first. Use `trim keep <name>` to protect essentials, `trim --apply` to make the changes, and `trim --undo` to reverse them.
+Your findings depend on your local sessions. `trim` inspects first. Use `trim keep <name>` to protect essentials, `trim --apply` to make the changes, and `trim --undo` to reverse them.
 
 ## Three tools. One place to understand usage.
 

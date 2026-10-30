@@ -35,6 +35,25 @@ function issues(text) {
   return found;
 }
 
+function publicText(data) {
+  if (!data.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))) return data.toString('utf8');
+  // PNG pixels and provenance are binary; textual metadata requires explicit review.
+  let offset = 8;
+  let type;
+  while (offset < data.length) {
+    assert.ok(offset + 12 <= data.length, 'Truncated PNG chunk');
+    const length = data.readUInt32BE(offset);
+    type = data.toString('ascii', offset + 4, offset + 8);
+    assert.ok(offset + length + 12 <= data.length, 'Truncated PNG payload');
+    assert.ok(!['tEXt', 'zTXt', 'iTXt'].includes(type), 'Review textual PNG metadata before publication');
+    offset += length + 12;
+    if (type === 'IEND') break;
+  }
+  assert.equal(type, 'IEND', 'Missing PNG end chunk');
+  assert.equal(offset, data.length, 'Unreviewed data after PNG end');
+  return '';
+}
+
 test('private operator tools and research cannot reenter the tracked public tree', () => {
   assert.deepEqual(
     tracked.filter((name) => privateFiles.includes(name) || name.startsWith('private/')),
@@ -46,7 +65,7 @@ test('tracked public content contains no unreviewed personal contact or operatio
   for (const name of tracked) {
     const path = resolve(root, name);
     if (!existsSync(path)) continue;
-    const text = readFileSync(path, 'utf8');
+    const text = publicText(readFileSync(path));
     // Print only the category and file, never the private value, in public CI logs.
     assert.deepEqual(issues(text), [], `Review public content in ${name}`);
     assert.equal(text.includes(`${homedir()}/`), false, `Personal home path in ${name}`);
@@ -58,6 +77,18 @@ test('privacy checks catch representative spills and permit public support and f
   assert.ok(issues('https://' + 'claude.ai/' + 'artifact/' + 'example-id').includes('private artifact link'));
   assert.ok(issues('LAUNCH' + '30').includes('internal campaign code'));
   assert.deepEqual(issues('support@limitcast.dev buyer@example.com a@b.co noreply@github.com'), []);
+});
+
+test('PNG pixels do not produce false contacts, while metadata and appended text require review', () => {
+  const png = readFileSync(resolve(root, 'docs/assets/emblem.png'));
+  assert.equal(publicText(png), '');
+  assert.throws(() => publicText(Buffer.concat([png, Buffer.from('unreviewed')])), /after PNG end/);
+  for (const type of ['tEXt', 'zTXt', 'iTXt']) {
+    const chunk = Buffer.alloc(12);
+    chunk.write(type, 4);
+    assert.throws(() => publicText(Buffer.concat([png.subarray(0, 8), chunk, png.subarray(8)])), /textual PNG metadata/);
+  }
+  assert.ok(issues(publicText(Buffer.from(['person', 'gmail.com'].join('@')))).includes('unreviewed contact email'));
 });
 
 test('owner-authored commits use the public project contact or GitHub privacy address', () => {

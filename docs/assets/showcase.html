@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Limitcast CLI showcase — synthetic demo data</title>
+    <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      width: 1360px;
+      height: 950px;
+      padding: 44px;
+      background: radial-gradient(ellipse at 50% 30%, #e8e5e0, #b8b9bd);
+      color: #eeeae4;
+      font:
+        18px / 1.55 -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+    }
+    .window {
+      height: 862px;
+      overflow: hidden;
+      border: 1px solid #7a7b80;
+      border-radius: 22px;
+      background: linear-gradient(135deg, #252930, #16191f);
+      box-shadow:
+        0 22px 35px #0007,
+        inset 0 1px 0 #fff5;
+    }
+    .bar {
+      height: 54px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 22px;
+      background: #292b2f;
+      border-bottom: 1px solid #47494d;
+    }
+    .dot {
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: #ff6058;
+    }
+    .dot:nth-child(2) {
+      background: #febc2e;
+    }
+    .dot:nth-child(3) {
+      background: #28c840;
+    }
+    .bar span:last-child {
+      margin-left: 14px;
+      color: #b4b7bd;
+      font:
+        14px ui-monospace,
+        Menlo,
+        monospace;
+    }
+    .content {
+      padding: 25px 28px;
+    }
+    .heading {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .brand {
+      font-size: 30px;
+      font-weight: 750;
+      color: #ff982e;
+      letter-spacing: -1px;
+    }
+    .label {
+      color: #c8c9cc;
+      font-size: 14px;
+      letter-spacing: 1px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+    .panel {
+      padding: 17px 20px;
+      border: 1px solid #bc702e;
+      border-radius: 10px;
+      overflow: hidden;
+      background: #1b1e25b3;
+      box-shadow: inset 0 1px 0 #ffffff10;
+    }
+    .wide {
+      grid-column: 1 / -1;
+      border-color: #d18738;
+    }
+    .panel h2 {
+      font:
+        600 16px ui-monospace,
+        Menlo,
+        monospace;
+      color: #ffb451;
+      margin: 0 0 15px;
+    }
+    .panel pre {
+      font:
+        15px / 1.65 ui-monospace,
+        Menlo,
+        Consolas,
+        monospace;
+      font-variant-ligatures: none;
+      color: #e6e6e9;
+      white-space: pre-wrap;
+      margin: 0;
+    }
+    .wide pre {
+      font-size: 16px;
+    }
+    .panel:nth-child(3) {
+      border-color: #51bda9;
+    }
+    .panel:nth-child(3) h2 {
+      color: #70deca;
+    }
+    .trim {
+      height: 180px;
+    }
+    .trim pre {
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    footer {
+      font-size: 13px;
+      color: #b8bac0;
+      margin-top: 18px;
+    }
+    .note {
+      color: #ffbe73;
+    }
+    </style>
+  </head>
+  <body>
+    <main class="window">
+      <div class="bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>limitcast — local capacity &amp; context</span></div>
+      <div class="content">
+        <div class="heading">
+          <div class="brand">limitcast</div>
+          <div class="label">FORECAST · PROTECT · TRIM</div>
+        </div>
+        <div class="grid">
+          <section class="panel wide">
+            <h2>$ limitcast status</h2>
+            <pre>window     used  burn      runs out  resets     today     status
+codex 5h   22%   +4.0%/h   -         14:12      -         OK
+claude 5h  71%   +18.0%/h  13:36     14:00      -         AT_RISK
+claude 7d  41%   +0.0%/h   -         Tue 12:00  10% left  OK
+
+You&#x27;ll hit Claude 5h first (13:36). Codex 5h has 78% left.
+</pre>
+          </section>
+          <section class="panel">
+            <h2>Top projects · limitcast report</h2>
+            <pre>| | new tokens | share | API-equivalent |
+|---|---:|---:|---:|
+| /work/weather-api | 508.0k | 40% | - |
+| /work/storefront | 508.0k | 40% | - |
+| /work/mobile-app | 254.0k | 20% | - |</pre>
+          </section>
+          <section class="panel">
+            <h2>By model · limitcast report</h2>
+            <pre>| | new tokens | share | API-equivalent |
+|---|---:|---:|---:|
+| claude-opus-4-1 | 762.0k | 60% | - |
+| claude-sonnet-4-5 | 508.0k | 40% | - |</pre>
+          </section>
+          <section class="panel wide trim">
+            <h2>$ limitcast results --share</h2>
+            <pre>limitcast, last 7 days: 0 usage limits reached. https://limitcast.dev
+Voluntary capacity check-in, 7 days: claude: 5 UTC active days, 1.1M new input/write, 7.0M cached, 92.0k output tokens; 0 applied protection events; 0 historical-preview events (0 unidentified attempts); Claude context estimate unavailable. No prompts, project names or account IDs. https://limitcast.dev
+</pre>
+          </section>
+        </div>
+        <footer>
+          <span class="note">Actual CLI output · synthetic demo sessions · Limitcast 0.17.3</span><br>Named report sections are shown in separate
+          panes. Estimates are not measured financial savings.
+        </footer>
+      </div>
+    </main>
+  </body>
+</html>
