@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(max-width: 600px)" srcset="docs/assets/banner-mobile.svg">
-  <img src="docs/assets/banner.svg" alt="limitcast — Make room for your next idea. Forecast limits, guard agents, and trim context across Claude Code, Codex, and Grok." width="100%">
+    <img src="docs/assets/banner.svg" alt="limitcast — Make room for your next idea. Forecast limits, guard agents, and trim context across Claude Code, Codex, and Grok." width="100%">
   </picture>
 </p>
 
@@ -31,10 +31,11 @@
 
 ## Less overhead. More room to build.
 
-| See what's ahead | Keep agents in check | Start lighter |
-| --- | --- | --- |
-| Forecast when each usage window will run out and see today's share of your weekly allowance. | Hold new subagents when a window is on pace to run out. See receipts and set budgets. | Measure starting context, identify unused skills and MCP servers, and trim with backups and undo. |
-| `limitcast status` | `limitcast install --guard` | `limitcast trim` |
+- **Forecast your windows.** See what's likely to run out first and pace your weekly allowance. `limitcast status`
+
+- **Keep agents in check.** Hold new subagents when capacity is tight, with receipts and optional budgets. `limitcast install --guard`
+
+- **Start lighter.** Inspect unused skills and MCP servers, then trim with backups and undo. `limitcast trim`
 
 <a id="free-and-open-source"></a>
 
