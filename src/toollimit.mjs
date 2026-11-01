@@ -102,7 +102,9 @@ export function toolLimitDecision(toolName, input, stats) {
     const path = /** @type {any} */ (obj).path ?? /** @type {any} */ (obj).file_path;
     const glob = /** @type {any} */ (obj).glob;
     if ((typeof path === 'string' && path.trim()) || (typeof glob === 'string' && glob.trim())) return null;
-    return { deny: `limitcast: Grep results average ≈${k(stat.avg)} tokens a call over ${stat.calls} calls. Add a path or a glob, then retry. Set LIMITCAST_ALLOW=1 to run it as written.` };
+    return {
+      deny: `limitcast: Grep results average ≈${k(stat.avg)} tokens a call over ${stat.calls} calls. Add a path or a glob, then retry. Set LIMITCAST_ALLOW=1 to run it as written.`,
+    };
   }
   if (toolName !== 'Read' && key !== 'Read' && !toolName.startsWith('mcp__') && !key.startsWith('mcp:')) return null;
   const cap = toolName === 'Read' || key === 'Read' ? READ_CAP : MCP_CAP;
@@ -116,7 +118,10 @@ export function toolLimitDecision(toolName, input, stats) {
       reason: `limitcast: ${label} results average ≈${k(stat.avg)} tokens a call, so this limit was lowered to ${cap}. Set LIMITCAST_ALLOW=1 to keep ${big.value}.`,
     };
   }
-  const what = toolName === 'Read' || key === 'Read' ? `Pass offset and limit (${cap} lines or fewer)` : `Add a limit of ${cap} or fewer, and ask for fewer fields`;
+  const what =
+    toolName === 'Read' || key === 'Read'
+      ? `Pass offset and limit (${cap} lines or fewer)`
+      : `Add a limit of ${cap} or fewer, and ask for fewer fields`;
   return {
     deny: `limitcast: ${label} results average ≈${k(stat.avg)} tokens a call over ${stat.calls} calls. This call sets no limit. ${what}, then retry. Set LIMITCAST_ALLOW=1 to run it as written.`,
   };

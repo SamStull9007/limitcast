@@ -54,7 +54,12 @@ test('duplicate spawn: same session, type and prompt, and a stop clears the olde
 });
 
 test('fat tool calls: deny a missing limit, lower one that is too high, leave Bash and small tools alone', () => {
-  const stats = { 'mcp:claude_ai_HubSpot': { avg: 7700, calls: 12 }, Read: { avg: 6000, calls: 4 }, Grep: { avg: 8000, calls: 3 }, Bash: { avg: 9000, calls: 20 } };
+  const stats = {
+    'mcp:claude_ai_HubSpot': { avg: 7700, calls: 12 },
+    Read: { avg: 6000, calls: 4 },
+    Grep: { avg: 8000, calls: 3 },
+    Bash: { avg: 9000, calls: 20 },
+  };
   assert.equal(toolLimitDecision('mcp__claude_ai_HubSpot__search', { limit: 20 }, stats), null);
   const denied = toolLimitDecision('mcp__claude_ai_HubSpot__search', { properties: ['name'] }, stats);
   assert.match(denied.deny, /claude_ai_HubSpot results average ≈8k.*no limit/);
@@ -74,7 +79,16 @@ test('fat tool calls: deny a missing limit, lower one that is too high, leave Ba
 });
 
 test('jobs report names the startup piece that changed and ignores a stable one', () => {
-  const start = (startup, t) => ({ t, tokens: 20_000, size: 40_000, calls: 2, prompt: 'Prepare the nightly brief', project: '/p', entry: 'sdk-cli', startup });
+  const start = (startup, t) => ({
+    t,
+    tokens: 20_000,
+    size: 40_000,
+    calls: 2,
+    prompt: 'Prepare the nightly brief',
+    project: '/p',
+    entry: 'sdk-cli',
+    startup,
+  });
   const r = attribute([]);
   r.total = 100_000;
   r.startHeadless = 40_000;
@@ -130,21 +144,35 @@ test('readCalls keeps the startup breakdown that arrived before the first respon
 
 test('CLI: duplicate spawns are held, a short idle is announced, and a fat call with no limit is denied', () => {
   const state = tmp('lc-eff-cli-');
-  const env = { ...process.env, LIMITCAST_STATE: state, XDG_CONFIG_HOME: tmp('lc-eff-xdg-'), LIMITCAST_CACHE_NOTICE_MINUTES: '5', LIMITCAST_CACHE_MINUTES: '60' };
+  const env = {
+    ...process.env,
+    LIMITCAST_STATE: state,
+    XDG_CONFIG_HOME: tmp('lc-eff-xdg-'),
+    LIMITCAST_CACHE_NOTICE_MINUTES: '5',
+    LIMITCAST_CACHE_MINUTES: '60',
+  };
   delete env.LIMITCAST_LICENSE;
   delete env.LIMITCAST_ALLOW;
-  const spawn = (prompt) => JSON.stringify({ tool_name: 'Agent', session_id: 's1', tool_use_id: prompt, tool_input: { subagent_type: 'Explore', prompt } });
+  const spawn = (prompt) =>
+    JSON.stringify({ tool_name: 'Agent', session_id: 's1', tool_use_id: prompt, tool_input: { subagent_type: 'Explore', prompt } });
   const run = (cmd, input) => execFileSync('node', [bin, cmd], { env, input });
   assert.equal(run('guard', spawn('find the parser')).toString(), '');
   assert.equal(run('guard', spawn('find the tests')).toString(), '');
   const denied = JSON.parse(run('guard', spawn('find the parser')).toString());
   assert.equal(denied.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(denied.hookSpecificOutput.permissionDecisionReason, /Explore subagent with this same prompt is already running/);
-  run('subagent-receipt', JSON.stringify({ session_id: 's1', agent_type: 'Explore', agent_transcript_path: join(tmp('lc-eff-missing-'), 'nope.jsonl') }));
+  run(
+    'subagent-receipt',
+    JSON.stringify({ session_id: 's1', agent_type: 'Explore', agent_transcript_path: join(tmp('lc-eff-missing-'), 'nope.jsonl') }),
+  );
   assert.equal(run('guard', spawn('find the parser')).toString(), '');
 
   const tr = join(tmp('lc-eff-tr-'), 's.jsonl');
-  const usage = (ago) => JSON.stringify({ timestamp: new Date(Date.now() - ago).toISOString(), message: { usage: { input_tokens: 10, cache_read_input_tokens: 250_000 } } });
+  const usage = (ago) =>
+    JSON.stringify({
+      timestamp: new Date(Date.now() - ago).toISOString(),
+      message: { usage: { input_tokens: 10, cache_read_input_tokens: 250_000 } },
+    });
   writeFileSync(tr, `${usage(10 * M)}\n`);
   const prompt = JSON.stringify({ session_id: 'cold', transcript_path: tr, prompt: 'continue' });
   const announced = JSON.parse(run('prompt-check', prompt).toString());
@@ -159,7 +187,9 @@ test('CLI: duplicate spawns are held, a short idle is announced, and a fat call 
   const open = JSON.parse(run('tool-limit', JSON.stringify({ tool_name: 'mcp__claude_ai_HubSpot__search', tool_input: { q: 'acme' } })).toString());
   assert.equal(open.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(open.hookSpecificOutput.permissionDecisionReason, /no limit/);
-  const capped = JSON.parse(run('tool-limit', JSON.stringify({ tool_name: 'mcp__claude_ai_HubSpot__search', tool_input: { limit: 1000 } })).toString());
+  const capped = JSON.parse(
+    run('tool-limit', JSON.stringify({ tool_name: 'mcp__claude_ai_HubSpot__search', tool_input: { limit: 1000 } })).toString(),
+  );
   assert.equal(capped.hookSpecificOutput.updatedInput.limit, 100);
   assert.equal(run('tool-limit', JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'ls' } })).toString(), '');
   assert.match(readFileSync(join(state, 'guard.jsonl'), 'utf8'), /"kind":"duplicate"/);

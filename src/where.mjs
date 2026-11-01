@@ -368,7 +368,10 @@ function driftSection(ranked) {
   for (const [name, job] of ranked) {
     const marked = job.starts.filter((s) => s.startup?.length);
     if (marked.length < 2) continue;
-    const diff = pieceDiff(/** @type {import('./startup.mjs').Piece[]} */ (marked[0].startup), /** @type {import('./startup.mjs').Piece[]} */ (marked[marked.length - 1].startup));
+    const diff = pieceDiff(
+      /** @type {import('./startup.mjs').Piece[]} */ (marked[0].startup),
+      /** @type {import('./startup.mjs').Piece[]} */ (marked[marked.length - 1].startup),
+    );
     for (const d of diff.slice(0, 5)) {
       rows.push(`| ${name.replace(/\|/g, '/').slice(0, 45)} | ${d.group}: ${d.name} | ${fmt(tok(d.from))} | ${fmt(tok(d.to))} |`);
     }

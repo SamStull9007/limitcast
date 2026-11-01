@@ -71,7 +71,7 @@ const pct = (/** @type {number} */ x) => `${x < 1 ? x.toFixed(2) : x.toFixed(1)}
  * @param {number} lastT the latest model call's time
  */
 export function firstWarning(sid, lastT) {
-  return claim(sid, lastT, sid);
+  return claim(lastT, sid);
 }
 
 /**
@@ -80,15 +80,14 @@ export function firstWarning(sid, lastT) {
  * @param {number} lastT
  */
 export function firstNotice(sid, lastT) {
-  return claim(sid, lastT, `n:${sid}`);
+  return claim(lastT, `n:${sid}`);
 }
 
 /**
- * @param {string} sid
  * @param {number} lastT
- * @param {string} key
+ * @param {string} key session id, or `n:` plus the session id for the idle notice
  */
-function claim(sid, lastT, key) {
+function claim(lastT, key) {
   /** @type {Record<string, number>} */
   let seen = {};
   try {

@@ -327,11 +327,14 @@ export function resultsReport({ now, days, samples, blocks, pro, saved, value = 
           (st.coldPct ? `, each re-sending the whole context (≈${pctText(st.coldPct)} of a 5-hour window in all).` : '.'),
       );
     if (st.coldNotices)
-      out.push(`Noted ${st.coldNotices} message${st.coldNotices === 1 ? '' : 's'} sent after a shorter idle, while the cheap prompt cache may already have expired.`);
+      out.push(
+        `Noted ${st.coldNotices} message${st.coldNotices === 1 ? '' : 's'} sent after a shorter idle, while the cheap prompt cache may already have expired.`,
+      );
   }
   if (st.toolLimits || st.toolCaps) {
     out.push('', '## Fat tool calls');
-    if (st.toolLimits) out.push(`Held ${st.toolLimits} call${st.toolLimits === 1 ? '' : 's'} that set no limit on a tool whose recent results were large.`);
+    if (st.toolLimits)
+      out.push(`Held ${st.toolLimits} call${st.toolLimits === 1 ? '' : 's'} that set no limit on a tool whose recent results were large.`);
     if (st.toolCaps) out.push(`Lowered the limit on ${st.toolCaps} call${st.toolCaps === 1 ? '' : 's'} whose recent results were large.`);
   }
 

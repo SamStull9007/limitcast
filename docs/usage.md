@@ -75,7 +75,7 @@ In Claude Code you can also add the plugin, for `/limitcast:status`, `/limitcast
 
 ### Sharing summaries
 
-The next release fixes `trim --share` fallback and provider summaries to omit configuration names and paths, and rejects combining sharing with keep-list edits, `--apply`, or `--undo`. This fix is currently on `main`, not in npm 0.17.3. For voluntary public check-ins on 0.17.3, use `results --share` and review the output before posting.
+`trim --share` and the provider summaries omit configuration names and paths. Sharing cannot be combined with keep-list edits, `--apply`, or `--undo`. Review the output before posting.
 
 ### Subagent guard
 

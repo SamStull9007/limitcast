@@ -34,7 +34,7 @@
 
 - **Forecast your windows.** See what's likely to run out first and pace your weekly allowance. `limitcast status`
 
-- **Keep agents in check.** Hold new subagents when capacity is tight, with receipts and optional budgets. `limitcast install --guard`
+- **Keep agents in check.** Hold new subagents when capacity is tight, with receipts and optional budgets. The guard also holds a second subagent of the same type and prompt while the first is still running. `limitcast install --guard`
 
 - **Start lighter.** Inspect unused skills and MCP servers, then trim with backups and undo. `limitcast trim`
 

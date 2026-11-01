@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.18.0 — 2026-11-01
+
 - New: the guard holds a second subagent of the same type and prompt while the first is still running in that session. Claude's stop hook clears it; a record older than 30 minutes is dropped so a missed stop cannot hold the prompt all day. `LIMITCAST_ALLOW=1` still spawns.
 - New: `install --alerts` adds a PreToolUse check. After `report --why` or `report --jobs`, a tool whose results averaged at least 5k tokens over 3 or more calls is held when the call sets no limit (Read, Grep, and MCP tools), or its limit is lowered when it is above the cap (400 lines for Read, 100 for MCP). Bash and WebFetch are left alone. Re-run `install --alerts` to add the hook.
 - New: `report --jobs` names the startup piece that changed between the earliest and latest run of a job, when both runs recorded one.

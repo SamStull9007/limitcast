@@ -24,7 +24,9 @@ export function spawnIdentity(hook) {
   if (!src) return null;
   const input = hook?.tool_input ?? hook?.toolInput ?? {};
   const type = String(input?.subagent_type ?? input?.subagentType ?? input?.agent_type ?? '').trim();
-  const prompt = String(input?.prompt ?? input?.description ?? input?.task ?? '').replace(/\s+/g, ' ').trim();
+  const prompt = String(input?.prompt ?? input?.description ?? input?.task ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
   const sid = String(hook?.session_id ?? hook?.sessionId ?? '').trim();
   if (!type || !prompt || !sid) return null;
   const hash = createHash('sha256').update(`${type.toLowerCase()}\0${prompt}`).digest('hex').slice(0, 16);

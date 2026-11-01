@@ -47,9 +47,18 @@ import {
   undoGrokTrim,
 } from '../src/grok.mjs';
 import { runGuard } from '../src/guard.mjs';
-import { duplicateReason, findDuplicate, forgetInflight, loadInflight, pruneInflight, rememberInflight, saveInflight, spawnIdentity } from '../src/inflight.mjs';
 import { accountForecasts, bindingLine, compactHint, headroom, lastCall, lastCallTokens } from '../src/hints.mjs';
 import { htmlPage } from '../src/html.mjs';
+import {
+  duplicateReason,
+  findDuplicate,
+  forgetInflight,
+  loadInflight,
+  pruneInflight,
+  rememberInflight,
+  saveInflight,
+  spawnIdentity,
+} from '../src/inflight.mjs';
 import { insightsReport, insightsShare, periodInsights } from '../src/insights.mjs';
 import { doctor, install, installedFeatures, readSettings, settingsPath, uninstall } from '../src/install.mjs';
 import { memoryCheck, memoryDir, memoryReport, scanMemory } from '../src/memory.mjs';
@@ -277,7 +286,11 @@ if (cmd === 'status') {
         sid: id.sid,
         ...(typeof hook?.tool_use_id === 'string' ? { operation: hook.tool_use_id } : {}),
       });
-      console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: duplicateReason(id) } }));
+      console.log(
+        JSON.stringify({
+          hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: duplicateReason(id) },
+        }),
+      );
     } else {
       const d = await runGuard(hook, now, Number(process.env.LIMITCAST_GUARD_MINUTES ?? 30), { preview: false });
       if (typeof d === 'string') {
@@ -370,7 +383,9 @@ if (cmd === 'status') {
         sid: hook.session_id,
         ...(typeof hook?.tool_use_id === 'string' ? { operation: hook.tool_use_id } : {}),
       });
-      console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: d.deny } }));
+      console.log(
+        JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: d.deny } }),
+      );
     } else if (d) {
       logBlock({
         t: now,
