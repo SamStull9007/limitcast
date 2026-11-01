@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- New: the guard holds a second subagent of the same type and prompt while the first is still running in that session. Claude's stop hook clears it; a record older than 30 minutes is dropped so a missed stop cannot hold the prompt all day. `LIMITCAST_ALLOW=1` still spawns.
+- New: `install --alerts` adds a PreToolUse check. After `report --why` or `report --jobs`, a tool whose results averaged at least 5k tokens over 3 or more calls is held when the call sets no limit (Read, Grep, and MCP tools), or its limit is lowered when it is above the cap (400 lines for Read, 100 for MCP). Bash and WebFetch are left alone. Re-run `install --alerts` to add the hook.
+- New: `report --jobs` names the startup piece that changed between the earliest and latest run of a job, when both runs recorded one.
+- New: after 5 idle minutes (`LIMITCAST_CACHE_NOTICE_MINUTES`) a large session's next message is announced and still sent. The hold stays at 60 minutes (`LIMITCAST_CACHE_MINUTES`).
 - Fix: `trim --share` keeps configuration names and paths private when no measured startup transcript is available, and honors totals-only output for Codex and Grok. Sharing cannot be combined with keep-list edits, apply, or undo.
 - Community: release-email instructions, Discussions, tester guidance, contribution and issue/PR templates, and a weekly maintainer draft reminder.
 

@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fmt } from './report.mjs';
+import { attachmentPieces, pieceDiff } from './startup.mjs';
 import { stateDir } from './store.mjs';
 import { BIG_RESULT, tipFor, toolKey } from './toolcheck.mjs';
 import { jsonlFiles } from './usage.mjs';
@@ -13,8 +14,8 @@ import { jsonlFiles } from './usage.mjs';
 // call i-1: its own output (written to the cache) plus the tool results it asked for plus your messages. So the input
 // of call i, less call i-1's output, is attributed to the tools call i-1 used. Claude Code transcripts only.
 
-/** @typedef {{t:number, input:number, cacheWrite:number, cacheRead:number, output:number, tools:string[], side:boolean, entry:string, project:string, model?:string, prompt?:string, agentType?:string}} Call
- *  prompt: first words of the session's first message, on its first main-thread call; agentType: a subagent transcript's type, on its first call */
+/** @typedef {{t:number, input:number, cacheWrite:number, cacheRead:number, output:number, tools:string[], side:boolean, entry:string, project:string, model?:string, prompt?:string, agentType?:string, startup?:import('./startup.mjs').Piece[]}} Call
+ *  prompt: first words of the session's first message, on its first main-thread call; agentType: a subagent transcript's type, on its first call; startup: context loaded before the first response */
 
 const COLD_MIN = 100_000; // prompt size from which a missed cache is called a rebuild after idle
 const NO_TOOL = '(your messages)';
@@ -48,7 +49,18 @@ export async function readCalls(file) {
   const calls = new Map();
   /** @type {string|undefined} */
   let prompt;
+  /** @type {import('./startup.mjs').Piece[]} */
+  const startup = [];
+  let startupOpen = true;
   for await (const line of createInterface({ input: createReadStream(file), crlfDelay: Infinity })) {
+    if (startupOpen && line.includes('"type":"attachment"')) {
+      try {
+        const ev = JSON.parse(line);
+        if (ev?.type === 'attachment') startup.push(...attachmentPieces(ev.attachment));
+      } catch {
+        /* a torn line: the call list is what matters */
+      }
+    }
     if (prompt === undefined && line.includes('"type":"user"')) prompt = firstPrompt(line);
     if (!line.includes('"usage"')) continue;
     let ev;
@@ -61,6 +73,7 @@ export async function readCalls(file) {
     const u = m?.usage;
     const t = Date.parse(ev?.timestamp);
     if (ev?.type !== 'assistant' || !u || !Number.isFinite(t)) continue;
+    startupOpen = false;
     const id = `${m.id ?? ''}:${ev.requestId ?? ''}`;
     let c = calls.get(id);
     if (!c || id === ':') {
@@ -85,6 +98,7 @@ export async function readCalls(file) {
   const all = [...calls.values()];
   const first = all.find((c) => !c.side);
   if (first && prompt) first.prompt = prompt;
+  if (first && startup.length) first.startup = startup;
   // A subagent's transcript has its type in a file next to it: agent-<id>.jsonl and agent-<id>.meta.json.
   if (all.length && file.includes('/subagents/')) {
     try {
@@ -117,7 +131,7 @@ export function attribute(sessions, since = 0) {
     tools: new Map(),
     /** @type {{tokens:number, tool:string, t:number, project:string}[]} */
     steps: [],
-    /** @type {{t:number, tokens:number, size:number, calls:number, prompt:string, project:string, entry:string}[]} headless session starts: when, new tokens, and the whole starting prompt (cached or not) */
+    /** @type {{t:number, tokens:number, size:number, calls:number, prompt:string, project:string, entry:string, startup?:import('./startup.mjs').Piece[]}[]} headless session starts: when, new tokens, and the whole starting prompt (cached or not) */
     starts: [],
     /** @type {Map<string, number>} every new token, by model */
     byModel: new Map(),
@@ -165,6 +179,7 @@ export function attribute(sessions, since = 0) {
             prompt: c.prompt ?? '',
             project: c.project,
             entry: c.entry,
+            ...(c.startup?.length ? { startup: c.startup } : {}),
           });
         }
         return;
@@ -340,6 +355,37 @@ function coldSection(runs, jobs) {
   return lines;
 }
 
+const tok = (/** @type {number} */ chars) => Math.round(chars / 4);
+
+/**
+ * Which startup piece changed between the earliest and latest recorded run of a job.
+ * Only jobs with two startup breakdowns are named. A stable prefix is omitted.
+ * @param {[string, {starts:{startup?:import('./startup.mjs').Piece[]}[]} ][]} ranked
+ */
+function driftSection(ranked) {
+  /** @type {string[]} */
+  const rows = [];
+  for (const [name, job] of ranked) {
+    const marked = job.starts.filter((s) => s.startup?.length);
+    if (marked.length < 2) continue;
+    const diff = pieceDiff(/** @type {import('./startup.mjs').Piece[]} */ (marked[0].startup), /** @type {import('./startup.mjs').Piece[]} */ (marked[marked.length - 1].startup));
+    for (const d of diff.slice(0, 5)) {
+      rows.push(`| ${name.replace(/\|/g, '/').slice(0, 45)} | ${d.group}: ${d.name} | ${fmt(tok(d.from))} | ${fmt(tok(d.to))} |`);
+    }
+  }
+  if (!rows.length) return [];
+  return [
+    '',
+    '## What changed between runs',
+    '',
+    'The earliest and latest run of each job that recorded its startup. A piece that changes every run (a hook that prints a date or a count) keeps the prompt cache from being reused, so running the job again sooner does not warm it.',
+    '',
+    '| job | piece | earlier | later |',
+    '|---|---|---:|---:|',
+    ...rows,
+  ];
+}
+
 /**
  * Markdown: the scheduled (headless) jobs whose runs spent the most new tokens just starting. A run's start is what
  * it loads before reading its prompt: settings, plugins, hooks, MCP servers, skills and instruction files.
@@ -388,6 +434,7 @@ export function jobsReport(r, { since, now }) {
     );
   }
   lines.push(...coldSection(r.starts.length, [...jobs.values()]));
+  lines.push(...driftSection(ranked));
   const [leanJob, lean] = [...jobs].sort((a, b) => a[1].size / a[1].runs - b[1].size / b[1].runs)[0];
   lines.push(
     '',

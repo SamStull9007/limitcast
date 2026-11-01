@@ -115,6 +115,34 @@ export function skillPieces(content) {
     });
 }
 
+/**
+ * Pieces whose size changed between two runs of the same job. Char counts are summed per group and name.
+ * @param {Piece[]} earlier
+ * @param {Piece[]} later
+ */
+export function pieceDiff(earlier, later) {
+  const sum = (/** @type {Piece[]} */ list) => {
+    /** @type {Map<string, number>} */
+    const m = new Map();
+    for (const p of list ?? []) {
+      const k = `${p.group}|${p.name}`;
+      m.set(k, (m.get(k) ?? 0) + p.chars);
+    }
+    return m;
+  };
+  const a = sum(earlier);
+  const b = sum(later);
+  return [...new Set([...a.keys(), ...b.keys()])]
+    .map((k) => {
+      const split = k.indexOf('|');
+      const from = a.get(k) ?? 0;
+      const to = b.get(k) ?? 0;
+      return { group: k.slice(0, split), name: k.slice(split + 1), from, to, delta: to - from };
+    })
+    .filter((x) => x.delta !== 0)
+    .sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta));
+}
+
 /** @param {unknown} v */
 const text = (v) => (typeof v === 'string' ? v : v == null ? '' : JSON.stringify(v));
 

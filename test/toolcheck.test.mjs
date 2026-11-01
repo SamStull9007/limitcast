@@ -63,8 +63,14 @@ test('install --alerts adds the PostToolUse hook and uninstall removes it, leavi
   assert.deepEqual(list[0], mine);
   assert.equal(list[1].hooks[0].command, '/x/limitcast tool-check');
   assert.match(list[1].matcher, /mcp__/);
-  assert.ok(uninstall(opts).includes('removed the large tool-output notice'));
+  const pre = readSettings(path).hooks.PreToolUse;
+  assert.equal(pre.length, 1);
+  assert.equal(pre[0].hooks[0].command, '/x/limitcast tool-limit');
+  const removed = uninstall(opts);
+  assert.ok(removed.includes('removed the large tool-output notice'));
+  assert.ok(removed.includes('removed the fat-tool limit check'));
   assert.deepEqual(readSettings(path).hooks.PostToolUse, [mine]);
+  assert.deepEqual(readSettings(path).hooks.PreToolUse, []);
 });
 
 test('report --why: what to try names the big steps and the sources with a tip', () => {

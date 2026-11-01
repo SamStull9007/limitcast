@@ -112,6 +112,13 @@ export function install({ guard, alerts = false, path = settingsPath(), codexPat
       isToolCheck,
     );
     changes.push('added the large tool-output notice');
+    upsertHook(
+      cfg,
+      'PreToolUse',
+      { matcher: 'Bash|Read|Grep|WebFetch|mcp__.*', hooks: [{ type: 'command', command: `${self} tool-limit`, timeout: 10 }] },
+      isToolLimit,
+    );
+    changes.push('added the fat-tool limit check');
   }
   writeSettings(path, cfg);
   if (guard && existsSync(join(codexPath, '..'))) {
@@ -174,6 +181,7 @@ export function uninstall({ path = settingsPath(), codexPath = codexHooksPath(),
     ['UserPromptSubmit', isPromptCheck, 'the cold-cache warning'],
     ['SubagentStop', isReceipt, 'subagent receipts'],
     ['PostToolUse', isToolCheck, 'the large tool-output notice'],
+    ['PreToolUse', isToolLimit, 'the fat-tool limit check'],
   ])) {
     const n = cfg.hooks?.[event]?.length ?? 0;
     if (!n) continue;
@@ -231,6 +239,7 @@ const isAlert = runs(/\bdrift --hook\b/);
 const isPromptCheck = runs(/\bprompt-check\b/);
 const isReceipt = runs(/\bsubagent-receipt\b/);
 const isToolCheck = runs(/\btool-check\b/);
+const isToolLimit = runs(/\btool-limit\b/);
 
 /** @param {string} path */
 export function readSettings(path) {

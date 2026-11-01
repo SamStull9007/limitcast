@@ -146,8 +146,12 @@ export function resultsStats({ now, days, samples, blocks, pro }) {
   const switches = mine.filter((b) => b.kind === 'switch').length;
   const defaults = mine.filter((b) => b.kind === 'default').length;
   const colds = mine.filter((b) => b.kind === 'cold');
+  const coldNotices = mine.filter((b) => b.kind === 'cold-notice').length;
   const budgets = mine.filter((b) => b.kind === 'budget').length;
   const todays = mine.filter((b) => b.kind === 'today').length;
+  const duplicates = mine.filter((b) => b.kind === 'duplicate').length;
+  const toolLimits = mine.filter((b) => b.kind === 'tool-limit').length;
+  const toolCaps = mine.filter((b) => b.kind === 'tool-cap').length;
   return {
     readings,
     hits,
@@ -160,6 +164,10 @@ export function resultsStats({ now, days, samples, blocks, pro }) {
     coldPct: colds.reduce((a, b) => a + b.pct, 0),
     budgets,
     todays,
+    coldNotices,
+    duplicates,
+    toolLimits,
+    toolCaps,
   };
 }
 
@@ -295,13 +303,15 @@ export function resultsReport({ now, days, samples, blocks, pro, saved, value = 
       `${pro ? 'Ran' : 'Pro would have run'} ${st.defaults} subagent${st.defaults === 1 ? '' : 's'} on the model you set for their type (limitcast subagent-model).`,
     );
   if (st.budgets) out.push(`Held ${st.budgets} subagent${st.budgets === 1 ? '' : 's'} once subagents had used their budget of the 5-hour window.`);
+  if (st.duplicates)
+    out.push(`Held ${st.duplicates} duplicate subagent${st.duplicates === 1 ? '' : 's'} that repeated a prompt already running in that session.`);
   if (st.todays)
     out.push(
       `${pro ? 'Held' : 'Pro could have held'} ${st.todays} subagent${st.todays === 1 ? '' : 's'} once today's share of a weekly window was used up (limitcast budget today on).`,
     );
 
   const recent = subagents.filter((e) => e.t >= now - days * 86400_000);
-  if (recent.length || st.colds) {
+  if (recent.length || st.colds || st.coldNotices) {
     out.push('', '## Subagents and cold caches');
     const priced = recent.filter((e) => e.pct !== undefined).map((e) => /** @type {number} */ (e.pct));
     if (recent.length)
@@ -316,6 +326,13 @@ export function resultsReport({ now, days, samples, blocks, pro, saved, value = 
         `${pro ? 'Held' : 'Pro would have held'} ${st.colds} message${st.colds === 1 ? '' : 's'} sent after the prompt cache had expired` +
           (st.coldPct ? `, each re-sending the whole context (≈${pctText(st.coldPct)} of a 5-hour window in all).` : '.'),
       );
+    if (st.coldNotices)
+      out.push(`Noted ${st.coldNotices} message${st.coldNotices === 1 ? '' : 's'} sent after a shorter idle, while the cheap prompt cache may already have expired.`);
+  }
+  if (st.toolLimits || st.toolCaps) {
+    out.push('', '## Fat tool calls');
+    if (st.toolLimits) out.push(`Held ${st.toolLimits} call${st.toolLimits === 1 ? '' : 's'} that set no limit on a tool whose recent results were large.`);
+    if (st.toolCaps) out.push(`Lowered the limit on ${st.toolCaps} call${st.toolCaps === 1 ? '' : 's'} whose recent results were large.`);
   }
 
   out.push('', '## Starting context');

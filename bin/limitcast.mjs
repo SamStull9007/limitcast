@@ -21,7 +21,7 @@ import {
 } from '../src/apply.mjs';
 import { calibrate, limitChange, limitChangeMessage, windowPct } from '../src/calibrate.mjs';
 import { applyCodexTrim, codexConfigPath, codexServers, codexStartup, codexTrimReport, codexUsedServers, undoCodexTrim } from '../src/codex.mjs';
-import { coldCost, coldMessage, firstWarning } from '../src/cold.mjs';
+import { coldCost, coldMessage, coldNotice, firstNotice, firstWarning } from '../src/cold.mjs';
 import { forecastAll, oneClaudeAccount, resetTarget } from '../src/forecast.mjs';
 import { formatChecks } from '../src/formats.mjs';
 import {
@@ -47,6 +47,7 @@ import {
   undoGrokTrim,
 } from '../src/grok.mjs';
 import { runGuard } from '../src/guard.mjs';
+import { duplicateReason, findDuplicate, forgetInflight, loadInflight, pruneInflight, rememberInflight, saveInflight, spawnIdentity } from '../src/inflight.mjs';
 import { accountForecasts, bindingLine, compactHint, headroom, lastCall, lastCallTokens } from '../src/hints.mjs';
 import { htmlPage } from '../src/html.mjs';
 import { insightsReport, insightsShare, periodInsights } from '../src/insights.mjs';
@@ -79,6 +80,7 @@ import {
 } from '../src/subagents.mjs';
 import { forTerminal } from '../src/term.mjs';
 import { firstFlag, toolKey, toolNotice } from '../src/toolcheck.mjs';
+import { loadToolStats, saveToolStats, toolLimitDecision, toolStats } from '../src/toollimit.mjs';
 import { baseline, contributors, measuredSavings, shareSummary, startupReport, trimReport } from '../src/trim.mjs';
 import { claudeRoot, grokRoot, readUsage } from '../src/usage.mjs';
 import { dailyDue, foldEvents, loadValue, saveValue, scanSessions, valuePeriod, valueSection, valueTotals } from '../src/value.mjs';
@@ -112,8 +114,10 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
   limitcast install --guard                  block new subagents when a window is on pace to run out, and run
                                              them on Sonnet while a window is tight (NEAR or AT_RISK); show what
                                              each finished subagent cost, and what that kind has cost before a new
-                                             one starts; hold the first message after the prompt
-                                             cache expired (idle over 60 min, LIMITCAST_CACHE_MINUTES) and say what it costs
+                                             one starts; hold a second spawn of the same type and prompt
+                                             while the first is still running; announce a message after the
+                                             cheap cache expires (idle over 5 min, LIMITCAST_CACHE_NOTICE_MINUTES)
+                                             and hold the first one after 60 min (LIMITCAST_CACHE_MINUTES)
   limitcast budget subagents <percent>|off   hold new subagents once they used that much of the 5-hour window
   limitcast subagent-model <type> <model>|off  run new subagents of that type on sonnet, opus, haiku, grok-… or a model id
   limitcast plan [--days N]                  does your Claude plan fit your use? Hit-limit and headroom evidence, and the monthly price difference
@@ -122,8 +126,9 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
                                              needs this cap to block spawn_subagent). Optional: budget grok 7d <usd>
   limitcast budget today on|off              hold new subagents once today's share of a weekly window is used up, until
                                              midnight (off: you only get a notification at 80% of the share; notify on)
-  limitcast install --alerts                 tell you when your starting context grows, plus a weekly summary, and
-                                             when one tool result is very large (about 20k tokens), with what to ask for instead
+  limitcast install --alerts                 tell you when your starting context grows, plus a weekly summary,
+                                             when one tool result is very large (about 20k tokens), and, before it
+                                             runs, when a tool report --why has shown to be fat sets no limit
   limitcast notify on|off|test               desktop notification when a window turns NEAR, AT_RISK or HIT, or resets,
                                              and when your Claude limit itself changes
   limitcast notify ntfy <topic|url>|off      also send them to your phone (ntfy.sh)
@@ -133,13 +138,15 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
   limitcast results --html [--out FILE]      results, current windows and the burn report as one page
   limitcast report [--days N] [--out FILE]   tokens by tool, day, project, model and session
   limitcast report --why [--days N]          where the new tokens went: subagents, session starts, cache rebuilds, tool results
-  limitcast report --jobs [--days N]         the scheduled (headless) jobs that spend the most tokens just starting
+  limitcast report --jobs [--days N]         the scheduled (headless) jobs that spend the most tokens just starting,
+                                             and which startup piece changed between two runs of the same job
   (status line: points to another account with room, and suggests /compact past ~150k tokens a call)
 
   Used by Claude Code, Codex and Grok (set up by install)
   limitcast statusline [-- <cmd...>]  record limit readings, then run your status-line command
   limitcast guard                     PreToolUse hook
-  limitcast prompt-check              UserPromptSubmit hook: the cold-cache warning
+  limitcast prompt-check              UserPromptSubmit hook: the cold-cache notice and hold
+  limitcast tool-limit                PreToolUse hook: a fat tool call that sets no limit
   limitcast subagent-receipt          SubagentStop hook: what the subagent cost
   limitcast drift [--hook]            SessionStart hook: compare starting context with the last session
 `;
@@ -252,24 +259,49 @@ if (cmd === 'status') {
   // The installed guard protects all users; LIMITCAST_ALLOW=1 remains the explicit override.
   if (process.env.LIMITCAST_ALLOW === '1') process.exit(0);
   try {
-    const d = await runGuard(JSON.parse(readStdin()), now, Number(process.env.LIMITCAST_GUARD_MINUTES ?? 30), { preview: false });
-    if (typeof d === 'string') {
-      console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: d } }));
-    } else if (d && 'notice' in d) {
-      // Allowed as is, with what this kind of subagent has cost so far (shown to the user, never the model).
-      console.log(JSON.stringify({ systemMessage: d.notice }));
-    } else if (d) {
-      // Model switch: allow the spawn with the same input and model "sonnet" (updatedInput replaces the whole input).
-      console.log(
-        JSON.stringify({
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'allow',
-            permissionDecisionReason: d.reason,
-            updatedInput: d.updatedInput,
-          },
-        }),
-      );
+    const hook = JSON.parse(readStdin());
+    const id = spawnIdentity(hook);
+    const live = pruneInflight(loadInflight(), now);
+    const dup = id ? findDuplicate(live, id) : null;
+    if (id && dup) {
+      saveInflight(live);
+      logBlock({
+        t: now,
+        kind: 'duplicate',
+        src: id.src,
+        win: '5h',
+        pct: 0,
+        wall: now,
+        reset: now,
+        type: id.type,
+        sid: id.sid,
+        ...(typeof hook?.tool_use_id === 'string' ? { operation: hook.tool_use_id } : {}),
+      });
+      console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: duplicateReason(id) } }));
+    } else {
+      const d = await runGuard(hook, now, Number(process.env.LIMITCAST_GUARD_MINUTES ?? 30), { preview: false });
+      if (typeof d === 'string') {
+        saveInflight(live);
+        console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: d } }));
+      } else {
+        if (id) saveInflight(rememberInflight(live, id, now));
+        if (d && 'notice' in d) {
+          // Allowed as is, with what this kind of subagent has cost so far (shown to the user, never the model).
+          console.log(JSON.stringify({ systemMessage: d.notice }));
+        } else if (d) {
+          // Model switch: allow the spawn with the same input and model "sonnet" (updatedInput replaces the whole input).
+          console.log(
+            JSON.stringify({
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'allow',
+                permissionDecisionReason: d.reason,
+                updatedInput: d.updatedInput,
+              },
+            }),
+          );
+        }
+      }
     }
   } catch (e) {
     // Fail open: a broken governor must not stop the agent.
@@ -282,9 +314,13 @@ if (cmd === 'status') {
     const hook = JSON.parse(readStdin());
     const path = hook?.transcript_path;
     const last = process.env.LIMITCAST_ALLOW !== '1' && typeof path === 'string' && existsSync(path) ? lastCall(path) : null;
-    const c = coldCost(hook?.prompt, last, now, { minutes: Number(process.env.LIMITCAST_CACHE_MINUTES ?? 60), calib: loadValue().calib });
-    if (c && last && firstWarning(String(hook.session_id), last.t)) {
-      const pro = true;
+    const c = coldCost(hook?.prompt, last, now, {
+      minutes: Number(process.env.LIMITCAST_CACHE_MINUTES ?? 60),
+      noticeMinutes: Number(process.env.LIMITCAST_CACHE_NOTICE_MINUTES ?? 5),
+      calib: loadValue().calib,
+    });
+    const sid = String(hook.session_id ?? '');
+    if (c && last && c.hold && firstWarning(sid, last.t)) {
       logBlock({
         t: now,
         kind: 'cold',
@@ -295,12 +331,71 @@ if (cmd === 'status') {
         reset: now,
         tokens: c.tokens,
         sid: hook.session_id,
-        ...(pro ? {} : { shadow: true }),
       });
-      if (pro) console.log(JSON.stringify({ decision: 'block', reason: coldMessage(c) }));
+      console.log(JSON.stringify({ decision: 'block', reason: coldMessage(c) }));
+    } else if (c && last && !c.hold && firstNotice(sid, last.t)) {
+      logBlock({
+        t: now,
+        kind: 'cold-notice',
+        src: 'claude',
+        win: '5h',
+        pct: c.pct ?? 0,
+        wall: now,
+        reset: now,
+        tokens: c.tokens,
+        sid: hook.session_id,
+      });
+      console.log(JSON.stringify({ systemMessage: coldNotice(c) }));
     }
   } catch {
     /* a hook must never stop a prompt by failing */
+  }
+} else if (cmd === 'tool-limit') {
+  // PreToolUse hook (installed with --alerts). A fat tool with no limit is denied so the model can retry smaller.
+  // A limit that is only too large is lowered. Fail open, and LIMITCAST_ALLOW=1 skips it.
+  if (process.env.LIMITCAST_ALLOW === '1') process.exit(0);
+  try {
+    const hook = JSON.parse(readStdin());
+    const name = String(hook?.tool_name ?? hook?.toolName ?? '');
+    const d = name ? toolLimitDecision(name, hook?.tool_input ?? hook?.toolInput, loadToolStats()) : null;
+    if (d && 'deny' in d) {
+      logBlock({
+        t: now,
+        kind: 'tool-limit',
+        src: 'claude',
+        win: '5h',
+        pct: 0,
+        wall: now,
+        reset: now,
+        sid: hook.session_id,
+        ...(typeof hook?.tool_use_id === 'string' ? { operation: hook.tool_use_id } : {}),
+      });
+      console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: d.deny } }));
+    } else if (d) {
+      logBlock({
+        t: now,
+        kind: 'tool-cap',
+        src: 'claude',
+        win: '5h',
+        pct: 0,
+        wall: now,
+        reset: now,
+        sid: hook.session_id,
+        ...(typeof hook?.tool_use_id === 'string' ? { operation: hook.tool_use_id } : {}),
+      });
+      console.log(
+        JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'allow',
+            permissionDecisionReason: d.reason,
+            updatedInput: d.updatedInput,
+          },
+        }),
+      );
+    }
+  } catch {
+    /* a hook must never break the session */
   }
 } else if (cmd === 'tool-check') {
   // PostToolUse hook (installed with --alerts): tell the user, once per tool per session, about a very large tool
@@ -320,6 +415,7 @@ if (cmd === 'status') {
   // Pro shows the receipt to the user (systemMessage, never the model). Internal agents (empty type) are skipped.
   try {
     const hook = JSON.parse(readStdin());
+    saveInflight(forgetInflight(loadInflight(), String(hook?.session_id ?? ''), String(hook?.agent_type ?? ''), now));
     const path = hook?.agent_transcript_path;
     if (hook?.agent_type && typeof path === 'string') {
       const u = subagentUsage(path);
@@ -675,6 +771,7 @@ if (cmd === 'status') {
   let text;
   if (why || jobs) {
     const r = attribute(await whySessions(claudeRoot(), since), since);
+    saveToolStats(toolStats(r.tools));
     text = jobs ? jobsReport(r, { since, now }) : whyReport(r, { since, now, calib: loadValue().calib });
   } else if (cmd === 'report') text = burnReport(usage, { since, now });
   else {
