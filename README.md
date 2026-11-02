@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <strong>See the limit. Stay ahead.</strong><br>
+  <strong>Claude Code usage limits: forecast Codex and Grok too.</strong><br>
   See when your usage window will run out, control subagent burn,<br>
   and remove starting context you never use.
 </p>
