@@ -36,7 +36,7 @@
 
 - **Keep agents in check.** Hold new subagents when capacity is tight, with receipts and optional budgets. The guard also holds a second subagent of the same type and prompt while the first is still running. `limitcast install --guard`
 
-- **Start lighter.** Inspect unused skills and MCP servers, then trim with backups and undo. `limitcast trim`
+- **Start lighter.** Inspect unused skills and MCP servers, then trim with backups and undo. Apply turns off only MCP servers quiet for 30 days. `limitcast trim`
 
 <a id="free-and-open-source"></a>
 

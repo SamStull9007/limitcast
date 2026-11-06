@@ -1,6 +1,6 @@
 {
   "name": "limitcast",
-  "version": "0.18.0",
+  "version": "0.18.1",
   "description": "Usage-limit status, results and trim for Claude Code",
   "author": {
     "name": "Sam Stull",

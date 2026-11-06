@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.18.1 — 2026-11-05
 
 - `results` leads with the net change in the controllable starting context, then says how many sessions started below the first snapshot. The estimated tokens-not-re-sent figure stays, after that line.
 - `trim --apply` turns off only MCP servers that have been quiet for 30 days. Servers unused in the report window but used within 30 days are listed and left on. `install`, `doctor --fix`, and a trim report (not `trim keep`, `--undo`, or `--share`) seed `ego-browser` on the keep-list when it has never been set. An empty keep-list refuses `--apply` unless you pass `--yes`.
