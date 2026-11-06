@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { runGuard } from '../src/guard.mjs';
+import { codexGuardSince, runGuard } from '../src/guard.mjs';
 import { transitions } from '../src/notify.mjs';
 import { loadBlocks, resultsStats } from '../src/results.mjs';
 import { setTodayHold } from '../src/subagents.mjs';
@@ -74,4 +74,40 @@ test('daily share notifies once a day at 80% of it, and not before', () => {
   assert.deepEqual(r.messages, ["Claude 7d: 87% of today's share used, 2% left today."]);
   assert.deepEqual(transitions([row(14)], r.next, clock, now + H).messages, []); // once today
   assert.equal(transitions([row(13)], r.next, clock, now + 24 * H).messages.length, 1); // again tomorrow
+});
+
+test('codex guard lookback reaches the minute before local midnight, and stays two hours just after it', () => {
+  assert.equal(codexGuardSince(now), midnight - 60_000);
+  const justAfter = new Date(2026, 9, 27, 0, 30).getTime();
+  assert.equal(codexGuardSince(justAfter), justAfter - 2 * H);
+});
+
+test('daily hold: Codex sees a reading from the minute before midnight', async () => {
+  const state = tmp('lc-today-codex-state-');
+  const codexHome = tmp('lc-today-codex-');
+  const day = join(codexHome, 'sessions', '2026', '10', '27');
+  mkdirSync(day, { recursive: true });
+  // 30s before midnight is inside the lookback. Two hours before midnight is not, and the share would read as unused.
+  const ev = (t, pct) =>
+    JSON.stringify({
+      timestamp: new Date(t).toISOString(),
+      type: 'event_msg',
+      payload: { type: 'token_count', rate_limits: { primary: { used_percent: pct, window_minutes: 10080, resets_at: reset }, secondary: null } },
+    });
+  const file = join(day, 'rollout-week.jsonl');
+  writeFileSync(file, [ev(midnight - 30_000, 40), ev(now, 60)].join('\n'));
+  utimesSync(file, new Date(now), new Date(now));
+  const prevState = process.env.LIMITCAST_STATE;
+  const prevCodex = process.env.CODEX_HOME;
+  process.env.LIMITCAST_STATE = state;
+  process.env.CODEX_HOME = codexHome;
+  try {
+    mkdirSync(state, { recursive: true });
+    setTodayHold(true);
+    const held = await runGuard({ tool_name: 'collaborationspawn_agent', session_id: 'c1' }, now, 30);
+    assert.match(held, /today's share of your Codex 7d limit is used up \(20% of 15%\)/);
+  } finally {
+    process.env.LIMITCAST_STATE = prevState;
+    process.env.CODEX_HOME = prevCodex;
+  }
 });

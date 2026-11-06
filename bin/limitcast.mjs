@@ -5,8 +5,11 @@ import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'no
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  APPLY_BLOCKED,
+  applyBlocked,
   applyTrim,
   claudeJsonPath,
+  ensureDefaultKeep,
   getKeep,
   installedPlugins,
   isKept,
@@ -115,9 +118,12 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
   All features are free (MIT License)
   limitcast trim [--days N] [--share]        names what to cut and what each costs
                                              (--share: totals only, no names, safe to post)
-  limitcast trim --apply / --undo            hide those skills and turn off those MCP servers (backed up, reversible)
-  limitcast trim --codex --apply / --undo    turn off unused Codex MCP servers (enabled = false; reversible)
-  limitcast trim --grok --apply / --undo     turn off unused Grok MCP servers (enabled = false; reversible)
+  limitcast trim --apply [--yes] / --undo    hide unused skills and turn off MCP servers quiet for 30 days
+                                             (backed up, reversible). Refuses while the keep-list is empty
+                                             unless you pass --yes. install, doctor --fix, and trim
+                                             seed ego-browser when that list was never set.
+  limitcast trim --codex --apply [--yes] / --undo   the same for Codex MCP servers (enabled = false; reversible)
+  limitcast trim --grok --apply [--yes] / --undo    the same for Grok MCP servers (enabled = false; reversible)
   limitcast trim keep <name>[,<name>…]       never hide or turn off these (any --apply); --remove <name> drops one, no name lists them
   limitcast saved                            tokens saved since limitcast first measured you
   limitcast install --guard                  block new subagents when a window is on pace to run out, and run
@@ -584,6 +590,7 @@ if (cmd === 'status') {
   const wantGuard = args.includes('--guard');
   const wantAlerts = args.includes('--alerts');
   for (const c of install({ guard: wantGuard, alerts: wantAlerts })) console.log(`✓ ${c}`);
+  if (ensureDefaultKeep().seeded) console.log('Kept ego-browser: trim --apply will not turn it off. Add more with limitcast trim keep <name>.');
   console.log('Restart Claude Code, Codex and Grok to load it. Then: limitcast doctor');
   if (wantGuard && grokPresent() && !getGrokBudget())
     console.log('Grok stores spend, not a % used. Set a 5-hour dollar cap so the guard can block: limitcast budget grok <usd>');
@@ -644,6 +651,7 @@ if (cmd === 'status') {
     if (!f.statusLine) console.log('limitcast is not installed. Run `limitcast install` first.');
     else {
       for (const c of install({ guard: f.guard, alerts: f.alerts })) console.log(`✓ ${c}`);
+      ensureDefaultKeep();
       console.log('Restart Claude Code, Codex and Grok to load it. Codex asks you to approve the guard again: start Codex and accept it.');
     }
   }
@@ -691,6 +699,12 @@ if (cmd === 'status') {
     console.error('--share is read-only; run keep, --apply, or --undo separately.');
     process.exit(1);
   }
+  if (cmd === 'trim' && args[0] !== 'keep' && !args.includes('--undo') && !args.includes('--share')) ensureDefaultKeep();
+  if (cmd === 'trim' && args.includes('--apply') && applyBlocked(getKeep(), args.includes('--yes'))) {
+    console.log(APPLY_BLOCKED);
+    process.exit(1);
+  }
+  const monthSince = now - 30 * 86400_000;
   if (cmd === 'trim' && args[0] === 'keep') {
     // The keep-list: servers and skills `trim --apply` never touches (Claude, Codex and Grok). Free to manage; apply is Pro.
     const drop = args[1] === '--remove';
@@ -723,7 +737,17 @@ if (cmd === 'status') {
       process.exit(0);
     }
     const servers = codexServers(readFileSync(codexConfigPath(), 'utf8'));
-    const r = codexTrimReport({ servers, used: await codexUsedServers(since), startup: await codexStartup(), days: days(), pro, keep: getKeep() });
+    const usedCodex = await codexUsedServers(since);
+    const usedCodexMonth = days() >= 30 ? null : await codexUsedServers(monthSince);
+    const r = codexTrimReport({
+      servers,
+      used: usedCodex,
+      usedMonth: usedCodexMonth,
+      startup: await codexStartup(),
+      days: days(),
+      pro,
+      keep: getKeep(),
+    });
     if (args.includes('--apply')) {
       const changed = applyCodexTrim(r.unused);
       console.log(
@@ -734,7 +758,7 @@ if (cmd === 'status') {
     } else
       console.log(
         args.includes('--share')
-          ? `Codex trim: ${r.unused.length} unused MCP servers, ${r.kept.length} kept. Totals only; no names or paths. https://limitcast.dev`
+          ? `Codex trim: ${r.unused.length} unused MCP servers, ${r.kept.length} kept.${r.standing.length ? ` ${r.standing.length} used in the last 30 days and left on.` : ''} Totals only; no names or paths. https://limitcast.dev`
           : forTerminal(r.text),
       );
     process.exit(0);
@@ -758,6 +782,7 @@ if (cmd === 'status') {
     const r = grokTrimReport({
       servers: grokServers(),
       used: grokUsedServers(since),
+      usedMonth: days() >= 30 ? null : grokUsedServers(monthSince),
       startup: grokStartup(),
       days: days(),
       pro,
@@ -773,7 +798,7 @@ if (cmd === 'status') {
     } else
       console.log(
         args.includes('--share')
-          ? `Grok trim: ${r.unused.length} unused MCP servers, ${r.kept.length} kept. Totals only; no names or paths. https://limitcast.dev`
+          ? `Grok trim: ${r.unused.length} unused MCP servers, ${r.kept.length} kept.${r.standing.length ? ` ${r.standing.length} used in the last 30 days and left on.` : ''} Totals only; no names or paths. https://limitcast.dev`
           : forTerminal(r.text),
       );
     process.exit(0);
@@ -783,6 +808,12 @@ if (cmd === 'status') {
   const jobs = cmd === 'report' && args.includes('--jobs');
   const why = cmd === 'report' && args.includes('--why');
   const usage = why || jobs ? [] : await readUsage(since, {}, cmd === 'trim' ? used : undefined);
+  /** @type {import('../src/trim.mjs').Activity|null} */
+  let usedMonth = null;
+  if (cmd === 'trim' && days() < 30) {
+    usedMonth = { skills: new Set(), mcp: new Set() };
+    await readUsage(monthSince, {}, usedMonth);
+  }
   let text;
   if (why || jobs) {
     const r = attribute(await whySessions(claudeRoot(), since), since);
@@ -795,21 +826,21 @@ if (cmd === 'status') {
     if (latest) recordOverhead(snapshot(latest));
     // The share view omits private names; the local view includes actionable detail.
     if (args.includes('--apply') || args.includes('--undo')) {
-      console.log(args.includes('--undo') ? undoMessage(undoTrim()) : applyMessage(latest, used));
+      console.log(args.includes('--undo') ? undoMessage(undoTrim()) : applyMessage(latest, used, usedMonth));
       process.exit(0);
     }
     const keep = getKeep();
-    if (latest && args.includes('--share')) text = shareSummary(baseline(usage), latest, used, days(), keep);
+    if (latest && args.includes('--share')) text = shareSummary(baseline(usage), latest, used, days(), keep, usedMonth);
     else
       text = latest
-        ? startupReport(baseline(usage), latest, used, days(), keep)
+        ? startupReport(baseline(usage), latest, used, days(), keep, usedMonth)
         : trimReport(baseline(usage), contributors(), used, days(), args.includes('--share'));
     if (latest && !args.includes('--share')) {
       const still = stillLoading(latest);
       text += still.length
         ? `\n\nStill loading after \`trim --apply\`: ${still.join(', ')}. A Claude Code session that was running may have rewritten ~/.claude.json; quit Claude Code and run \`limitcast trim --apply\` again.`
-        : measuredSavings(latest.pieces, used, keep).tokens > 0
-          ? '\n\nApply these cuts: `limitcast trim --apply` (backed up; `limitcast trim --undo` reverses it).'
+        : measuredSavings(latest.pieces, used, keep, usedMonth).tokens > 0
+          ? '\n\nApply these cuts: `limitcast trim --apply` turns off MCP servers quiet for 30 days and hides unused skills (backed up; `limitcast trim --undo` reverses it).'
           : '';
     }
   }
@@ -863,10 +894,13 @@ if (cmd === 'status') {
   const since = now - days() * 86400_000;
   let saved = '';
   let perSession = null;
+  /** @type {{first:number, last:number}|null} */
+  let start = null;
   if (pro) {
     const latest = await latestInteractiveTranscript(claudeRoot());
     if (latest) recordOverhead(snapshot(latest));
     const s = loadOverhead();
+    start = s ? { first: s.first.chars, last: s.last.chars } : null;
     perSession = s ? savedPerSession(s) : null;
     saved =
       s && !args.includes('--share')
@@ -895,7 +929,16 @@ if (cmd === 'status') {
     const burn = burnReport(await readUsage(since, {}), { since, now }).replace(/^(#{1,2}) /gm, '#$1 ');
     const md = [
       insightsReport(insight, pro),
-      resultsReport({ now, days: days(), samples, blocks, pro, saved, value: valueSection(totals, { now, pro }), subagents: loadSubagents(since) }),
+      resultsReport({
+        now,
+        days: days(),
+        samples,
+        blocks,
+        pro,
+        saved,
+        value: valueSection(totals, { now, pro, start }),
+        subagents: loadSubagents(since),
+      }),
       '## Right now',
       '```',
       rows.length ? table(rows) : 'No readings yet.',
@@ -922,7 +965,7 @@ if (cmd === 'status') {
             blocks,
             pro,
             saved,
-            value: valueSection(totals, { now, pro }),
+            value: valueSection(totals, { now, pro, start }),
             subagents: loadSubagents(since),
           }),
         ].join('\n\n'),
@@ -1102,13 +1145,13 @@ async function refreshValue() {
  * @param {Awaited<ReturnType<typeof latestInteractiveTranscript>>} latest
  * @param {import('../src/trim.mjs').Activity} used
  */
-function applyMessage(latest, used) {
+function applyMessage(latest, used, usedMonth) {
   if (!latest) return '`limitcast trim --apply` needs one Claude Code session first.';
-  const s = measuredSavings(latest.pieces, used);
+  const s = measuredSavings(latest.pieces, used, getKeep(), usedMonth);
   const cwd = transcriptCwd(latest.file) ?? process.cwd();
   const plan = planTrim({
     skills: s.unusedSkills.map((k) => k.name),
-    mcp: s.unusedMcp.map((m) => m.name),
+    mcp: s.staleMcp.map((m) => m.name),
     cwd,
     settings: readSettings(settingsPath()),
     claudeJson: readSettings(claudeJsonPath()),

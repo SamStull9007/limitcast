@@ -118,14 +118,16 @@ export async function codexStartup(root = join(codexHome(), 'sessions')) {
 }
 
 /**
- * @param {{servers:{name:string, enabled:boolean|undefined}[], used:Set<string>, startup:{agentsMd:number, base:number}|null, days:number, pro:boolean, keep?:string[]}} r
- *   keep: the `trim keep` list; unused servers on it are reported as kept and left out of `unused`
+ * @param {{servers:{name:string, enabled:boolean|undefined}[], used:Set<string>, usedMonth?:Set<string>|null, startup:{agentsMd:number, base:number}|null, days:number, pro:boolean, keep?:string[]}} r
+ *   keep: the `trim keep` list; unused servers on it are reported as kept and left out of `unused`.
+ *   usedMonth: normalized names used in 30 days. Servers in it stay out of `unused`.
  */
-export function codexTrimReport({ servers, used, startup, days, pro, keep = [] }) {
+export function codexTrimReport({ servers, used, usedMonth = null, startup, days, pro, keep = [] }) {
   const on = servers.filter((s) => s.enabled !== false);
   const idle = on.filter((s) => !used.has(norm(s.name)));
   const kept = idle.filter((s) => keep.some((k) => norm(k) === norm(s.name)));
-  const unused = idle.filter((s) => !kept.includes(s));
+  const standing = usedMonth ? idle.filter((s) => !kept.includes(s) && usedMonth.has(norm(s.name))) : [];
+  const unused = idle.filter((s) => !kept.includes(s) && !standing.includes(s));
   const tok = (/** @type {number} */ c) => `${(c / 4000).toFixed(1)}k`;
   const out = ['# limitcast trim --codex', ''];
   if (startup)
@@ -133,17 +135,28 @@ export function codexTrimReport({ servers, used, startup, days, pro, keep = [] }
       `Codex sessions start with ~${tok(startup.agentsMd)} tokens of AGENTS.md (your instruction files) and ~${tok(startup.base)} of Codex's own instructions, re-sent on every turn.`,
       '',
     );
-  out.push(`## MCP servers: ${on.length} on, ${unused.length} not used in ${days} days`);
-  if (!unused.length) out.push(kept.length ? 'Nothing else to turn off.' : 'Every server that is on was used.');
+  out.push(`## MCP servers: ${on.length} on, ${unused.length + standing.length} not used in ${days} days`);
+  if (standing.length)
+    out.push('', `${standing.length} used in the last 30 days, so \`trim --apply\` leaves them on:`, ...standing.map((s) => `- ${s.name}`));
+  if (!unused.length) out.push(kept.length || standing.length ? 'Nothing else to turn off.' : 'Every server that is on was used.');
   else if (pro)
-    out.push(...unused.map((s) => `- ${s.name}`), '', 'Turn them off: `limitcast trim --codex --apply` (backed up; `--undo` reverses it).');
+    out.push(
+      ...unused.map((s) => `- ${s.name}`),
+      '',
+      `${usedMonth ? 'Turn the servers that have been quiet for 30 days off' : 'Turn them off'}: \`limitcast trim --codex --apply\` (backed up; \`--undo\` reverses it).`,
+    );
   else out.push(`Pro names them and turns them off for you: https://limitcast.dev/#pricing`);
   if (kept.length) out.push('', `Would keep (your keep-list): ${kept.map((s) => s.name).join(', ')}.`);
   out.push(
     '',
     'Each server that is on starts with every Codex session and adds its tool list to the context. AGENTS.md: every 1k tokens you move into files read on demand saves 1k per turn.',
   );
-  return { text: out.join('\n'), unused: unused.map((s) => s.name), kept: kept.map((s) => s.name) };
+  return {
+    text: out.join('\n'),
+    unused: unused.map((s) => s.name),
+    standing: standing.map((s) => s.name),
+    kept: kept.map((s) => s.name),
+  };
 }
 
 /** @param {string} path @param {string} text */

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `results` leads with the net change in the controllable starting context, then says how many sessions started below the first snapshot. The estimated tokens-not-re-sent figure stays, after that line.
+- `trim --apply` turns off only MCP servers that have been quiet for 30 days. Servers unused in the report window but used within 30 days are listed and left on. `install`, `doctor --fix`, and a trim report (not `trim keep`, `--undo`, or `--share`) seed `ego-browser` on the keep-list when it has never been set. An empty keep-list refuses `--apply` unless you pass `--yes`.
+- The Codex guard reads back to local midnight, and at least the last two hours, so today's share of a weekly window can see a reading from before midnight.
+
 ## 0.18.0 — 2026-11-01
 
 - New: the guard holds a second subagent of the same type and prompt while the first is still running in that session. Claude's stop hook clears it; a record older than 30 minutes is dropped so a missed stop cannot hold the prompt all day. `LIMITCAST_ALLOW=1` still spawns.

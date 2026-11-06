@@ -149,6 +149,7 @@ export function valueTotals(v) {
   return {
     since: v.since,
     sessions: sessions.length,
+    contributed: sessions.filter((s) => s.savedPerTurn > 0).length,
     turns: sessions.reduce((a, s) => a + s.turns, 0),
     tokens: sessions.reduce((a, s) => a + s.turns * s.savedPerTurn, 0),
     hits: hits.length,
@@ -197,15 +198,28 @@ export function valuePeriod(v, since, until) {
 /**
  * The "since you installed" section at the top of `limitcast results`.
  * @param {ReturnType<typeof valueTotals>} t
- * @param {{now:number, pro:boolean}} o
+ * @param {{now:number, pro:boolean, start?:{first:number, last:number}|null}} o
+ *   start: controllable starting context, in characters, the first time it was measured and now
  */
-export function valueSection(t, { now, pro }) {
+export function valueSection(t, { now, pro, start = null }) {
   if (!t.since) return '';
   const days = Math.max(1, Math.round((now - t.since) / 86400_000));
   const out = [`## Since limitcast started watching (${new Date(t.since).toLocaleDateString()}, ${days} day${days === 1 ? '' : 's'})`];
+  if (start) {
+    const from = Math.round(start.first / 4);
+    const to = Math.round(start.last / 4);
+    const delta = to - from;
+    const change = delta === 0 ? 'no change' : `${delta > 0 ? '+' : '-'}${fmtBig(Math.abs(delta))}`;
+    out.push(`- The part of your starting context you control went from ~${fmtBig(from)} to ~${fmtBig(to)} tokens (${change}).`);
+  }
   if (pro && t.tokens > 0) {
+    const rest = Number.isFinite(t.contributed) ? t.sessions - t.contributed : null;
+    const who =
+      rest === null
+        ? ''
+        : ` ${t.contributed} of ${t.sessions} sessions started below that first snapshot${rest > 0 ? `; the other ${rest} were the same size or larger` : ''}.`;
     out.push(
-      `- **Estimated ${fmtBig(t.tokens)} context tokens not re-sent.** Compared with your first recorded Claude Code starting context: ${t.turns.toLocaleString()} calls across ${t.sessions} sessions. Estimated from characters / 4; most would have been cached input. Project or manual configuration changes can also change this baseline; this is not a causal savings measurement.`,
+      `- **Estimated ${fmtBig(t.tokens)} context tokens not re-sent.** Compared with your first recorded Claude Code starting context: ${t.turns.toLocaleString()} calls across ${t.sessions} sessions.${who} Estimated from characters / 4; most would have been cached input. Project or manual configuration changes can also change this baseline; this is not a causal savings measurement.`,
     );
     if (t.windowPct !== null && t.calib)
       out.push(

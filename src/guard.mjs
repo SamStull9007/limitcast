@@ -9,6 +9,16 @@ import { budgetMessage, budgetSpent, getBudget, getTodayHold, loadSubagents, pin
 const NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok' };
 
 /**
+ * How far back a Codex guard read must go. Today's share of a weekly window needs a reading from before
+ * local midnight. Just after midnight, keep the last two hours so the pace still has a slope.
+ * @param {number} now epoch ms
+ */
+export function codexGuardSince(now) {
+  const midnight = new Date(now).setHours(0, 0, 0, 0);
+  return Math.min(now - 2 * 3600_000, midnight - 60_000);
+}
+
+/**
  * Whose limits a subagent-spawning tool call draws on, or null if the call spawns nothing.
  * Claude Code: Task/Agent. Codex: spawn_agent (reported with a namespace prefix). Grok: spawn_subagent.
  * @param {string} tool
@@ -65,12 +75,13 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
   const tool = String(hook?.tool_name ?? hook?.toolName ?? hook?.tool ?? '');
   const src = spawnSource(tool);
   const operation = hook?.tool_use_id ?? hook?.toolUseId ?? hook?.call_id;
-  // Codex: only the last two hours of rollouts, so the hook stays fast. Grok: spend vs the user's dollar cap.
+  // Codex: back to local midnight, and at least two hours, so today's share can see a reading from before midnight.
+  // A two-hour cap hid that reading and the share read low. Grok: spend vs the user's dollar cap.
   const samples =
     src === 'claude'
       ? oneClaudeAccount(load(now - KEEP_MS), hook.session_id ?? hook.sessionId)
       : src === 'codex'
-        ? await readCodex(now - 2 * 3600_000)
+        ? await readCodex(codexGuardSince(now))
         : src === 'grok'
           ? grokSamples(now)
           : [];
@@ -99,7 +110,7 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
   if (reason) return preview ? null : reason;
   // Today's share of a weekly window is used up: hold new subagents until local midnight, when the share starts over.
   // Opt-in for Pro (`limitcast budget today on`; the default is a notification at 80%); a free preview records it either way.
-  // A window already at 100% is left to the tool. shortcut: Codex readings here span only 2 hours, so its share reads low.
+  // A window already at 100% is left to the tool.
   const day = todayOver(src, forecasts);
   if (day && (preview || getTodayHold())) {
     try {

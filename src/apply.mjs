@@ -32,6 +32,13 @@ const ledgerPath = () => join(stateDir(), 'trim-applied.json');
 const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '_');
 const configFile = () => join(stateDir(), 'config.json');
 
+/** Seeded the first time the keep-list is created. `trim --apply` must not turn this off. */
+export const DEFAULT_KEEP = ['ego-browser'];
+
+/** Shown when `--apply` would run with nothing protected. */
+export const APPLY_BLOCKED =
+  'Nothing on the keep-list, so `trim --apply` would turn off every server that looks unused, including ego-browser. Run `limitcast trim keep ego-browser` first, or repeat with `--yes`.';
+
 /** Names `trim --apply` never turns off or hides, from `limitcast trim keep`. @returns {string[]} */
 export function getKeep() {
   try {
@@ -41,6 +48,25 @@ export function getKeep() {
     return [];
   }
 }
+
+/**
+ * Write the default keep-list when `trimKeep` has never been set. An explicit empty list stays empty.
+ * @returns {{keep:string[], seeded:boolean}}
+ */
+export function ensureDefaultKeep() {
+  let cfg = {};
+  try {
+    cfg = JSON.parse(readFileSync(configFile(), 'utf8'));
+  } catch {
+    cfg = {};
+  }
+  if (Object.hasOwn(cfg, 'trimKeep')) return { keep: getKeep(), seeded: false };
+  setKeep(DEFAULT_KEEP);
+  return { keep: [...DEFAULT_KEEP], seeded: true };
+}
+
+/** True when `--apply` must stop because nothing is protected and the user did not pass `--yes`. */
+export const applyBlocked = (/** @type {string[]} */ keep, /** @type {boolean} */ yes) => !yes && keep.length === 0;
 
 /** @param {string[]} names */
 export function setKeep(names) {

@@ -207,9 +207,11 @@ const tok = (/** @type {number} */ chars) => Math.round(chars / 4);
  * @param {import('./startup.mjs').Piece[]} pieces
  * @param {Activity} used
  * @param {string[]} [keep] the `trim keep` list: unused, but never counted as a cut; named in `kept`
+ * @param {Activity|null} [usedMonth] servers used in 30 days. When set, only servers missing here are removable.
  */
-export function measuredSavings(pieces, used, keep = []) {
+export function measuredSavings(pieces, used, keep = [], usedMonth = null) {
   const usedMcp = new Set([...used.mcp].map(norm));
+  const month = usedMonth ? new Set([...usedMonth.mcp].map(norm)) : null;
   // Instructions and tool names spell a server differently ("claude.ai Postman" / "claude_ai_Postman"): merge by normalized name.
   /** @type {Map<string, {name:string, chars:number}>} */
   const mcp = new Map();
@@ -226,9 +228,11 @@ export function measuredSavings(pieces, used, keep = []) {
   const kept = [...mcp.values(), ...skills].filter((x) => keep.some((k) => norm(k) === norm(x.name))).map((x) => x.name);
   const isKept = (/** @type {{name:string}} */ x) => kept.includes(x.name);
   const unusedMcp = [...mcp.values()].filter((m) => !isKept(m)).sort((a, b) => b.chars - a.chars);
+  const standingMcp = month ? unusedMcp.filter((m) => month.has(norm(m.name))) : [];
+  const staleMcp = month ? unusedMcp.filter((m) => !month.has(norm(m.name))) : unusedMcp;
   const unusedSkills = skills.filter((s) => !isKept(s));
-  const chars = unusedMcp.reduce((a, m) => a + m.chars, 0) + unusedSkills.reduce((a, s) => a + s.chars, 0);
-  return { unusedMcp, unusedSkills, tokens: tok(chars), kept };
+  const chars = staleMcp.reduce((a, m) => a + m.chars, 0) + unusedSkills.reduce((a, s) => a + s.chars, 0);
+  return { unusedMcp, standingMcp, staleMcp, unusedSkills, tokens: tok(chars), kept };
 }
 
 /**
@@ -238,9 +242,10 @@ export function measuredSavings(pieces, used, keep = []) {
  * @param {Activity} used
  * @param {number} days
  * @param {string[]} [keep] the `trim keep` list
+ * @param {Activity|null} [usedMonth] servers used in 30 days; `--apply` leaves those on
  */
-export function startupReport(base, b, used, days, keep = []) {
-  const s = measuredSavings(b.pieces, used, keep);
+export function startupReport(base, b, used, days, keep = [], usedMonth = null) {
+  const s = measuredSavings(b.pieces, used, keep, usedMonth);
   const median = base?.median ?? 0;
   const lines = ['# limitcast trim', ''];
   if (base) {
@@ -254,16 +259,27 @@ export function startupReport(base, b, used, days, keep = []) {
   lines.push(
     `## Estimated removable context: ~${fmt(s.tokens)} tokens per session${pct}`,
     '',
-    `From things you haven't used in the last ${days} days:`,
+    usedMonth
+      ? `From skills unused in the last ${days} days and MCP servers quiet for 30 days:`
+      : `From things you haven't used in the last ${days} days:`,
     '',
   );
-  if (s.unusedMcp.length) {
-    const total = s.unusedMcp.reduce((a, m) => a + m.chars, 0);
+  if (s.standingMcp.length) {
     lines.push(
-      `- **Disable ${s.unusedMcp.length} MCP servers** (~${fmt(tok(total))}): ${s.unusedMcp
+      `- **Leave on ${s.standingMcp.length} MCP servers** used in the last 30 days but not in ${days} days: ${s.standingMcp
+        .slice(0, 10)
+        .map((m) => m.name)
+        .join(', ')}${s.standingMcp.length > 10 ? ', ...' : ''}.`,
+      '  `trim --apply` does not turn these off.',
+    );
+  }
+  if (s.staleMcp.length) {
+    const total = s.staleMcp.reduce((a, m) => a + m.chars, 0);
+    lines.push(
+      `- **Disable ${s.staleMcp.length} MCP servers** ${usedMonth ? 'quiet for 30 days' : `you haven't used in ${days} days`} (~${fmt(tok(total))}): ${s.staleMcp
         .slice(0, 10)
         .map((m) => `${m.name} ~${fmt(tok(m.chars))}`)
-        .join(', ')}${s.unusedMcp.length > 10 ? ', ...' : ''}.`,
+        .join(', ')}${s.staleMcp.length > 10 ? ', ...' : ''}.`,
       '  Their instructions and tool names load into every session. Remove them in `/mcp`, or move them to the projects that use them.',
     );
   }
@@ -315,16 +331,17 @@ export function startupReport(base, b, used, days, keep = []) {
  * @param {Activity} used
  * @param {number} days
  * @param {string[]} [keep] the `trim keep` list; only its count is shown
+ * @param {Activity|null} [usedMonth] servers used in 30 days
  */
-export function shareSummary(base, b, used, days, keep = []) {
-  const s = measuredSavings(b.pieces, used, keep);
+export function shareSummary(base, b, used, days, keep = [], usedMonth = null) {
+  const s = measuredSavings(b.pieces, used, keep, usedMonth);
   /** @type {Map<string, number>} */
   const groups = new Map();
   for (const p of b.pieces) groups.set(p.group, (groups.get(p.group) ?? 0) + p.chars);
   const median = base?.median ?? 0;
   const lines = [
     `My Claude Code sessions start at ${fmt(median)} tokens before I type.`,
-    `limitcast found ~${fmt(s.tokens)} per session${median ? ` (${Math.round((s.tokens / median) * 100)}%)` : ''} I haven't used in ${days} days: ${s.unusedMcp.length} MCP servers, ${s.unusedSkills.length} skills${s.kept.length ? ` (${s.kept.length} more kept on my keep-list)` : ''}.`,
+    `limitcast found ~${fmt(s.tokens)} per session${median ? ` (${Math.round((s.tokens / median) * 100)}%)` : ''} I haven't used in ${days} days: ${s.unusedMcp.length} MCP servers, ${s.unusedSkills.length} skills${s.standingMcp.length ? ` (${s.standingMcp.length} of the servers were used in 30 days and stay on)` : ''}${s.kept.length ? ` (${s.kept.length} more kept on my keep-list)` : ''}.`,
     'Where it comes from:',
     ...[...groups].sort((x, y) => y[1] - x[1]).map(([g, c]) => `  ${g}: ${fmt(tok(c))}`),
   ];

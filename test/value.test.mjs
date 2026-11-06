@@ -92,6 +92,34 @@ test('scan adds new sessions only, and the section reads clearly', async () => {
   assert.match(text, /10 calls across 1 sessions/);
   assert.match(text, /Forecast risk before 1 of the 1 limits it watched you approach\*\*, on average 50 min ahead/);
   assert.match(text, /hasn't needed to stop a subagent yet/);
+  assert.match(text, /1 of 1 sessions started below that first snapshot/);
+});
+
+test('the since-watching section leads with the net starting-context change', () => {
+  const text = valueSection(
+    {
+      since: t0,
+      sessions: 63,
+      contributed: 13,
+      turns: 11422,
+      tokens: 12_000_000,
+      hits: 0,
+      watched: 0,
+      leads: [],
+      blocked: 0,
+      previewed: 0,
+      confirmed: 0,
+      switched: 0,
+      switchPreviewed: 0,
+      calib: null,
+      limitChange: null,
+      windowPct: null,
+    },
+    { now: t0 + 12 * 86400_000, pro: true, start: { first: 156379, last: 167217 } },
+  );
+  assert.ok(text.indexOf('went from ~39.1k to ~41.8k') < text.indexOf('Estimated 12.0M'));
+  assert.match(text, /\(\+2\.7k\)/);
+  assert.match(text, /13 of 63 sessions started below that first snapshot; the other 50 were the same size or larger/);
 });
 
 test('the rollup is due once a day; an empty record loads', () => {
