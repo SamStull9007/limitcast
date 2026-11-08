@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.18.3 — 2026-11-08
+
+- Fix: two commands that change settings at the same moment no longer lose one of the changes. `budget`, `plan set`, `trim keep`, `models`, `grok-usage` and the other commands that write `config.json` each read the file and wrote it back, so when two ran together (a second terminal, a script) the later write undid the earlier change. Every settings write now takes a short lock, re-reads the file inside it, and writes the result through a temp file. A lock left by a command that was killed is broken after 2 seconds. Hooks only read settings and never wait on the lock.
+
 ## 0.18.2 — 2026-11-08
 
 - Fix: a mistyped option now fails with `Unknown option --gaurd` and exit 1. Before, `limitcast install --gaurd` or `trim --aply` ignored the typo and ran the plain command. Hooks (`guard`, `statusline` and the others) are not checked, so they still fail open.
