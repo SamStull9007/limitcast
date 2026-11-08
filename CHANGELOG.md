@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Fix: a mistyped option now fails with `Unknown option --gaurd` and exit 1. Before, `limitcast install --gaurd` or `trim --aply` ignored the typo and ran the plain command. Hooks (`guard`, `statusline` and the others) are not checked, so they still fail open.
+- Fix: settings (`config.json`), the usage cache, `last.json` and the pruned `samples.jsonl` are written to a temp file and renamed. A hook that read one while a command was writing it could see an empty file and treat budgets and the keep-list as unset for that call.
+- Faster: `results` reads usage once instead of walking the transcripts twice (median 5.3 s to 4.2 s on a machine with 6,500 transcripts). The usage cache (17 MB there) and the `report --why` cache are rewritten only when a transcript changed. Other commands did not measurably change; the transcript walk (about 0.6 s per pass there) is what is left.
+- `report --why` says "reading N transcripts for the first time" before a cold read of more than 100 transcripts, which took 25 s with no output.
+- Comments and docs: removed the "Pro" labels that outlived 0.15.0, and folded the stale "Unreleased" block into 0.15.0 in this changelog.
+
 ## 0.18.1 — 2026-11-05
 
 - `results` leads with the net change in the controllable starting context, then says how many sessions started below the first snapshot. The estimated tokens-not-re-sent figure stays, after that line.
@@ -44,10 +52,6 @@
 - Previously installed preview guards now enforce forecasts and enabled budgets; `LIMITCAST_ALLOW=1` remains the override.
 - Guards, model controls, budgets, trimming, alerts, notifications and dashboards work without a key. Controls remain opt-in, with existing keep-lists, undo and overrides.
 - Added guided read-only onboarding, accurate weekly capacity reporting, private share totals and local pilot measurement.
-
-
-## Unreleased
-
 - Read-only `limitcast onboard` guides setup, personal findings, trial choices, restarts and safe controls without changing settings.
 - `results`, its local dashboard and voluntary share output separate provider usage, estimated context reduction, protection events and free previews. Weekly context estimates use main-thread call timestamps, including sessions crossing the boundary; legacy state remains readable and is rescanned when available.
 - Hook records accept host operation IDs so reporting can deduplicate repeated decisions. Missing IDs stay explicitly labeled attempts. Existing guard decisions, overrides and entitlement checks are preserved.

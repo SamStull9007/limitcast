@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { codexServers, setEnabled } from './codex.mjs';
 import { windowMs } from './forecast.mjs';
-import { KEEP_MS, stateDir } from './store.mjs';
+import { KEEP_MS, stateDir, writeAtomic } from './store.mjs';
 import { grokRoot } from './usage.mjs';
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */
@@ -193,7 +193,7 @@ export function setGrokBudget(usd, win = '5h') {
   if (usd === null) delete cur[win];
   else cur[win] = usd;
   mkdirSync(stateDir(), { recursive: true });
-  writeFileSync(configFile(), JSON.stringify({ ...cfg, grokBudget: Object.keys(cur).length ? cur : null }));
+  writeAtomic(configFile(), JSON.stringify({ ...cfg, grokBudget: Object.keys(cur).length ? cur : null }));
 }
 
 /**
@@ -241,7 +241,7 @@ export function setGrokQuota(on) {
     /* new */
   }
   mkdirSync(stateDir(), { recursive: true });
-  writeFileSync(configFile(), JSON.stringify({ ...cfg, grokQuota: on }));
+  writeAtomic(configFile(), JSON.stringify({ ...cfg, grokQuota: on }));
 }
 
 /** @returns {QuotaState} */

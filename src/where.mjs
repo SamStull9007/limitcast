@@ -1,15 +1,15 @@
 // @ts-check
-import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fmt } from './report.mjs';
 import { attachmentPieces, pieceDiff } from './startup.mjs';
-import { stateDir } from './store.mjs';
+import { stateDir, writeAtomic } from './store.mjs';
 import { BIG_RESULT, tipFor, toolKey } from './toolcheck.mjs';
 import { jsonlFiles } from './usage.mjs';
 
-// `limitcast report --why` (Pro): where the new tokens went, which is what moves the limit (cached reads barely count).
+// `limitcast report --why`: where the new tokens went, which is what moves the limit (cached reads barely count).
 // A model call's new tokens are input + cache writes + output. The input of call i is what entered the context since
 // call i-1: its own output (written to the cache) plus the tool results it asked for plus your messages. So the input
 // of call i, less call i-1's output, is attributed to the tools call i-1 used. Claude Code transcripts only.
@@ -480,16 +480,22 @@ export async function whySessions(root, since) {
   /** @type {typeof cache} */
   const next = {};
   const files = jsonlFiles(root, since, () => true);
-  for (const f of files) {
-    const st = statSync(f);
-    const hit = cache[f];
-    next[f] = hit && hit.s === st.size && hit.m === st.mtimeMs ? hit : { s: st.size, m: st.mtimeMs, c: await readCalls(f) };
+  const stats = files.map((f) => statSync(f));
+  const fresh = (/** @type {number} */ i) => !(cache[files[i]] && cache[files[i]].s === stats[i].size && cache[files[i]].m === stats[i].mtimeMs);
+  const cold = files.filter((_, i) => fresh(i)).length;
+  // The first run reads every transcript (up to a minute on a big machine); say so instead of sitting silent.
+  if (cold > 100) console.error(`limitcast: reading ${cold} transcripts for the first time. This can take a minute; later runs use a cache.`);
+  for (const [i, f] of files.entries()) {
+    next[f] = fresh(i) ? { s: stats[i].size, m: stats[i].mtimeMs, c: await readCalls(f) } : cache[f];
   }
   // Keep entries this run didn't need (another period) while they are recent; drop the rest.
   for (const [f, e] of Object.entries(cache)) if (!next[f] && e.m >= Date.now() - CACHE_KEEP_MS && existsSync(f)) next[f] = e;
   try {
-    mkdirSync(stateDir(), { recursive: true });
-    writeFileSync(cacheFile(), JSON.stringify({ v: CACHE_VERSION, files: next }));
+    // Rewrite the file only when something was read or dropped; it is several MB on a busy machine.
+    if (cold || Object.keys(next).length !== Object.keys(cache).length) {
+      mkdirSync(stateDir(), { recursive: true });
+      writeAtomic(cacheFile(), JSON.stringify({ v: CACHE_VERSION, files: next }));
+    }
   } catch {
     /* a cache: the next run just reads the transcripts */
   }

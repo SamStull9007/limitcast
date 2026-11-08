@@ -2,7 +2,7 @@
 import { closeSync, openSync, readSync, statSync } from 'node:fs';
 import { claudeAccounts, forecastAll } from './forecast.mjs';
 
-// Pro hints for the status line: another account with room, and when a long session is worth compacting.
+// Hints for the status line: another account with room, and when a long session is worth compacting.
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */
 

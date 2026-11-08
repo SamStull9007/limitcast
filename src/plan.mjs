@@ -3,9 +3,9 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { claudeAccounts } from './forecast.mjs';
 import { fmtUsd } from './prices.mjs';
-import { stateDir } from './store.mjs';
+import { stateDir, writeAtomic } from './store.mjs';
 
-// `limitcast plan` (Pro): does your Claude plan fit how much you use? From a long-lived record of the peak of every
+// `limitcast plan`: does your Claude plan fit how much you use? From a long-lived record of the peak of every
 // 5-hour and weekly window (the samples themselves are only kept for 8 days), it says whether you hit your limits often
 // enough to justify the next plan, or use so little that a smaller one would do, with the monthly price difference.
 
@@ -49,7 +49,7 @@ export function setPlan(plan) {
     /* new */
   }
   mkdirSync(stateDir(), { recursive: true });
-  writeFileSync(configFile(), JSON.stringify({ ...cfg, plan }));
+  writeAtomic(configFile(), JSON.stringify({ ...cfg, plan }));
 }
 
 /**

@@ -1,9 +1,9 @@
 // @ts-check
-import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { stateDir } from './store.mjs';
+import { stateDir, writeAtomic } from './store.mjs';
 
 /**
  * One model response's token usage.
@@ -171,6 +171,7 @@ export async function readUsage(since, roots = {}, activity) {
   const out = [];
   // Parsed transcripts are cached by size and mtime: only new or changed ones are read again.
   const cache = loadUsageCache();
+  let dirty = false; // a parsed file or a dropped entry: only then is the cache file rewritten
   /** @type {typeof cache} */
   const next = {};
   /**
@@ -180,7 +181,9 @@ export async function readUsage(since, roots = {}, activity) {
   const cached = async (file, parse) => {
     const st = statSync(file);
     const hit = cache[file];
-    const entry = hit && hit.s === st.size && hit.m === st.mtimeMs ? hit : { s: st.size, m: st.mtimeMs, ...(await parse(file)) };
+    const fresh = !(hit && hit.s === st.size && hit.m === st.mtimeMs);
+    if (fresh) dirty = true;
+    const entry = fresh ? { s: st.size, m: st.mtimeMs, ...(await parse(file)) } : hit;
     next[file] = entry;
     return entry;
   };
@@ -220,7 +223,7 @@ export async function readUsage(since, roots = {}, activity) {
   }
   // Keep entries for files this run didn't need (another period) while they are recent; drop the rest.
   for (const [f, e] of Object.entries(cache)) if (!next[f] && e.m >= Date.now() - CACHE_KEEP_MS && existsSync(f)) next[f] = e;
-  saveUsageCache(next);
+  if (dirty || Object.keys(next).length !== Object.keys(cache).length) saveUsageCache(next);
   for (const { file, session, project } of grokLedgers(roots.grok ?? grokRoot(), since)) {
     let ledger;
     try {
@@ -251,7 +254,7 @@ function loadUsageCache() {
 function saveUsageCache(c) {
   try {
     mkdirSync(stateDir(), { recursive: true });
-    writeFileSync(usageCacheFile(), JSON.stringify({ v: USAGE_CACHE_VERSION, files: c }));
+    writeAtomic(usageCacheFile(), JSON.stringify({ v: USAGE_CACHE_VERSION, files: c }));
   } catch {
     /* a cache: the next run just reads the transcripts */
   }

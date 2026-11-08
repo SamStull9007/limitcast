@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileS
 import { join } from 'node:path';
 import { stateDir } from './store.mjs';
 
-// Desktop notifications (Pro, opt-in): one per change of state, raised from the status line.
+// Desktop notifications (opt-in): one per change of state, raised from the status line.
 // Optionally also sent to a phone (ntfy) or a Slack/Discord webhook.
 
 const flag = () => join(stateDir(), 'notify.on');
@@ -94,7 +94,7 @@ export function notifyChanges(rows, clock) {
  * @param {string} message
  */
 export function send(message) {
-  // Pro: the same message to the phone (ntfy) or a chat webhook, by a detached curl so no hook waits on the network.
+  // The same message to the phone (ntfy) or a chat webhook, by a detached curl so no hook waits on the network.
   try {
     for (const a of remoteArgs(loadChannels(), message)) run('curl', a);
   } catch {

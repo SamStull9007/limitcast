@@ -234,7 +234,7 @@ const fmtK = (/** @type {number} */ n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M`
 
 /**
  * @param {{now:number, days:number, samples:Sample[], blocks:Block[], pro:boolean, saved:string|null, value?:string, subagents?:import('./subagents.mjs').SubagentEntry[]}} r
- *   blocks: every logged block (Pro blocks and free previews); saved: the starting-context text, if any;
+ *   blocks: every logged block (blocks and free previews); saved: the starting-context text, if any;
  *   value: the "since you installed" section, shown first; subagents: the finished-subagent ledger
  */
 export function resultsReport({ now, days, samples, blocks, pro, saved, value = '', subagents = [] }) {

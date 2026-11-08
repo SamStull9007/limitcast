@@ -25,6 +25,7 @@ import {
 import { calibrate, limitChange, limitChangeMessage, windowPct } from '../src/calibrate.mjs';
 import { applyCodexTrim, codexConfigPath, codexServers, codexStartup, codexTrimReport, codexUsedServers, undoCodexTrim } from '../src/codex.mjs';
 import { coldCost, coldMessage, coldNotice, firstNotice, firstWarning } from '../src/cold.mjs';
+import { unknownFlag } from '../src/flags.mjs';
 import { forecastAll, oneClaudeAccount, resetTarget } from '../src/forecast.mjs';
 import { formatChecks } from '../src/formats.mjs';
 import {
@@ -168,6 +169,14 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
 
 const [cmd, ...args] = process.argv.slice(2);
 const now = Date.now();
+// Hooks run unattended and fail open; everything else rejects a mistyped option instead of ignoring it.
+const typo = ['guard', 'prompt-check', 'tool-check', 'tool-limit', 'subagent-receipt', 'drift', 'statusline'].includes(cmd)
+  ? undefined
+  : unknownFlag(args);
+if (typo) {
+  console.error(`Unknown option ${typo}. Run "limitcast help" for the options.`);
+  process.exit(1);
+}
 const flag = (/** @type {string} */ name) => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
@@ -909,9 +918,10 @@ if (cmd === 'status') {
   }
   const samples = [...load(since), ...(await readCodex(since))];
   const blocks = loadBlocks(since);
-  const value = await refreshValue();
+  const usage = await readUsage(Math.min(since - days() * 86400_000, now - KEEP_MS), {}); // one read feeds both below
+  const value = await refreshValue(usage);
   const totals = valueTotals(value);
-  const insight = periodInsights({ value, usage: await readUsage(since - days() * 86400_000, {}), blocks, since, until: now });
+  const insight = periodInsights({ value, usage: usage.filter((u) => u.t >= since - days() * 86400_000), blocks, since, until: now });
   if (args.includes('--share'))
     console.log(
       resultsShare(resultsStats({ now, days: days(), samples, blocks, pro }), {
@@ -926,7 +936,10 @@ if (cmd === 'status') {
   else if (args.includes('--html')) {
     // results, the current windows and the burn report on one page, opened in the browser.
     const rows = forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS))]), now);
-    const burn = burnReport(await readUsage(since, {}), { since, now }).replace(/^(#{1,2}) /gm, '#$1 ');
+    const burn = burnReport(
+      usage.filter((u) => u.t >= since),
+      { since, now },
+    ).replace(/^(#{1,2}) /gm, '#$1 ');
     const md = [
       insightsReport(insight, pro),
       resultsReport({
@@ -1107,8 +1120,11 @@ function healthHint() {
   }
 }
 
-/** Fold the last 8 days of readings and blocks, and any new sessions, into the long-term value record. */
-async function refreshValue() {
+/**
+ * Fold the last 8 days of readings and blocks, and any new sessions, into the long-term value record.
+ * @param {import('../src/usage.mjs').Usage[]} [preread] usage already read since at least KEEP_MS ago, to skip a second walk of the transcripts
+ */
+async function refreshValue(preread) {
   const since = now - KEEP_MS;
   const claude = load(since);
   recordPeaks(claude, now); // the long-lived record of window peaks behind `limitcast plan`
@@ -1118,7 +1134,7 @@ async function refreshValue() {
   const v = foldEvents(loadValue(), { now, samples: [...claude, ...(await readCodex(since))], blocks: loadBlocks(since), start });
   await scanSessions(v, { root: claudeRoot(), baseline: o ? { at: o.first.at, chars: o.first.chars } : null, now });
   // Recalibrate from the last 8 days when there is enough data; keep the last good calibration otherwise.
-  const usage = await readUsage(since, {});
+  const usage = preread ? preread.filter((u) => u.t >= since) : await readUsage(since, {});
   const c = calibrate(claude, usage);
   if (c) v.calib = { ...c, at: now };
   // Once a day, the last 3 days on their own: a lasting shift against earlier days means the limit itself changed.

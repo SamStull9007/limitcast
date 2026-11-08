@@ -1,10 +1,10 @@
 // @ts-check
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { stateDir } from './store.mjs';
+import { stateDir, writeAtomic } from './store.mjs';
 
-// Subagent receipts and budgets (Pro). A SubagentStop hook prices each finished subagent against the 5-hour window
+// Subagent receipts and budgets. A SubagentStop hook prices each finished subagent against the 5-hour window
 // (from the user's own calibration) and logs it; the guard holds new subagents once a window's budget is spent.
 
 /** @typedef {{t:number, id?:string, sid?:string, type?:string, calls:number, fresh:number, read:number, pct?:number}} SubagentEntry */
@@ -128,7 +128,7 @@ export function setBudget(pct) {
     /* new */
   }
   mkdirSync(stateDir(), { recursive: true });
-  writeFileSync(configFile(), JSON.stringify({ ...cfg, subagentBudget: pct }));
+  writeAtomic(configFile(), JSON.stringify({ ...cfg, subagentBudget: pct }));
 }
 
 /** Whether the guard holds new subagents once today's share of a weekly window is used up (`limitcast budget today on`). */
@@ -149,7 +149,7 @@ export function setTodayHold(on) {
     /* new */
   }
   mkdirSync(stateDir(), { recursive: true });
-  writeFileSync(configFile(), JSON.stringify({ ...cfg, todayHold: on }));
+  writeAtomic(configFile(), JSON.stringify({ ...cfg, todayHold: on }));
 }
 
 /** A model a subagent type can be pinned to: sonnet, opus, haiku, a claude-... id, or a grok-... id. */
@@ -193,7 +193,7 @@ export function setSubagentModel(type, model) {
   if (model === null) delete models[type];
   else models[type] = model;
   mkdirSync(stateDir(), { recursive: true });
-  writeFileSync(configFile(), JSON.stringify({ ...cfg, subagentModels: models }));
+  writeAtomic(configFile(), JSON.stringify({ ...cfg, subagentModels: models }));
 }
 
 /**

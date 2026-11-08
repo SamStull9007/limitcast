@@ -16,7 +16,7 @@ import {
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readSettings, settingsPath } from './install.mjs';
-import { stateDir } from './store.mjs';
+import { stateDir, writeAtomic } from './store.mjs';
 
 // `trim --apply`: hide unused skills and turn off unused MCP servers through Claude Code's own settings.
 // Skills: `skillOverrides` in ~/.claude/settings.json ("user-invocable-only": the model stops seeing it, /name still works).
@@ -77,7 +77,7 @@ export function setKeep(names) {
     /* new */
   }
   mkdirSync(stateDir(), { recursive: true });
-  writeFileSync(configFile(), JSON.stringify({ ...cfg, trimKeep: [...new Set(names)] }));
+  writeAtomic(configFile(), JSON.stringify({ ...cfg, trimKeep: [...new Set(names)] }));
 }
 
 /** Same server or skill under another spelling ("ego-browser" / "ego_browser") counts. @param {string[]} keep @param {string} name */

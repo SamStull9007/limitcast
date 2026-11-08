@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stateDir } from './store.mjs';
 
-// Large tool-output notice (Pro, PostToolUse hook, installed with --alerts). A tool result enters the context once as
+// Large tool-output notice (PostToolUse hook, installed with --alerts). A tool result enters the context once as
 // new tokens and is then re-read on every later call, so a very large one is worth knowing about. The notice goes to
 // the user (systemMessage), never the model, once per tool per session, with what to ask for next time.
 

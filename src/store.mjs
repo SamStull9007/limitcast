@@ -1,5 +1,5 @@
 // @ts-check
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,6 +10,13 @@ const PRUNE_BYTES = 1_000_000;
 
 export function stateDir() {
   return process.env.LIMITCAST_STATE ?? join(process.env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'), 'limitcast');
+}
+
+/** Write through a temp file and rename, so a hook reading at the same moment never sees a half-written file. */
+export function writeAtomic(/** @type {string} */ path, /** @type {string} */ text) {
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, text);
+  renameSync(tmp, path);
 }
 
 /**
@@ -38,9 +45,9 @@ export function record(samples) {
   const file = join(dir, 'samples.jsonl');
   appendFileSync(file, `${fresh.map((s) => JSON.stringify(s)).join('\n')}\n`);
   for (const s of fresh) last[key(s)] = { pct: s.pct, reset: s.reset };
-  writeFileSync(lastPath, JSON.stringify(last));
+  writeAtomic(lastPath, JSON.stringify(last));
   if (statSync(file).size > PRUNE_BYTES)
-    writeFileSync(
+    writeAtomic(
       file,
       load(Date.now() - KEEP_MS)
         .map((s) => `${JSON.stringify(s)}\n`)

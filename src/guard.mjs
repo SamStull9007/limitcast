@@ -130,7 +130,7 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
     }
     if (!preview) return todayMessage(day);
   }
-  // Pro: hold new Claude subagents once those of this account have used their budget of the current 5-hour window.
+  // Hold new Claude subagents once those of this account have used their budget of the current 5-hour window.
   const budget = src === 'claude' ? getBudget() : null;
   if (budget) {
     const start = windowStart(forecasts, now);
