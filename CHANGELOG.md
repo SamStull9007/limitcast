@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.18.2 — 2026-11-08
 
 - Fix: a mistyped option now fails with `Unknown option --gaurd` and exit 1. Before, `limitcast install --gaurd` or `trim --aply` ignored the typo and ran the plain command. Hooks (`guard`, `statusline` and the others) are not checked, so they still fail open.
 - Fix: settings (`config.json`), the usage cache, `last.json` and the pruned `samples.jsonl` are written to a temp file and renamed. A hook that read one while a command was writing it could see an empty file and treat budgets and the keep-list as unset for that call.
