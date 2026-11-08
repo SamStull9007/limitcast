@@ -16,7 +16,7 @@ import {
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readSettings, settingsPath } from './install.mjs';
-import { stateDir, writeAtomic } from './store.mjs';
+import { stateDir, updateConfig } from './store.mjs';
 
 // `trim --apply`: hide unused skills and turn off unused MCP servers through Claude Code's own settings.
 // Skills: `skillOverrides` in ~/.claude/settings.json ("user-invocable-only": the model stops seeing it, /name still works).
@@ -39,11 +39,13 @@ export const DEFAULT_KEEP = ['ego-browser'];
 export const APPLY_BLOCKED =
   'Nothing on the keep-list, so `trim --apply` would turn off every server that looks unused, including ego-browser. Run `limitcast trim keep ego-browser` first, or repeat with `--yes`.';
 
+const keepFrom = (/** @type {any} */ cfg) =>
+  Array.isArray(cfg.trimKeep) ? cfg.trimKeep.filter((/** @type {unknown} */ n) => typeof n === 'string') : [];
+
 /** Names `trim --apply` never turns off or hides, from `limitcast trim keep`. @returns {string[]} */
 export function getKeep() {
   try {
-    const k = JSON.parse(readFileSync(configFile(), 'utf8')).trimKeep;
-    return Array.isArray(k) ? k.filter((n) => typeof n === 'string') : [];
+    return keepFrom(JSON.parse(readFileSync(configFile(), 'utf8')));
   } catch {
     return [];
   }
@@ -54,31 +56,28 @@ export function getKeep() {
  * @returns {{keep:string[], seeded:boolean}}
  */
 export function ensureDefaultKeep() {
-  let cfg = {};
-  try {
-    cfg = JSON.parse(readFileSync(configFile(), 'utf8'));
-  } catch {
-    cfg = {};
-  }
-  if (Object.hasOwn(cfg, 'trimKeep')) return { keep: getKeep(), seeded: false };
-  setKeep(DEFAULT_KEEP);
-  return { keep: [...DEFAULT_KEEP], seeded: true };
+  let seeded = false;
+  updateConfig((cfg) => {
+    if (Object.hasOwn(cfg, 'trimKeep')) return cfg;
+    seeded = true;
+    return { ...cfg, trimKeep: [...DEFAULT_KEEP] };
+  });
+  return { keep: seeded ? [...DEFAULT_KEEP] : getKeep(), seeded };
 }
 
 /** True when `--apply` must stop because nothing is protected and the user did not pass `--yes`. */
 export const applyBlocked = (/** @type {string[]} */ keep, /** @type {boolean} */ yes) => !yes && keep.length === 0;
 
-/** @param {string[]} names */
-export function setKeep(names) {
-  let cfg = {};
-  try {
-    cfg = JSON.parse(readFileSync(configFile(), 'utf8'));
-  } catch {
-    /* new */
-  }
-  mkdirSync(stateDir(), { recursive: true });
-  writeAtomic(configFile(), JSON.stringify({ ...cfg, trimKeep: [...new Set(names)] }));
+/**
+ * Change the keep-list under the settings lock, so two `trim keep` runs cannot undo each other.
+ * @param {(keep: string[]) => string[]} change
+ */
+export function editKeep(change) {
+  updateConfig((cfg) => ({ ...cfg, trimKeep: [...new Set(change(keepFrom(cfg)))] }));
 }
+
+/** @param {string[]} names */
+export const setKeep = (names) => editKeep(() => names);
 
 /** Same server or skill under another spelling ("ego-browser" / "ego_browser") counts. @param {string[]} keep @param {string} name */
 export const isKept = (keep, name) => keep.some((k) => norm(k) === norm(name));

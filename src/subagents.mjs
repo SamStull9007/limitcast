@@ -2,7 +2,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { stateDir, writeAtomic } from './store.mjs';
+import { stateDir, updateConfig } from './store.mjs';
 
 // Subagent receipts and budgets. A SubagentStop hook prices each finished subagent against the 5-hour window
 // (from the user's own calibration) and logs it; the guard holds new subagents once a window's budget is spent.
@@ -121,14 +121,7 @@ export function getBudget() {
 
 /** @param {number|null} pct */
 export function setBudget(pct) {
-  let cfg = {};
-  try {
-    cfg = JSON.parse(readFileSync(configFile(), 'utf8'));
-  } catch {
-    /* new */
-  }
-  mkdirSync(stateDir(), { recursive: true });
-  writeAtomic(configFile(), JSON.stringify({ ...cfg, subagentBudget: pct }));
+  updateConfig((cfg) => ({ ...cfg, subagentBudget: pct }));
 }
 
 /** Whether the guard holds new subagents once today's share of a weekly window is used up (`limitcast budget today on`). */
@@ -142,14 +135,7 @@ export function getTodayHold() {
 
 /** @param {boolean} on */
 export function setTodayHold(on) {
-  let cfg = {};
-  try {
-    cfg = JSON.parse(readFileSync(configFile(), 'utf8'));
-  } catch {
-    /* new */
-  }
-  mkdirSync(stateDir(), { recursive: true });
-  writeAtomic(configFile(), JSON.stringify({ ...cfg, todayHold: on }));
+  updateConfig((cfg) => ({ ...cfg, todayHold: on }));
 }
 
 /** A model a subagent type can be pinned to: sonnet, opus, haiku, a claude-... id, or a grok-... id. */
@@ -183,17 +169,12 @@ export function getSubagentModels() {
  * @param {string|null} model
  */
 export function setSubagentModel(type, model) {
-  let cfg = /** @type {any} */ ({});
-  try {
-    cfg = JSON.parse(readFileSync(configFile(), 'utf8'));
-  } catch {
-    /* new */
-  }
-  const models = { ...cfg.subagentModels };
-  if (model === null) delete models[type];
-  else models[type] = model;
-  mkdirSync(stateDir(), { recursive: true });
-  writeAtomic(configFile(), JSON.stringify({ ...cfg, subagentModels: models }));
+  updateConfig((cfg) => {
+    const models = { ...cfg.subagentModels };
+    if (model === null) delete models[type];
+    else models[type] = model;
+    return { ...cfg, subagentModels: models };
+  });
 }
 
 /**

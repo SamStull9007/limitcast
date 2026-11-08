@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { codexServers, setEnabled } from './codex.mjs';
 import { windowMs } from './forecast.mjs';
-import { KEEP_MS, stateDir, writeAtomic } from './store.mjs';
+import { KEEP_MS, stateDir, updateConfig } from './store.mjs';
 import { grokRoot } from './usage.mjs';
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */
@@ -182,18 +182,13 @@ export function getGrokBudget() {
  * @param {'5h'|'7d'} [win]
  */
 export function setGrokBudget(usd, win = '5h') {
-  let cfg = {};
-  try {
-    cfg = JSON.parse(readFileSync(configFile(), 'utf8'));
-  } catch {
-    /* new */
-  }
-  /** @type {{'5h'?:number, '7d'?:number}} */
-  const cur = typeof cfg.grokBudget === 'number' ? { '5h': cfg.grokBudget } : { ...(cfg.grokBudget ?? {}) };
-  if (usd === null) delete cur[win];
-  else cur[win] = usd;
-  mkdirSync(stateDir(), { recursive: true });
-  writeAtomic(configFile(), JSON.stringify({ ...cfg, grokBudget: Object.keys(cur).length ? cur : null }));
+  updateConfig((cfg) => {
+    /** @type {{'5h'?:number, '7d'?:number}} */
+    const cur = typeof cfg.grokBudget === 'number' ? { '5h': cfg.grokBudget } : { ...(cfg.grokBudget ?? {}) };
+    if (usd === null) delete cur[win];
+    else cur[win] = usd;
+    return { ...cfg, grokBudget: Object.keys(cur).length ? cur : null };
+  });
 }
 
 /**
@@ -234,14 +229,7 @@ export function grokQuotaEnabled() {
 
 /** @param {boolean} on */
 export function setGrokQuota(on) {
-  let cfg = {};
-  try {
-    cfg = JSON.parse(readFileSync(configFile(), 'utf8'));
-  } catch {
-    /* new */
-  }
-  mkdirSync(stateDir(), { recursive: true });
-  writeAtomic(configFile(), JSON.stringify({ ...cfg, grokQuota: on }));
+  updateConfig((cfg) => ({ ...cfg, grokQuota: on }));
 }
 
 /** @returns {QuotaState} */

@@ -9,6 +9,7 @@ import {
   applyBlocked,
   applyTrim,
   claudeJsonPath,
+  editKeep,
   ensureDefaultKeep,
   getKeep,
   installedPlugins,
@@ -17,7 +18,6 @@ import {
   planTrim,
   projectMcpServers,
   reapplyTrim,
-  setKeep,
   stillLoading,
   transcriptCwd,
   undoTrim,
@@ -723,7 +723,7 @@ if (cmd === 'status') {
       .split(',')
       .map((n) => n.trim())
       .filter(Boolean);
-    if (names.length) setKeep(drop ? getKeep().filter((k) => !isKept(names, k)) : [...getKeep(), ...names]);
+    if (names.length) editKeep((keep) => (drop ? keep.filter((k) => !isKept(names, k)) : [...keep, ...names]));
     const keep = getKeep();
     console.log(keep.length ? `Kept by \`trim --apply\`: ${keep.join(', ')}` : 'Nothing on the keep-list. Example: limitcast trim keep ego-browser');
     process.exit(0);

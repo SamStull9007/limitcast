@@ -1,5 +1,5 @@
 // @ts-check
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -17,6 +17,51 @@ export function writeAtomic(/** @type {string} */ path, /** @type {string} */ te
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, text);
   renameSync(tmp, path);
+}
+
+const LOCK_STALE_MS = 2_000; // the lock is held for one read and one write; older than this means its owner died
+const LOCK_WAIT_MS = 5_000;
+
+/**
+ * Change config.json under a lock: read it, let `change` return the new settings (or the same object to leave the file
+ * alone), write it. Without the lock, two commands that each read the file and then each write it lose one change.
+ * shortcut: two waiters that break the same stale lock in the same instant can both write; fix with a lockfile library if seen.
+ * @param {(cfg: any) => any} change
+ */
+export function updateConfig(change) {
+  const dir = stateDir();
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'config.json');
+  const lock = `${file}.lock`;
+  const start = Date.now();
+  for (;;) {
+    try {
+      mkdirSync(lock); // atomic: exactly one process creates it
+      break;
+    } catch (e) {
+      if (/** @type {NodeJS.ErrnoException} */ (e).code !== 'EEXIST') throw e;
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) rmSync(lock, { recursive: true, force: true });
+      } catch {
+        /* released while we looked */
+      }
+      if (Date.now() - start > LOCK_WAIT_MS) throw new Error(`could not lock ${file}: another limitcast command is changing settings`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+  }
+  try {
+    let cfg = {};
+    try {
+      cfg = JSON.parse(readFileSync(file, 'utf8'));
+    } catch {
+      /* new or corrupt: start fresh */
+    }
+    if (!cfg || typeof cfg !== 'object') cfg = {};
+    const next = change(cfg);
+    if (next !== cfg) writeAtomic(file, JSON.stringify(next));
+  } finally {
+    rmSync(lock, { recursive: true, force: true });
+  }
 }
 
 /**
