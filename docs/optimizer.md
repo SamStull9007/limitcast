@@ -1,13 +1,13 @@
 # Repository optimizer
 
-The optimizer complements Limitcast's forecasts, budgets, MCP trimming and subagent controls. It adds local failure-loop detection, evidence-backed check-command learning, built-in capability pruning and a bounded source map. It is opt-in and adds no model or network calls.
+The optimizer complements Limitcast's forecasts, budgets, MCP trimming and subagent controls. It adds local failure-loop detection, evidence-backed check-command learning, built-in capability pruning and a bounded source map. It is opt-in. Its deterministic mode adds no model/network calls; optional model work consumes your Codex plan.
 
 ```sh
 limitcast install --optimize
 limitcast optimize status
 ```
 
-Restart the host. Codex asks you to review and trust the new hooks. Claude Code, Codex and Grok have adapters; other agents are not integrated yet. These commands operate on the current Git repository, including when run from a subdirectory. Worktrees have separate evidence. `LIMITCAST_ALLOW=1` bypasses optimizer hooks. `limitcast uninstall` removes them while preserving unrelated hooks; it does not erase evidence or undo explicit capability edits.
+Restart the host. Codex asks you to review and trust the new hooks. Claude Code, Codex, Grok, Copilot CLI and Pi have optimizer adapters. These commands operate on the current Git repository, including when run from a subdirectory. Worktrees have separate evidence. `LIMITCAST_ALLOW=1` bypasses optimizer hooks. `limitcast uninstall` removes them while preserving unrelated hooks; it does not erase evidence or undo explicit capability edits.
 
 ## Failure loops
 
@@ -26,7 +26,7 @@ limitcast optimize learn off
 
 Learning starts off. A recognized check command must fail because its executable/module is missing, and an alternative must then succeed. Three independent sessions must confirm that replacement before it is injected. A later missing-command/module result for the replacement retires the fact. Ordinary test assertion failures do not teach environment facts.
 
-Only a small whitelist of test/build/check commands is eligible. Raw prompts, output and arbitrary instructions are not retained or injected. At most four active facts and 1,000 characters are injected per session. This is deliberately narrower than model-synthesized repository knowledge: there is no paid proposer or judge. Inspect the facts and retire any that no longer apply; they are evidence, not commands that Limitcast executes.
+Only a small whitelist of test/build/check commands is eligible. Raw prompts, output and arbitrary instructions are not retained or injected. At most four active facts and 1,000 characters are injected per session. The deterministic mode learns command alternatives. Optional model learning also selects successful verification commands; arbitrary repository prose is intentionally excluded. Inspect the facts and retire any that no longer apply; they are evidence, not commands that Limitcast executes.
 
 ## Built-in capabilities
 
@@ -65,3 +65,35 @@ limitcast optimize replay /path/to/hooks.json --codex
 The file is an array of native hook payloads. Replay is in memory and reports redirects, notices, command facts and emitted context; it does not edit repository settings or invent token savings. The deterministic six-case suite in `scripts/optimizer-eval.yaml` covers looping, productive work, changing failures, exploration, duplicate delivery and ambiguous status. No external tools or model calls are attached.
 
 Optimizer state is local under Limitcast's state directory, separated by a hash of repository path and host. It contains bounded counters, command shapes, failure digests and receipts. Explicit capability edits also retain their original configuration bytes locally for undo; protect the state directory like other local configuration. Corrupt or oversized state is preserved and refused rather than silently reset.
+
+
+## Optional model learning and judging
+
+```sh
+limitcast optimize model on
+limitcast optimize learn on
+limitcast optimize model
+limitcast optimize model off
+```
+
+Requires an authenticated Codex CLI supporting `--ignore-user-config` (verified on 0.167.0). All five host adapters use this same Codex backend; Copilot/Pi provider accounts are not used for optimizer calls. Native gpt-5.6-luna calls use low reasoning, a neutral temporary directory, an ephemeral read-only session, no user config/rules/project documents, disabled hooks/plugins/shell/collaboration/web, and a structured output schema. Missing/unsupported native features fail open with an error receipt; an unavailable model is not silently replaced.
+
+Only allowlisted check commands, action types, counts and hashed file/failure identities are sent. There are no raw transcripts, source text, prompts or tool output. The learning model selects commands observed passing, requires three independent session confirmations, and retires a selected check when it later fails. Facts cannot become arbitrary model-authored instructions. This narrower learning surface does not reproduce TokenEconomizer's general prose repository facts.
+
+Judging runs after the heuristic detects a suspicious loop. A redirect requires stuck=true and confidence at least 0.7, is delivered on a later tool-result event, and never stops work. Results from a different prompt-turn, ended/productive session or expired job are discarded. Unknown verdicts/errors do not authorize a redirect. A productive verdict remains valid for at most twelve more calls or five minutes.
+
+Model work runs in a detached process outside the state lock. One outstanding job and six attempts in a rolling 24 hours are allowed per repository across hosts. Each native call times out after 45 seconds; leases expire after two minutes. The status receipt records actual input/cached/output usage when reported; missing usage is null, not zero. Native base prompts can cost thousands of tokens. Calls do not guarantee net savings. Disable model work to cancel pending application; deterministic learning and controls remain usable.
+
+## Copilot CLI and Pi
+
+```sh
+limitcast optimize install --copilot
+limitcast optimize install --pi
+# Remove the corresponding adapter:
+limitcast optimize install --copilot --undo
+limitcast optimize install --pi --undo
+```
+
+Restart the selected host. Copilot installation owns only `~/.copilot/hooks/limitcast.json` (or COPILOT_HOME) and uses the documented PascalCase payloads and top-level additionalContext. Pi adds the packaged extension path to `~/.pi/agent/settings.json` (or PI_CODING_AGENT_DIR), preserving other extensions. Both installers back up existing settings and refuse symlinks or conflicting files. They do not install or authenticate an agent. Use a stable global Limitcast installation before installing adapters; moving/removing that installation requires reinstalling them. General `limitcast uninstall` covers the original three hosts; use the explicit adapter --undo commands for Copilot/Pi.
+
+Host contracts: [Copilot hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference), [Pi extensions](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md). Copilot/Pi optimizer support does not add their allowance forecasting or built-in capability pruning.

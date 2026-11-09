@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { stateDir, updateConfig, writeAtomic } from './store.mjs';
 
 export const digest = (text) => createHash('sha256').update(text).digest('hex');
-export const HOSTS = ['claude', 'codex', 'grok'];
+export const HOSTS = ['claude', 'codex', 'grok', 'copilot', 'pi'];
 export const CORE_TOOLS =
   /^(?:Bash|Read|Edit|Write|Grep|Glob|Skill|WebSearch|WebFetch|AskUserQuestion|exec|exec_command|apply_patch|request_user_input)$/i;
 const CAPABILITIES = {
@@ -76,6 +76,8 @@ function responseText(value) {
   if (!value || typeof value !== 'object') return '';
   return [
     value.stdout,
+    value.text_result_for_llm,
+    value.textResultForLlm,
     value.stderr,
     value.output_for_prompt,
     value.output,
@@ -95,19 +97,28 @@ export function normalizeEvent(hook, host) {
   if (!HOSTS.includes(host) || !hook || typeof hook !== 'object') throw new Error('unsupported optimizer host or event');
   const sid = String(hook.session_id ?? hook.sessionId ?? '').slice(0, 200);
   if (!sid) throw new Error('optimizer needs a session id');
-  const rawEvent = String(hook.hook_event_name ?? hook.hookEventName ?? '');
+  const rawEvent = String(hook.hook_event_name ?? hook.hookEventName ?? hook.event ?? '');
   const event = rawEvent.includes('_')
     ? rawEvent
         .split('_')
         .map((s) => s[0]?.toUpperCase() + s.slice(1))
         .join('')
-    : rawEvent;
+    : ({ agentStop: 'Stop', userPromptSubmitted: 'UserPromptSubmit' }[rawEvent] ?? rawEvent[0]?.toUpperCase() + rawEvent.slice(1));
   if (!['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop'].includes(event))
     throw new Error('unsupported optimizer event');
   const nativeName = String(hook.tool_name ?? hook.toolName ?? '').slice(0, 100);
-  const aliases = { run_terminal_command: 'Bash', run_terminal_cmd: 'Bash', search_replace: 'Edit', read_file: 'Read' };
+  const aliases = {
+    bash: 'Bash',
+    edit: 'Edit',
+    write: 'Write',
+    read: 'Read',
+    run_terminal_command: 'Bash',
+    run_terminal_cmd: 'Bash',
+    search_replace: 'Edit',
+    read_file: 'Read',
+  };
   const name = Object.hasOwn(aliases, nativeName) ? aliases[nativeName] : nativeName;
-  let input = hook.tool_input ?? hook.toolInput ?? {};
+  let input = hook.tool_input ?? hook.toolInput ?? hook.toolArgs ?? {};
   if (typeof input === 'string') {
     try {
       input = JSON.parse(input);
@@ -116,7 +127,15 @@ export function normalizeEvent(hook, host) {
     }
   }
   const response = hook.tool_response ?? hook.tool_result ?? hook.toolResult ?? hook.error;
-  const text = responseText(response);
+  let parsedResponse = response;
+  if (typeof response === 'string') {
+    try {
+      parsedResponse = JSON.parse(response);
+    } catch {
+      /* plain tool output */
+    }
+  }
+  const text = responseText(parsedResponse);
   const rawCode = typeof input?.code === 'string' ? input.code : typeof input?.input === 'string' ? input.input : '';
   const nested = [...rawCode.matchAll(/\b(?:cmd|command)\s*:\s*("(?:[^"\\]|\\.)*"|'[^'\\]*')/g)];
   let nestedCommand;
@@ -128,12 +147,13 @@ export function normalizeEvent(hook, host) {
     }
   }
   const command = commandShape(input?.command ?? input?.cmd ?? nestedCommand);
-  const reportedCode = /(?:^|\n)(?:Exit code |Process exited with code |exit: )(\d+)\b/i.exec(text)?.[1];
-  const status = response?.exit_code ?? response?.exitCode ?? hook.exit_code ?? (reportedCode === undefined ? undefined : Number(reportedCode));
+  const reportedCode = /(?:^|\n)(?:Exit code:? |Process exited with code |exit: )(\d+)\b/i.exec(text)?.[1];
+  const status =
+    parsedResponse?.exit_code ?? parsedResponse?.exitCode ?? hook.exit_code ?? (reportedCode === undefined ? undefined : Number(reportedCode));
   const failed =
     event === 'PostToolUseFailure' ||
-    response?.is_error === true ||
-    response?.isError === true ||
+    parsedResponse?.is_error === true ||
+    parsedResponse?.isError === true ||
     (typeof status === 'number' && status !== 0) ||
     (Boolean(command) && /(?:^|\s)[1-9]\d* failed\b/.test(text));
   const path = String(
@@ -168,7 +188,7 @@ export function normalizeEvent(hook, host) {
   };
 }
 
-const freshTurn = () => ({ calls: 0, errors: 0, repeats: 0, failures: [], edits: {}, green: false, nudged: false, warned: false });
+const freshTurn = () => ({ trace: [], calls: 0, errors: 0, repeats: 0, failures: [], edits: {}, green: false, nudged: false, warned: false });
 
 export function loopDecision(turn, productiveLengths = []) {
   const churn = Math.max(0, ...Object.values(turn.edits));
@@ -207,9 +227,13 @@ function learn(state, session, e) {
 export function learnedContext(state) {
   if (!state.config.learn) return '';
   return state.facts
-    .filter((f) => f.state === 'active' && commandShape(f.from) && commandShape(f.to))
+    .filter((f) => f.state === 'active' && commandShape(f.to) && (f.kind === 'check' || commandShape(f.from)))
     .slice(0, 4)
-    .map((f) => `Repository evidence: ${f.from} failed and ${f.to} succeeded in three independent sessions. Consider ${f.to} for that check.`)
+    .map((f) =>
+      f.kind === 'check'
+        ? `Repository evidence: ${f.to} passed in three independent sessions and was selected by the learning model. Consider it for verification.`
+        : `Repository evidence: ${f.from} failed and ${f.to} succeeded in three independent sessions. Consider ${f.to} for that check.`,
+    )
     .join('\n')
     .slice(0, 1000);
 }
@@ -251,6 +275,7 @@ export function processEvent(state, e, now = Date.now()) {
   }
   if (e.event === 'UserPromptSubmit') {
     session.turn = freshTurn();
+    session.turnId = (session.turnId ?? 0) + 1;
     session.stopped = false;
     session.failed = [];
     host.prompts++;
@@ -268,6 +293,25 @@ export function processEvent(state, e, now = Date.now()) {
   } else if (/^PostToolUse(?:Failure)?$/.test(e.event)) {
     const turn = session.turn;
     turn.calls++;
+    turn.trace = [
+      ...(turn.trace ?? []),
+      {
+        action: e.edit ? 'edit' : e.command ? 'check' : 'other',
+        command: e.command,
+        failed: e.failed,
+        succeeded: e.succeeded,
+        file: e.file,
+        failure: e.failure,
+      },
+    ].slice(-30);
+    if (e.command) {
+      session.checks ??= {};
+      if (e.succeeded) session.checks[e.command] = true;
+      if (e.failed) {
+        delete session.checks[e.command];
+        for (const f of state.facts) if (f.kind === 'check' && f.to === e.command) f.state = 'retired';
+      }
+    }
     if (e.edit) {
       if (Object.keys(turn.edits).length < 64 || turn.edits[e.file || e.name]) turn.edits[e.file || e.name] = (turn.edits[e.file || e.name] ?? 0) + 1;
       turn.green = false;
@@ -287,6 +331,14 @@ export function processEvent(state, e, now = Date.now()) {
     }
     learn(state, session, e);
     const decision = loopDecision(turn, host.productive);
+    if (decision === 'redirect' && state.config.model) {
+      const verdict = turn.judgment;
+      if (!verdict || now - verdict.at > 300000 || turn.calls - verdict.calls > 12) {
+        if (!turn.judgeRequested || now - turn.judgeRequested > 300000) return { modelJob: 'judge' };
+        return {};
+      }
+      if (!verdict.stuck || verdict.confidence < 0.7) return {};
+    }
     if (decision === 'redirect') {
       turn.nudged = true;
       turn.nudgeAt = turn.calls;
@@ -303,6 +355,14 @@ export function processEvent(state, e, now = Date.now()) {
       return { notice: 'Limitcast: repeated failures continued after a redirect. Review the approach; interrupt the turn if needed.' };
     }
   }
+  if (
+    state.config.learn &&
+    state.config.model &&
+    ['Stop', 'SessionEnd'].includes(e.event) &&
+    !session.learningRequested &&
+    Object.keys(session.checks ?? {}).length
+  )
+    return { modelJob: 'learn' };
   // Keep ended-session tombstones so replay cannot count the same session twice.
   const ids = Object.keys(host.sessions);
   for (const id of ids.slice(0, Math.max(0, ids.length - 30))) delete host.sessions[id];

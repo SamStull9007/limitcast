@@ -114,6 +114,8 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
   limitcast grok-usage [on|off]      Grok's weekly % used, from grok.com with the login Grok holds (off by default)
   limitcast memory [dir]             check this project's auto-memory: load cap, broken links, unlinked and oversized files
   limitcast install --optimize       opt-in local loop detection and repository optimizer hooks
+  limitcast optimize install --copilot|--pi  install the optional host adapter (--undo removes it)
+  limitcast optimize model on|off     opt into bounded Codex-backed learning/judging (uses your plan)
   limitcast optimize status          inspect repository evidence, proposals and optimization receipts
   limitcast optimize learn on|off     learn safe check-command alternatives; three independent sessions to promote
   limitcast optimize map [on|off]     show a bounded source-symbol map or opt into session-start injection

@@ -1,10 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.19.0 — 2026-11-09
 
-- Opt-in repository optimizer: `install --optimize` adds local failure-loop detection, evidence-backed check-command learning, explicit reversible built-in capability pruning and a bounded tracked-source map. Existing forecasts, guards and MCP trimming remain available. Learning and map injection start off; no additional model/network calls are made.
+- Opt-in repository optimizer: `install --optimize` adds local failure-loop detection, evidence-backed check-command learning, explicit reversible built-in capability pruning and a bounded tracked-source map. Existing forecasts, guards and MCP trimming remain available. Learning, map injection and model calls start off.
 - Native Claude Code, Codex and Grok hook adapters, per-repository evidence, concurrent-event serialization, bounded receipts, three-session fact confirmation, contradiction retirement, privacy filtering and a deterministic replay/evaluation workflow. See `docs/optimizer.md` for the supported surface and limits; these additions do not establish comparative real-world savings.
 - Capability changes journal before writing, refuse tracked/symlinked/conflicting configuration, verify Codex's actual project feature state and restore only if the file still matches. The optimizer's state-writing hooks use the settings lock; existing read-only hooks are unchanged.
+- Optional Codex-backed model worker selects verified check guidance and judges suspicious loops asynchronously. Six attempts per repository per day, 45-second native timeout, grounded outputs, three-session promotion, stale-turn rejection and inspectable actual usage/error receipts.
+- Copilot CLI personal hooks and Pi extension adapters support context injection, loop redirects and evidence collection. Forecasting remains specific to Claude/Codex/Grok; the optional model backend requires an authenticated Codex CLI.
 - Tests: isolate the launcher's missing-install fixture from a real Homebrew installation and verify its PATH fallback separately.
 
 ## 0.18.3 — 2026-11-08

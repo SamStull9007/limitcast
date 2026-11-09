@@ -267,6 +267,7 @@ test('optimizer installation is idempotent and uninstall preserves unrelated hos
   assert.equal(installedFeatures(path).optimize, true);
   assert.equal(readSettings(path).hooks.Stop.length, 2);
   assert.equal(readSettings(codexPath).hooks.SessionStart.length, 1);
+  assert.equal(readSettings(codexPath).hooks.PostToolUseFailure, undefined);
   uninstall(opts);
   assert.deepEqual(readSettings(path).hooks.Stop, [mine]);
   assert.equal(readSettings(codexPath).hooks.SessionStart.length, 0);

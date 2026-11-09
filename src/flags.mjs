@@ -5,6 +5,8 @@ export const KNOWN_FLAGS = [
   '--alerts',
   '--apply',
   '--codex',
+  '--copilot',
+  '--pi',
   '--days',
   '--detach',
   '--fix',

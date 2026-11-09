@@ -161,8 +161,17 @@ export function install({
 
 function addOptimizerHooks(cfg, self, host) {
   const events = ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'SessionEnd'];
-  for (const event of events)
-    upsertHook(cfg, event, { matcher: '', hooks: [{ type: 'command', command: `${self} _optimize-hook --src ${host}`, timeout: 10 }] }, isOptimizer);
+  // Codex reports failed calls through PostToolUse; its native hook schema has no failure event.
+  for (const event of events.filter((e) => host !== 'codex' || e !== 'PostToolUseFailure'))
+    upsertHook(
+      cfg,
+      event,
+      {
+        matcher: '',
+        hooks: [{ type: 'command', command: `${self} _optimize-hook --src ${host}`, timeout: host === 'codex' && event === 'SessionEnd' ? 3 : 10 }],
+      },
+      isOptimizer,
+    );
 }
 
 function removeOptimizerHooks(cfg) {
