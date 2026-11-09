@@ -137,6 +137,15 @@ export function normalizeEvent(hook, host) {
   }
   const text = responseText(parsedResponse);
   const rawCode = typeof input?.code === 'string' ? input.code : typeof input?.input === 'string' ? input.input : '';
+  let patchText = rawCode;
+  const patchLiteral = /\btools\.apply_patch\s*\(\s*("(?:[^"\\]|\\.)*")/.exec(rawCode)?.[1];
+  if (patchLiteral) {
+    try {
+      patchText = JSON.parse(patchLiteral);
+    } catch {
+      /* retain the raw form when ambiguous */
+    }
+  }
   const nested = [...rawCode.matchAll(/\b(?:cmd|command)\s*:\s*("(?:[^"\\]|\\.)*"|'[^'\\]*')/g)];
   let nestedCommand;
   if (nested.length === 1) {
@@ -157,7 +166,7 @@ export function normalizeEvent(hook, host) {
     (typeof status === 'number' && status !== 0) ||
     (Boolean(command) && /(?:^|\s)[1-9]\d* failed\b/.test(text));
   const path = String(
-    input?.file_path ?? input?.target_file ?? input?.path ?? /\*\*\* (?:Update|Add|Delete) File: ([^\n]+)/.exec(rawCode)?.[1] ?? '',
+    input?.file_path ?? input?.target_file ?? input?.path ?? /\*\*\* (?:Update|Add|Delete) File: ([^\r\n]+)/.exec(patchText)?.[1] ?? '',
   );
   const edit = /^(?:Edit|Write|MultiEdit|apply_patch|replace_file_content|write_to_file)$/i.test(name) || /\btools\.apply_patch\s*\(/.test(rawCode);
   const succeeded = Boolean(command) && !failed && (status === 0 || /(?:^|\n)(?:# fail 0|.*\b\d+ passed\b|OK)\s*$/m.test(text));

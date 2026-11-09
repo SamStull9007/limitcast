@@ -142,6 +142,22 @@ function evidence(state, host = 'codex') {
   }
 }
 
+test('Codex code-mode patches retain file identity across escaped changing edits', () => {
+  const events = loopEvents().map((e, i) =>
+    e.tool_name !== 'Edit'
+      ? e
+      : {
+          ...e,
+          tool_name: 'exec',
+          tool_input: {
+            code: `await tools.apply_patch(${JSON.stringify(`*** Begin Patch\n*** Update File: src/a.mjs\n@@\n- old\n+ revision${i}\n*** End Patch`)})`,
+          },
+        },
+  );
+  assert.equal(normalizeEvent(events[1], 'codex').file, normalizeEvent(events[3], 'codex').file);
+  assert.equal(replayOptimization(events).redirects, 1);
+});
+
 test('capability evidence protects core tools, ever-used packages, keep lists and session replays', () => {
   const state = fresh();
   feed(state, hook('PostToolUse', { tool_name: 'exec', tool_input: 'await tools.view_image({path:"x"})' }));

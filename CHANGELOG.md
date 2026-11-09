@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.19.1 — 2026-11-09
+
+- Fix Codex code-mode patch normalization: decode JSON-escaped patch literals before hashing the edited filename. Repeated edits to the same file now remain one churn signal even when the patch body changes. No source text is retained. A native-shaped replay regression verifies that the loop detector redirects this case.
+
 ## 0.19.0 — 2026-11-09
 
 - Opt-in repository optimizer: `install --optimize` adds local failure-loop detection, evidence-backed check-command learning, explicit reversible built-in capability pruning and a bounded tracked-source map. Existing forecasts, guards and MCP trimming remain available. Learning, map injection and model calls start off.
