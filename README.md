@@ -38,6 +38,8 @@
 
 - **Start lighter.** Inspect unused skills and MCP servers, then trim with backups and undo. Apply turns off only MCP servers quiet for 30 days. `limitcast trim`
 
+- **Learn from repository evidence (development).** Opt into repeated-failure detection, safe check-command learning, reversible built-in capability pruning and a bounded source map. `limitcast install --optimize` — see [the optimizer guide](docs/optimizer.md) for scope, safeguards and verification limits. Available from this source checkout; npm 0.18.3 does not contain these additions.
+
 <a id="free-and-open-source"></a>
 
 **Free and open source.** All features are included. No Limitcast account, license key, or subscription required. Runs locally on **macOS and Linux** with **Node.js 20+**.

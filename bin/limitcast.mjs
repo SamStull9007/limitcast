@@ -68,6 +68,7 @@ import { doctor, install, installedFeatures, readSettings, settingsPath, uninsta
 import { memoryCheck, memoryDir, memoryReport, scanMemory } from '../src/memory.mjs';
 import { buildNotifierApp, loadChannels, notifierApp, notifyChanges, notifyEnabled, send, setChannel, setNotify } from '../src/notify.mjs';
 import { onboardingReport } from '../src/onboarding.mjs';
+import { runOptimizationHook, runOptimize } from '../src/optimize-cli.mjs';
 import { driftMessage, loadOverhead, recordOverhead, savedPerSession, savedSummary, snapshot } from '../src/overhead.mjs';
 import { advise, getPlan, loadPeaks, PLANS, planPrices, planStats, recordPeaks, setPlan } from '../src/plan.mjs';
 import { costOf, fmtUsd } from '../src/prices.mjs';
@@ -112,6 +113,11 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
   limitcast trim --grok              the same for Grok: system prompt size and MCP servers you haven't used
   limitcast grok-usage [on|off]      Grok's weekly % used, from grok.com with the login Grok holds (off by default)
   limitcast memory [dir]             check this project's auto-memory: load cap, broken links, unlinked and oversized files
+  limitcast install --optimize       opt-in local loop detection and repository optimizer hooks
+  limitcast optimize status          inspect repository evidence, proposals and optimization receipts
+  limitcast optimize learn on|off     learn safe check-command alternatives; three independent sessions to promote
+  limitcast optimize map [on|off]     show a bounded source-symbol map or opt into session-start injection
+  limitcast optimize capabilities --codex   preview unused built-in packages; --apply <names> / --undo
   limitcast results [--days N]       limits you reached, how far ahead limitcast warned, what the guard blocked
                     [--share]        totals only, safe to post
   limitcast license                  show the MIT license status
@@ -190,7 +196,22 @@ const days = () => {
   return Math.max(1, n);
 };
 
-if (cmd === 'status') {
+if (cmd === '_optimize-hook') {
+  try {
+    if (process.env.LIMITCAST_ALLOW !== '1') console.log(JSON.stringify(runOptimizationHook(JSON.parse(readStdin()), flag('--src') ?? 'claude')));
+  } catch {
+    // Hook payloads and settings can contain secrets; never echo a failed parse or its input.
+    console.error('limitcast optimizer skipped: invalid hook, repository or state; run optimize status to inspect');
+  }
+} else if (cmd === 'optimize') {
+  try {
+    const result = runOptimize(args);
+    console.log(result.text ?? JSON.stringify(result, null, 2));
+  } catch (error) {
+    console.error(error instanceof SyntaxError ? 'Invalid optimizer JSON; preserve the file and repair it before retrying.' : error.message);
+    process.exitCode = 1;
+  }
+} else if (cmd === 'status') {
   if (grokQuotaEnabled() && grokPresent()) await refreshGrokQuota(now);
   const rows = forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS)), ...grokSamples(now)]), now);
   if (args.includes('--json')) console.log(JSON.stringify(rows, null, 2));
@@ -598,7 +619,7 @@ if (cmd === 'status') {
 } else if (cmd === 'install') {
   const wantGuard = args.includes('--guard');
   const wantAlerts = args.includes('--alerts');
-  for (const c of install({ guard: wantGuard, alerts: wantAlerts })) console.log(`✓ ${c}`);
+  for (const c of install({ guard: wantGuard, alerts: wantAlerts, optimize: args.includes('--optimize') })) console.log(`✓ ${c}`);
   if (ensureDefaultKeep().seeded) console.log('Kept ego-browser: trim --apply will not turn it off. Add more with limitcast trim keep <name>.');
   console.log('Restart Claude Code, Codex and Grok to load it. Then: limitcast doctor');
   if (wantGuard && grokPresent() && !getGrokBudget())
@@ -659,7 +680,7 @@ if (cmd === 'status') {
     const f = installedFeatures();
     if (!f.statusLine) console.log('limitcast is not installed. Run `limitcast install` first.');
     else {
-      for (const c of install({ guard: f.guard, alerts: f.alerts })) console.log(`✓ ${c}`);
+      for (const c of install({ guard: f.guard, alerts: f.alerts, optimize: f.optimize })) console.log(`✓ ${c}`);
       ensureDefaultKeep();
       console.log('Restart Claude Code, Codex and Grok to load it. Codex asks you to approve the guard again: start Codex and accept it.');
     }

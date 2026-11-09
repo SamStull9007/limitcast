@@ -17,6 +17,7 @@ export const KNOWN_FLAGS = [
   '--json',
   '--no-open',
   '--out',
+  '--optimize',
   '--refresh',
   '--remove',
   '--share',

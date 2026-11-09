@@ -462,9 +462,16 @@ test('launcher: runs this copy, falls back to limitcast on PATH, then to your ow
     assert.match(execFileSync('/bin/sh', [sh, '--version'], { env }).toString(), /^\d+\.\d+\.\d+/);
     // Node moved (an upgrade) and no limitcast on PATH: the status line still runs the wrapped command.
     writeLauncher('/gone/node', '/gone/limitcast.mjs');
+    // Isolate the missing-install branch from a real Homebrew install on the test machine.
+    const launcher = readFileSync(sh, 'utf8');
+    assert.ok(launcher.includes('PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin"'));
+    writeFileSync(sh, launcher.replace('PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin"', 'PATH="$PATH"'));
     const out = execFileSync('/bin/sh', [sh, 'statusline', '--', 'sh', '-c', 'cat >/dev/null; echo mine'], { env, input: '{}' }).toString();
     assert.equal(out, 'mine\n');
     assert.equal(execFileSync('/bin/sh', [sh, 'guard'], { env, stdio: ['ignore', 'pipe', 'pipe'] }).toString(), ''); // allows
+    const fallback = join(state, 'limitcast');
+    writeFileSync(fallback, '#!/bin/sh\necho fallback\n', { mode: 0o755 });
+    assert.equal(execFileSync('/bin/sh', [sh, '--version'], { env: { ...env, PATH: `${state}:/usr/bin:/bin` } }).toString(), 'fallback\n');
   } finally {
     process.env.LIMITCAST_STATE = prev;
   }

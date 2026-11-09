@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -51,8 +51,10 @@ test('writeAtomic replaces the file and leaves no temp file behind', () => {
   const dir = mkdtempSync(join(tmpdir(), 'lc-atomic-'));
   const file = join(dir, 'config.json');
   writeFileSync(file, '{"old":true}');
+  chmodSync(file, 0o600);
   writeAtomic(file, '{"new":true}');
   assert.equal(readFileSync(file, 'utf8'), '{"new":true}');
   assert.deepEqual(readdirSync(dir), ['config.json']);
   assert.ok(statSync(file).isFile());
+  assert.equal(statSync(file).mode & 0o777, 0o600, 'atomic replacement must preserve private configuration permissions');
 });

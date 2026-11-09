@@ -1,5 +1,6 @@
 // @ts-check
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,9 +15,19 @@ export function stateDir() {
 
 /** Write through a temp file and rename, so a hook reading at the same moment never sees a half-written file. */
 export function writeAtomic(/** @type {string} */ path, /** @type {string} */ text) {
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, text);
-  renameSync(tmp, path);
+  const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  const mode = existsSync(path) ? statSync(path).mode & 0o777 : 0o600;
+  const fd = openSync(tmp, 'wx', mode);
+  let closed = false;
+  try {
+    writeFileSync(fd, text);
+    closeSync(fd);
+    closed = true;
+    renameSync(tmp, path);
+  } finally {
+    if (!closed) closeSync(fd);
+    rmSync(tmp, { force: true });
+  }
 }
 
 const LOCK_STALE_MS = 2_000; // the lock is held for one read and one write; older than this means its owner died

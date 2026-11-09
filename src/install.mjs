@@ -78,9 +78,17 @@ export function launcherTargets(path) {
  * Idempotent; backs up settings.json first; remembers the original status line for uninstall.
  * With `guard`, Codex gets the guard too when ~/.codex exists. With `alerts`, a SessionStart hook tells you
  * (never the model) when your starting context grew.
- * @param {{guard:boolean, alerts?:boolean, path?:string, codexPath?:string, grokDir?:string, self?:string}} opts
+ * @param {{guard:boolean, alerts?:boolean, optimize?:boolean, path?:string, codexPath?:string, grokDir?:string, self?:string}} opts
  */
-export function install({ guard, alerts = false, path = settingsPath(), codexPath = codexHooksPath(), grokDir = grokHome(), self = selfCommand() }) {
+export function install({
+  guard,
+  alerts = false,
+  optimize = false,
+  path = settingsPath(),
+  codexPath = codexHooksPath(),
+  grokDir = grokHome(),
+  self = selfCommand(),
+}) {
   const cfg = readSettings(path);
   backup(path);
   const changes = [];
@@ -120,6 +128,10 @@ export function install({ guard, alerts = false, path = settingsPath(), codexPat
     );
     changes.push('added the fat-tool limit check');
   }
+  if (optimize) {
+    addOptimizerHooks(cfg, self, 'claude');
+    changes.push('added opt-in repository optimizer hooks (learning and map injection remain off until enabled per repository)');
+  }
   writeSettings(path, cfg);
   if (guard && existsSync(join(codexPath, '..'))) {
     const codex = readSettings(codexPath);
@@ -129,7 +141,32 @@ export function install({ guard, alerts = false, path = settingsPath(), codexPat
     changes.push('added the Codex subagent guard (Codex runs it after you trust it: start Codex and approve the new hook)');
   }
   if (grokPresent(grokDir)) changes.push(...installGrok({ guard, self, home: grokDir }));
+  if (optimize && existsSync(join(codexPath, '..'))) {
+    const codex = readSettings(codexPath);
+    backup(codexPath);
+    addOptimizerHooks(codex, self, 'codex');
+    writeSettings(codexPath, codex);
+    changes.push('added Codex optimizer hooks; review and trust the new hooks in Codex, then restart');
+  }
+  if (optimize && grokPresent(grokDir)) {
+    const optimizerPath = join(grokDir, 'hooks', 'limitcast-optimize.json');
+    const grok = readSettings(optimizerPath);
+    backup(optimizerPath);
+    addOptimizerHooks(grok, self, 'grok');
+    writeSettings(optimizerPath, grok);
+    changes.push('added Grok optimizer hooks');
+  }
   return changes;
+}
+
+function addOptimizerHooks(cfg, self, host) {
+  const events = ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'SessionEnd'];
+  for (const event of events)
+    upsertHook(cfg, event, { matcher: '', hooks: [{ type: 'command', command: `${self} _optimize-hook --src ${host}`, timeout: 10 }] }, isOptimizer);
+}
+
+function removeOptimizerHooks(cfg) {
+  for (const [event, entries] of Object.entries(cfg.hooks ?? {})) cfg.hooks[event] = entries.filter((entry) => !isOptimizer(entry));
 }
 
 /**
@@ -188,18 +225,26 @@ export function uninstall({ path = settingsPath(), codexPath = codexHooksPath(),
     cfg.hooks[event] = cfg.hooks[event].filter((/** @type {any} */ h) => !mine(h));
     if (cfg.hooks[event].length < n) changes.push(`removed ${what}`);
   }
+  removeOptimizerHooks(cfg);
   writeSettings(path, cfg);
   if (existsSync(codexPath)) {
     const codex = readSettings(codexPath);
     const list = codex.hooks?.PreToolUse ?? [];
-    if (list.some(isGuard)) {
+    if (list.some(isGuard) || Object.values(codex.hooks ?? {}).some((entries) => entries.some(isOptimizer))) {
       backup(codexPath);
       codex.hooks.PreToolUse = list.filter((/** @type {any} */ h) => !isGuard(h));
+      removeOptimizerHooks(codex);
       writeSettings(codexPath, codex);
       changes.push('removed the Codex subagent guard');
     }
   }
   changes.push(...uninstallGrok({ home: grokDir }));
+  const optimizerPath = join(grokDir, 'hooks', 'limitcast-optimize.json');
+  if (existsSync(optimizerPath)) {
+    const grok = readSettings(optimizerPath);
+    removeOptimizerHooks(grok);
+    writeSettings(optimizerPath, grok);
+  }
   return changes;
 }
 
@@ -226,6 +271,7 @@ export function installedFeatures(path = settingsPath()) {
     statusLine: Boolean(cfg.statusLine?.command?.includes(MARK)),
     guard: (cfg.hooks?.PreToolUse ?? []).some(isGuard),
     alerts: (cfg.hooks?.SessionStart ?? []).some(isAlert),
+    ...((cfg.hooks?.SessionStart ?? []).some(isOptimizer) ? { optimize: true } : {}),
   };
 }
 
@@ -240,6 +286,7 @@ const isPromptCheck = runs(/\bprompt-check\b/);
 const isReceipt = runs(/\bsubagent-receipt\b/);
 const isToolCheck = runs(/\btool-check\b/);
 const isToolLimit = runs(/\btool-limit\b/);
+const isOptimizer = runs(/\b_optimize-hook\b/);
 
 /** @param {string} path */
 export function readSettings(path) {
@@ -332,6 +379,11 @@ export function doctor({ path = settingsPath(), codexPath = codexHooksPath(), sa
       });
   }
   const hooks = /** @type {any} */ (cfg).hooks ?? {};
+  if ((hooks.SessionStart ?? []).some(isOptimizer))
+    out.push({
+      ok: true,
+      line: 'Repository optimizer hooks configured (runtime delivery unmeasured); learning and map injection are per-repository opt-ins',
+    });
   const guard = (hooks.PreToolUse ?? []).some(isGuard);
   out.push({
     ok: true,

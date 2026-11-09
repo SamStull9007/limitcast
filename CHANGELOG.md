@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Opt-in repository optimizer: `install --optimize` adds local failure-loop detection, evidence-backed check-command learning, explicit reversible built-in capability pruning and a bounded tracked-source map. Existing forecasts, guards and MCP trimming remain available. Learning and map injection start off; no additional model/network calls are made.
+- Native Claude Code, Codex and Grok hook adapters, per-repository evidence, concurrent-event serialization, bounded receipts, three-session fact confirmation, contradiction retirement, privacy filtering and a deterministic replay/evaluation workflow. See `docs/optimizer.md` for the supported surface and limits; these additions do not establish comparative real-world savings.
+- Capability changes journal before writing, refuse tracked/symlinked/conflicting configuration, verify Codex's actual project feature state and restore only if the file still matches. The optimizer's state-writing hooks use the settings lock; existing read-only hooks are unchanged.
+- Tests: isolate the launcher's missing-install fixture from a real Homebrew installation and verify its PATH fallback separately.
+
 ## 0.18.3 — 2026-11-08
 
 - Fix: two commands that change settings at the same moment no longer lose one of the changes. `budget`, `plan set`, `trim keep`, `models`, `grok-usage` and the other commands that write `config.json` each read the file and wrote it back, so when two ran together (a second terminal, a script) the later write undid the earlier change. Every settings write now takes a short lock, re-reads the file inside it, and writes the result through a temp file. A lock left by a command that was killed is broken after 2 seconds. Hooks only read settings and never wait on the lock.

@@ -1,0 +1,16 @@
+description: Deterministic optimizer replay; no model calls or savings claims
+providers:
+  - file://./optimizer-eval.cjs
+prompts:
+  - "{{scenario}}"
+defaultTest:
+  assert:
+    - type: javascript
+      value: JSON.parse(output).redirects === context.vars.redirects
+tests:
+  - vars: { scenario: loop, redirects: 1 }
+  - vars: { scenario: productive, redirects: 0 }
+  - vars: { scenario: changing, redirects: 0 }
+  - vars: { scenario: exploration, redirects: 0 }
+  - vars: { scenario: duplicates, redirects: 1 }
+  - vars: { scenario: ambiguous, redirects: 0 }
