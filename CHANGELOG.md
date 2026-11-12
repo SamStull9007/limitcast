@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.2 — 2026-11-11
+
+- Fix optimizer learning so replacements preserve the verification check. Lint, build, type-check and unrelated test runners cannot substitute for one another; incompatible historical replacements are excluded from injected context.
+- Cache repository maps only from clean trees and regenerate legacy caches. Restoring an edited file no longer leaves temporary declarations in the clean-tree map.
+- Show the LimitCast icon in Codex plugin settings, and update all plugin commands to the matching package version.
+
 ## 0.19.1 — 2026-11-09
 
 - Fix Codex code-mode patch normalization: decode JSON-escaped patch literals before hashing the edited filename. Repeated edits to the same file now remain one churn signal even when the patch body changes. No source text is retained. A native-shaped replay regression verifies that the loop detector redirects this case.
