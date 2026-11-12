@@ -1,0 +1,24 @@
+{
+  "name": "limitcast",
+  "version": "0.19.1",
+  "description": "Usage-limit status, results and trim for Claude Code",
+  "author": {
+    "name": "Sam Stull",
+    "url": "https://limitcast.dev"
+  },
+  "homepage": "https://limitcast.dev",
+  "repository": "https://github.com/SamStull9007/limitcast",
+  "license": "MIT",
+  "keywords": [
+    "usage-limits",
+    "rate-limits",
+    "tokens",
+    "status-line",
+    "subagents"
+  ],
+  "interface": {
+    "displayName": "LimitCast",
+    "composerIcon": "./.claude-plugin/icon.png",
+    "logo": "./.claude-plugin/icon.png"
+  }
+}

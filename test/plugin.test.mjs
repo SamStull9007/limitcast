@@ -23,3 +23,15 @@ test('the marketplace lists the plugin by its manifest name', () => {
     [[p.name, './plugin']],
   );
 });
+
+test('the Codex manifest preserves plugin metadata and resolves the bundled logo', () => {
+  const { interface: ui, ...metadata } = JSON.parse(read('plugin/.codex-plugin/plugin.json'));
+  assert.deepEqual(metadata, JSON.parse(read('plugin/.claude-plugin/plugin.json')));
+  assert.equal(ui.displayName, 'LimitCast');
+  for (const key of ['composerIcon', 'logo']) {
+    assert.equal(ui[key], './.claude-plugin/icon.png');
+    const png = readFileSync(new URL(`plugin/${ui[key]}`, root));
+    assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    assert.equal(png.readUInt32BE(16), png.readUInt32BE(20));
+  }
+});
