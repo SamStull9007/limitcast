@@ -26,6 +26,8 @@ limitcast optimize learn off
 
 Learning starts off. A recognized check command must fail because its executable/module is missing, and an alternative must then succeed. Three independent sessions must confirm that replacement before it is injected. A later missing-command/module result for the replacement retires the fact. Ordinary test assertion failures do not teach environment facts.
 
+Replacements must preserve the check: Python launcher variants for the same pytest or unittest runner, and `npm test`/`npm run test`, are equivalent. Build, lint, type-check and unrelated test runners are not interchangeable. Previously saved incompatible replacements are excluded from injected context.
+
 Only a small whitelist of test/build/check commands is eligible. Raw prompts, output and arbitrary instructions are not retained or injected. At most four active facts and 1,000 characters are injected per session. The deterministic mode learns command alternatives. Optional model learning also selects successful verification commands; arbitrary repository prose is intentionally excluded. Inspect the facts and retire any that no longer apply; they are evidence, not commands that Limitcast executes.
 
 ## Built-in capabilities
@@ -52,7 +54,7 @@ limitcast optimize map off
 limitcast optimize map --refresh
 ```
 
-Maps use tracked source filenames and recognizable declaration names, with a 6,000-character default budget. Reads are bounded to 1,000 candidate files, 100 KB per file and 2 MB in total. Hidden, credential-shaped, generated/vendor paths and symlinks are excluded. A clean tree reuses its commit-keyed cache; a dirty tree regenerates it. The extractor recognizes common declarations, not every language construct, and ranks by source location and declaration count rather than a full dependency graph. No dependency or model call is needed.
+Maps use tracked source filenames and recognizable declaration names, with a 6,000-character default budget. Reads are bounded to 1,000 candidate files, 100 KB per file and 2 MB in total. Hidden, credential-shaped, generated/vendor paths and symlinks are excluded. A clean tree reuses its commit-keyed cache; a dirty tree regenerates the map without replacing that clean cache. Legacy caches are regenerated once. The extractor recognizes common declarations, not every language construct, and ranks by source location and declaration count rather than a full dependency graph. No dependency or model call is needed.
 
 Injection starts off. Once enabled, new Claude/Codex sessions receive the cached/generated map at start; Grok receives it with its first tool result. Maps add recurring context, so use them where reduced searching justifies their size.
 

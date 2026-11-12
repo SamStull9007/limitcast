@@ -92,6 +92,32 @@ test('safe command facts need three independent sessions and retire on contradic
   assert.equal(learnedContext(state), '');
 });
 
+test('learning preserves check identity and rejects incompatible historical replacements', () => {
+  for (const [from, to, compatible] of [
+    ['npm run lint', 'npm run build', false],
+    ['npm run typecheck', 'npm run lint', false],
+    ['pytest', 'npm test', false],
+    ['pytest', 'python3 -m unittest', false],
+    ['node --test', 'npm test', false],
+    ['python -m pytest', '.venv/bin/python3 -m pytest', true],
+    ['python -m unittest', 'python3 -m unittest', true],
+    ['npm run test', 'npm test', true],
+  ]) {
+    const state = fresh();
+    for (let i = 0; i < 3; i++) {
+      feed(state, hook('PostToolUseFailure', call(from, 'command not found', 127), `checks-${i}`));
+      feed(state, hook('PostToolUse', call(to, 'passed', 0), `checks-${i}`));
+    }
+    assert.equal(
+      state.facts.some((f) => f.state === 'active'),
+      compatible,
+      `${from} -> ${to}`,
+    );
+    state.facts = [{ from, to, state: 'active' }];
+    assert.equal(Boolean(learnedContext(state)), compatible, `historical: ${from} -> ${to}`);
+  }
+});
+
 test('test assertion failures, injected commands and credential-shaped text never become learned instructions', () => {
   const state = fresh();
   for (let i = 0; i < 4; i++) {
@@ -266,6 +292,27 @@ test('repository maps stay bounded, exclude sensitive paths and symlinks, and re
   writeFileSync(join(r.root, 'src/a.mjs'), 'export function changedName() {}\n');
   assert.match(repositoryMap(r), /changedName/);
   assert.throws(() => repositoryMap(r, { maxChars: Infinity }), /budget/);
+});
+
+test('dirty maps cannot contaminate the cache used after restoring a clean tree', () => {
+  const r = repo();
+  mkdirSync(join(r.root, 'src'));
+  const path = join(r.root, 'src/a.mjs');
+  const original = 'export function originalName() {}\n';
+  writeFileSync(path, original);
+  git(r.root, 'add', 'src');
+  git(r.root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture');
+  const clean = repositoryMap(r);
+  const cachePath = join(process.env.LIMITCAST_STATE, 'optimize', `${r.id}.map.json`);
+  const cache = readFileSync(cachePath, 'utf8');
+  writeFileSync(path, 'export function temporaryName() {}\n');
+  assert.match(repositoryMap(r), /temporaryName/);
+  assert.equal(readFileSync(cachePath, 'utf8'), cache);
+  writeFileSync(path, original);
+  assert.equal(git(r.root, 'status', '--porcelain'), '');
+  assert.equal(repositoryMap(r), clean);
+  writeFileSync(cachePath, JSON.stringify({ head: git(r.root, 'rev-parse', 'HEAD').trim(), budget: 6000, text: 'stale legacy map' }));
+  assert.equal(repositoryMap(r), clean);
 });
 
 test('optimizer installation is idempotent and uninstall preserves unrelated host hooks', () => {

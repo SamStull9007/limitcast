@@ -16,7 +16,7 @@ export function repositoryMap(repo, { refresh = false, maxChars = 6000 } = {}) {
   const path = join(stateDir(), 'optimize', `${repo.id}.map.json`);
   if (!refresh && !dirty && existsSync(path)) {
     const cached = JSON.parse(readFileSync(path, 'utf8'));
-    if (cached.head === head && cached.budget === maxChars) return cached.text;
+    if (cached.version === 2 && cached.head === head && cached.budget === maxChars) return cached.text;
   }
   const files = git('ls-files', '-z')
     .split('\0')
@@ -47,7 +47,9 @@ export function repositoryMap(repo, { refresh = false, maxChars = 6000 } = {}) {
     const line = `${row.name}${row.symbols.length ? `: ${row.symbols.join(', ')}` : ''}\n`;
     if (text.length + line.length <= maxChars) text += line;
   }
-  mkdirSync(join(stateDir(), 'optimize'), { recursive: true, mode: 0o700 });
-  writeAtomic(path, JSON.stringify({ head, budget: maxChars, fingerprint: digest(text), text }));
+  if (!dirty) {
+    mkdirSync(join(stateDir(), 'optimize'), { recursive: true, mode: 0o700 });
+    writeAtomic(path, JSON.stringify({ version: 2, head, budget: maxChars, fingerprint: digest(text), text }));
+  }
   return text;
 }

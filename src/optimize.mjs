@@ -71,6 +71,12 @@ export function commandShape(command) {
   return null;
 }
 
+function checkIdentity(command) {
+  return commandShape(command)
+    ?.replace(/^(?:python3?|\.venv\/bin\/python3?) -m (pytest|unittest)$/, '$1')
+    .replace(/^npm run test$/, 'npm test');
+}
+
 function responseText(value) {
   if (typeof value === 'string') return value.slice(0, 16000);
   if (!value || typeof value !== 'object') return '';
@@ -219,7 +225,7 @@ function learn(state, session, e) {
   if (!e.succeeded) return;
   for (const from of session.failed ?? []) {
     if (from === e.command) continue;
-    if (/test/.test(from) !== /test/.test(e.command)) continue;
+    if (checkIdentity(from) !== checkIdentity(e.command)) continue;
     let fact = state.facts.find((f) => f.from === from && f.to === e.command);
     if (!fact) {
       fact = { id: digest(`${from}\0${e.command}`).slice(0, 16), from, to: e.command, state: 'candidate', sessions: [] };
@@ -236,7 +242,7 @@ function learn(state, session, e) {
 export function learnedContext(state) {
   if (!state.config.learn) return '';
   return state.facts
-    .filter((f) => f.state === 'active' && commandShape(f.to) && (f.kind === 'check' || commandShape(f.from)))
+    .filter((f) => f.state === 'active' && commandShape(f.to) && (f.kind === 'check' || checkIdentity(f.from) === checkIdentity(f.to)))
     .slice(0, 4)
     .map((f) =>
       f.kind === 'check'
