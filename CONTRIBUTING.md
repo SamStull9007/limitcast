@@ -14,6 +14,8 @@ npm test
 npx --yes @biomejs/biome@2.6.3 ci .
 ```
 
+For the automatic local security check, install Semgrep with `uv tool install --python 3.12 semgrep`, install `pre-commit`, and run `pre-commit install` once in this checkout. Matching staged production code is scanned before each commit; run `pre-commit run semgrep-security --all-files` to check all covered files. The focused rule scope and limits are in [CONSTRAINTS.md](CONSTRAINTS.md).
+
 Keep changes focused on one problem. Explain the behavior before and after, include a small regression test for nontrivial logic, and name any host or operating system you could not test. Update the usage guide when a command changes. Preserve existing hooks, configuration backups, keep-lists, and undo behavior.
 
 ## Protect private data

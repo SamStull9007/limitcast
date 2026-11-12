@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: semgrep-security
+        name: Semgrep security (production code)
+        entry: semgrep scan --config p/ci --severity ERROR --metrics=off --disable-version-check --error --strict --vim --quiet
+        language: system
+        files: ^(src|bin|scripts)/.*\.(py|[cm]?js|jsx|ts|tsx)$
+        exclude: (^|/)(tests?|test_[^/]+|[^/]+[._]test\.[^/]+|node_modules|vendor)(/|$)
