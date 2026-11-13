@@ -6,8 +6,8 @@ import { spawnSource } from './guard.mjs';
 import { stateDir } from './store.mjs';
 
 // A second spawn of the same type and prompt, in the same session, while the first has not finished.
-// SubagentStop clears the Claude one. Codex and Grok have no stop event here, so a record older than
-// 30 minutes is forgotten: a missed stop must not hold the same prompt for the rest of the day.
+// SubagentStop clears it on all three hosts (Claude Code, Codex and Grok each send one). A record older than
+// 30 minutes is forgotten anyway: a missed stop must not hold the same prompt for the rest of the day.
 
 export const INFLIGHT_MS = 30 * 60_000;
 
@@ -23,8 +23,12 @@ export function spawnIdentity(hook) {
   const src = spawnSource(tool);
   if (!src) return null;
   const input = hook?.tool_input ?? hook?.toolInput ?? {};
+  // Grok re-runs a finished subagent with resume_from: the same prompt again is a continuation, not a duplicate.
+  if (input?.resume_from || input?.resumeFrom) return null;
   const type = String(input?.subagent_type ?? input?.subagentType ?? input?.agent_type ?? '').trim();
-  const prompt = String(input?.prompt ?? input?.description ?? input?.task ?? '')
+  // Claude and Grok send `prompt`; Codex spawn_agent sends `message` (or `items`, a list of text parts).
+  const items = Array.isArray(input?.items) ? input.items.map((x) => (typeof x === 'string' ? x : (x?.text ?? ''))).join(' ') : '';
+  const prompt = String(input?.prompt || input?.message || input?.description || input?.task || items || '')
     .replace(/\s+/g, ' ')
     .trim();
   const sid = String(hook?.session_id ?? hook?.sessionId ?? '').trim();
@@ -67,7 +71,11 @@ export function rememberInflight(entries, id, now) {
 export function forgetInflight(entries, sid, type, now) {
   const live = pruneInflight(entries, now);
   if (!sid || !type) return live;
-  const i = live.findIndex((e) => e.sid === sid && e.type.toLowerCase() === type.toLowerCase());
+  const same = (/** @type {Inflight} */ e) => e.type.toLowerCase() === type.toLowerCase();
+  // Some hosts report the subagent's own session on its stop event. Match the parent session first, else the type alone:
+  // clearing the wrong record only lets a duplicate through, which is the safe way to be wrong.
+  let i = live.findIndex((e) => e.sid === sid && same(e));
+  if (i < 0) i = live.findIndex(same);
   if (i >= 0) live.splice(i, 1);
   return live;
 }

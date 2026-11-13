@@ -495,13 +495,15 @@ export function installGrok({ guard, self, home = grokHome() }) {
         {
           hooks: {
             PreToolUse: [{ matcher: 'spawn_subagent', hooks: [{ type: 'command', command: `${self} guard`, timeout: 10 }] }],
+            // A subagent's stop clears the duplicate-spawn hold (the payload carries `subagentType`, not `agent_type`).
+            SubagentStop: [{ hooks: [{ type: 'command', command: `${self} subagent-receipt`, timeout: 15 }] }],
           },
         },
         null,
         2,
       )}\n`,
     );
-    changes.push('added the Grok subagent guard (matcher spawn_subagent)');
+    changes.push('added the Grok subagent guard (matcher spawn_subagent) and its subagent-stop hook');
   }
   return changes;
 }

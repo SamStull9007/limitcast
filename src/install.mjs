@@ -137,8 +137,10 @@ export function install({
     const codex = readSettings(codexPath);
     backup(codexPath);
     upsertGuard(codex, { matcher: CODEX_MATCHER, hooks: [{ type: 'command', command: `${self} guard`, timeout: 10 }] });
+    // A subagent's stop clears the duplicate-spawn hold; without it a finished spawn blocks its own retry for 30 minutes.
+    upsertHook(codex, 'SubagentStop', { matcher: '', hooks: [{ type: 'command', command: `${self} subagent-receipt`, timeout: 15 }] }, isReceipt);
     writeSettings(codexPath, codex);
-    changes.push('added the Codex subagent guard (Codex runs it after you trust it: start Codex and approve the new hook)');
+    changes.push('added the Codex subagent guard (Codex runs it after you trust it: start Codex and approve the new hooks)');
   }
   if (grokPresent(grokDir)) changes.push(...installGrok({ guard, self, home: grokDir }));
   if (optimize && existsSync(join(codexPath, '..'))) {
@@ -239,9 +241,10 @@ export function uninstall({ path = settingsPath(), codexPath = codexHooksPath(),
   if (existsSync(codexPath)) {
     const codex = readSettings(codexPath);
     const list = codex.hooks?.PreToolUse ?? [];
-    if (list.some(isGuard) || Object.values(codex.hooks ?? {}).some((entries) => entries.some(isOptimizer))) {
+    if (list.some(isGuard) || Object.values(codex.hooks ?? {}).some((entries) => entries.some((h) => isOptimizer(h) || isReceipt(h)))) {
       backup(codexPath);
       codex.hooks.PreToolUse = list.filter((/** @type {any} */ h) => !isGuard(h));
+      if (codex.hooks.SubagentStop) codex.hooks.SubagentStop = codex.hooks.SubagentStop.filter((/** @type {any} */ h) => !isReceipt(h));
       removeOptimizerHooks(codex);
       writeSettings(codexPath, codex);
       changes.push('removed the Codex subagent guard');

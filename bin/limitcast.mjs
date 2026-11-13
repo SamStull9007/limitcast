@@ -468,7 +468,16 @@ if (cmd === '_optimize-hook') {
   // Pro shows the receipt to the user (systemMessage, never the model). Internal agents (empty type) are skipped.
   try {
     const hook = JSON.parse(readStdin());
-    saveInflight(forgetInflight(loadInflight(), String(hook?.session_id ?? ''), String(hook?.agent_type ?? ''), now));
+    // Claude Code and Codex send snake_case; Grok sends `sessionId` and `subagentType`. Every host clears the duplicate hold;
+    // only Claude transcripts are priced below (a Codex or Grok transcript yields no calls, so nothing is logged for them).
+    saveInflight(
+      forgetInflight(
+        loadInflight(),
+        String(hook?.session_id ?? hook?.sessionId ?? ''),
+        String(hook?.agent_type ?? hook?.subagentType ?? hook?.agentType ?? ''),
+        now,
+      ),
+    );
     const path = hook?.agent_transcript_path;
     if (hook?.agent_type && typeof path === 'string') {
       const u = subagentUsage(path);

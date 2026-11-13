@@ -46,7 +46,7 @@ export function guardDecision(tool, forecasts, now, minutes) {
   if (!f || f.wall === null) return null;
   const left = Math.max(0, Math.round((f.wall - now) / 60_000));
   return (
-    `limitcast: ${NAMES[/** @type {'claude'} */ (f.src)]} ${f.win} limit is ${f.pct}% used and on pace to run out in ~${left} min, before it resets. ` +
+    `limitcast: ${NAMES[/** @type {'claude'} */ (f.src)]} ${f.win} limit is ${Math.round(f.pct)}% used and on pace to run out in ~${left} min, before it resets. ` +
     'Finish with the agents already running, or set LIMITCAST_ALLOW=1 to spawn anyway.'
   );
 }
@@ -161,7 +161,7 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
   const input = hook?.tool_input ?? hook?.toolInput;
   const tight = forecasts.find((x) => x.src === 'claude' && (x.verdict === 'AT_RISK' || x.verdict === 'NEAR'));
   const type = String(input?.subagent_type ?? input?.subagentType ?? '');
-  const pinned = isUnset(input?.model) && type ? pinnedModel(type) : undefined;
+  const pinned = isUnset(input?.model) && type && src ? pinnedModel(type, src) : undefined;
   if (src === 'grok') return grokPinOrNotice(input, type, pinned, forecasts, now, preview, operation);
   if (src !== 'claude') return null;
   const model = pinned ?? input?.model;

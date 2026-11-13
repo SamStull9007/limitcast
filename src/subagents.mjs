@@ -143,14 +143,17 @@ export const validModel = (/** @type {unknown} */ m) => typeof m === 'string' &&
 
 /**
  * The pinned model for a subagent type, matching the stored name case-insensitively (Claude "Explore" vs Grok "explore").
+ * With a host, only a model that host can run is returned: Grok takes grok-... ids, Claude takes everything else,
+ * so `subagent-model explore grok-4.3` never rewrites a Claude `Explore` spawn.
  * @param {unknown} type
+ * @param {'claude'|'codex'|'grok'} [host]
  */
-export function pinnedModel(type) {
+export function pinnedModel(type, host) {
   if (typeof type !== 'string' || !type) return undefined;
-  const models = getSubagentModels();
-  if (models[type]) return models[type];
+  const fits = (/** @type {string} */ m) => (host === 'grok' ? /^grok-/i.test(m) : host === 'claude' ? !/^grok-/i.test(m) : host === undefined);
+  const models = Object.entries(getSubagentModels()).filter(([, m]) => fits(m));
   const want = type.toLowerCase();
-  return Object.entries(models).find(([t]) => t.toLowerCase() === want)?.[1];
+  return (models.find(([t]) => t === type) ?? models.find(([t]) => t.toLowerCase() === want))?.[1];
 }
 
 /** @returns {Record<string, string>} the model each subagent type runs on by default, e.g. {Explore: 'haiku'} */
