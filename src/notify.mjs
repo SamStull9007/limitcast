@@ -10,7 +10,7 @@ import { stateDir } from './store.mjs';
 const flag = () => join(stateDir(), 'notify.on');
 const stateFile = () => join(stateDir(), 'notified.json');
 const RANK = { OK: 0, RESET: 0, NEAR: 1, AT_RISK: 2, HIT: 3 };
-const NAMES = { claude: 'Claude', codex: 'Codex' };
+const NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok' };
 
 export const notifyEnabled = () => existsSync(flag());
 

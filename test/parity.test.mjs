@@ -1,13 +1,22 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { alignedStart, grokHistory, installGrok } from '../src/grok.mjs';
 import { runGuard } from '../src/guard.mjs';
 import { findDuplicate, forgetInflight, rememberInflight, spawnIdentity } from '../src/inflight.mjs';
 import { install, uninstall } from '../src/install.mjs';
-import { installGrok } from '../src/grok.mjs';
+import { transitions } from '../src/notify.mjs';
+import { costOf } from '../src/prices.mjs';
+import { blockOutcomes } from '../src/results.mjs';
 import { pinnedModel, setSubagentModel } from '../src/subagents.mjs';
+import { grokUsage } from '../src/usage.mjs';
+
+const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
+const TICKS = 10_000_000_000;
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
 const fresh = () => {
@@ -102,4 +111,61 @@ test('installGrok on its own writes the stop hook beside the guard', () => {
   const hook = JSON.parse(readFileSync(join(home, 'hooks', 'limitcast.json'), 'utf8'));
   assert.equal(hook.hooks.PreToolUse[0].matcher, 'spawn_subagent');
   assert.equal(hook.hooks.SubagentStop.length, 1);
+});
+
+test('grokHistory rebuilds past Grok windows so results can judge an old block', () => {
+  const root = tmp('lc-parity-grok-root-');
+  const len = 5 * 3600_000;
+  const a = alignedStart(Date.now(), '5h') - 2 * len; // an old window, then the one after it
+  const dir = join(root, encodeURIComponent('/p/g'), '01abc');
+  mkdirSync(dir, { recursive: true });
+  const turn = (t, usd) => ({ endedAt: new Date(t).toISOString(), costUsdTicks: usd * TICKS });
+  writeFileSync(join(dir, 'usage.json'), JSON.stringify({ turns: [turn(a + 600_000, 2), turn(a + 3_600_000, 2.5), turn(a + len + 600_000, 1)] }));
+  const now = a + len + 30 * 60_000;
+  const samples = grokHistory(a - 3600_000, now, { root, budget: { '5h': 4 } });
+  const first = samples.filter((s) => s.reset === (a + len) / 1000);
+  assert.equal(first.length, 2);
+  assert.equal(first.at(-1).pct, 100, 'spend past the cap reads as 100, not 125');
+  assert.equal(samples.find((s) => s.reset === (a + 2 * len) / 1000).pct, 25);
+  const block = { t: a + 1_800_000, src: 'grok', win: '5h', pct: 90, wall: a + 2_400_000, reset: a + len };
+  assert.equal(blockOutcomes([block], samples, now)[0].outcome, 'hit', 'the window did reach its cap');
+  assert.equal(blockOutcomes([block], [], now)[0].outcome, 'under', 'without readings the old code invented this');
+  assert.deepEqual(grokHistory(a, now, { root, budget: null }), []);
+});
+
+test('notifications name Grok like the other tools', () => {
+  const row = { src: 'grok', win: '5h', pct: 85, reset: 1_800_000_000, wall: null, verdict: 'NEAR' };
+  const { messages } = transitions([row], {}, () => '19:00');
+  assert.match(messages[0], /^Grok 5h limit is at 85%/);
+});
+
+test('a Grok turn carries its own recorded cost, and costOf prefers it to re-pricing the whole turn', () => {
+  const ledger = {
+    turns: [
+      {
+        endedAt: '2026-11-13T12:00:00.000Z',
+        inputTokens: 300_000,
+        cachedReadTokens: 250_000,
+        cacheCreationTokens: 0,
+        outputTokens: 2000,
+        primaryModelId: 'grok-4.3',
+        costUsdTicks: 0.2 * TICKS,
+      },
+    ],
+  };
+  const [u] = grokUsage(ledger, 's', '/p');
+  assert.equal(u.costUsd, 0.2);
+  assert.equal(costOf([u]).total, 0.2);
+  assert.ok(costOf([{ ...u, costUsd: undefined }]).total > 0.2, 'the token re-price used the long-context tier');
+});
+
+test('the status line keeps Grok and Claude feed shapes in separate files', () => {
+  const state = tmp('lc-parity-feed-');
+  const env = { ...process.env, LIMITCAST_STATE: state, GROK_HOME: join(state, 'nogrok'), CODEX_HOME: join(state, 'nocodex') };
+  const run = (feed) => execFileSync('node', [bin, 'statusline'], { env, input: JSON.stringify(feed) });
+  run({ model: { display_name: 'Grok 4.6' }, context_window: { used_percentage: 12 }, schema_version: 1, trigger: 'turn' });
+  assert.ok(existsSync(join(state, 'last-feed-grok.json')));
+  assert.equal(existsSync(join(state, 'last-feed.json')), false, 'a Grok feed must not satisfy the Claude feed check');
+  run({ session_id: 's', rate_limits: { five_hour: { used_percentage: 10, resets_at: Math.floor(Date.now() / 1000) + 3600 } } });
+  assert.ok(existsSync(join(state, 'last-feed.json')));
 });

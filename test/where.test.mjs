@@ -147,9 +147,10 @@ test('burn report ranks sessions by new tokens, not by cached reads', () => {
     cacheRead,
     output: 0,
   });
-  const md = burnReport([u('cachey-session', 10, 1_000_000), u('fresh-session', 5000, 0)], { since: T0, now: T0 });
+  // Labels show the last 8 characters of the id: UUIDv7 ids from Codex and Grok share their first characters.
+  const md = burnReport([u('x-cachey01', 10, 1_000_000), u('x-fresh001', 5000, 0)], { since: T0, now: T0 });
   const heaviest = md.split('## Heaviest sessions')[1];
-  assert.ok(heaviest.indexOf('fresh-se') < heaviest.indexOf('cachey-s'));
+  assert.ok(heaviest.indexOf('fresh001') < heaviest.indexOf('cachey01'));
   assert.match(heaviest, /\| new tokens \| share \|/);
 });
 

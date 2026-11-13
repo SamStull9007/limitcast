@@ -85,7 +85,8 @@ export function burnReport(usage, { since, now }) {
   table(
     lines,
     'Heaviest sessions',
-    group(usage, (u) => `${u.src} ${u.session.slice(0, 8)} · ${short(u.project)}`),
+    // Codex and Grok ids are UUIDv7: their first characters are a timestamp, so sessions started close together share them.
+    group(usage, (u) => `${u.src} ${u.session.slice(-8)} · ${short(u.project)}`),
     fresh,
     allFresh,
     true,

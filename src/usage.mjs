@@ -8,8 +8,9 @@ import { stateDir, writeAtomic } from './store.mjs';
 /**
  * One model response's token usage.
  * @typedef {{t:number, src:'claude'|'codex'|'grok', session:string, project:string, model:string, sidechain:boolean,
- *   input:number, cacheWrite:number, cacheWrite1h?:number, cacheRead:number, output:number, entry?:string}} Usage
- *   entry: how Claude Code was launched (cli, sdk-py, ...); cacheWrite1h: the part of cacheWrite that used the 1-hour cache
+ *   input:number, cacheWrite:number, cacheWrite1h?:number, cacheRead:number, output:number, entry?:string, costUsd?:number}} Usage
+ *   entry: how Claude Code was launched (cli, sdk-py, ...); cacheWrite1h: the part of cacheWrite that used the 1-hour cache;
+ *   costUsd: dollars the tool itself recorded for this record (Grok's costUsdTicks), preferred over re-pricing it
  */
 
 export const claudeRoot = () => join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'projects');
@@ -134,7 +135,22 @@ export function grokUsage(ledger, session, project) {
     const input = Math.max(0, (turn.inputTokens ?? 0) - cacheRead - cacheWrite);
     const output = turn.outputTokens ?? 0;
     const model = turn.primaryModelId ?? Object.keys(turn.modelUsage ?? {})[0] ?? '';
-    out.push({ t, src: 'grok', session, project, model, sidechain: false, input, cacheWrite, cacheRead, output });
+    // A Grok record is a whole turn (up to dozens of model calls). Re-pricing its summed tokens would apply the
+    // above-200k long-context tier to the turn, overstating cost by about 1.8x, so carry Grok's own recorded cost.
+    const ticks = Number(turn.costUsdTicks);
+    out.push({
+      t,
+      src: 'grok',
+      session,
+      project,
+      model,
+      sidechain: false,
+      input,
+      cacheWrite,
+      cacheRead,
+      output,
+      ...(Number.isFinite(ticks) && ticks >= 0 ? { costUsd: ticks / 1e10 } : {}),
+    });
   }
   return out;
 }
@@ -237,7 +253,7 @@ export async function readUsage(since, roots = {}, activity) {
 }
 
 const CACHE_KEEP_MS = 35 * 86400_000;
-const USAGE_CACHE_VERSION = 2; // 2: records carry cacheWrite1h; an older cache is read again
+const USAGE_CACHE_VERSION = 3; // 3: Grok records carry costUsd; 2: records carry cacheWrite1h. An older cache is read again
 const usageCacheFile = () => join(stateDir(), 'usage-cache.json');
 
 /** @returns {Record<string, {s:number, m:number, u:Usage[], a?:{skills:string[], mcp:string[]}}>} */

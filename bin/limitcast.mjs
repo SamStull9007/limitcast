@@ -36,6 +36,7 @@ import {
   grokPresent,
   grokQuotaDue,
   grokQuotaEnabled,
+  grokHistory,
   grokSamples,
   grokServers,
   grokSessionLine,
@@ -246,7 +247,8 @@ if (cmd === '_optimize-hook') {
     feed = JSON.parse(input);
     sid = feed?.session_id;
     record(claudeSamples(feed, now));
-    saveFeedShape(feed);
+    // Grok runs the same status-line command. Its feed gets its own file, so `doctor`'s Claude checks only see Claude feeds.
+    saveFeedShape(feed, grokSessionLine(feed) ? 'last-feed-grok.json' : 'last-feed.json');
     // Readings are kept 8 days; the daily rollup folds what they showed into the long-term value record.
     if (dailyDue(now)) spawn(process.execPath, [fileURLToPath(import.meta.url), 'rollup'], { detached: true, stdio: 'ignore' }).unref();
     const health = healthHint();
@@ -907,7 +909,7 @@ if (cmd === '_optimize-hook') {
       // Once a week, what limitcast did: shown to the user at session start, never to the model.
       if (weeklyDue(now)) {
         const since = now - 7 * 86400_000;
-        const samples = [...load(since), ...(await readCodex(since))];
+        const samples = [...load(since), ...(await readCodex(since)), ...grokHistory(since, now)];
         const s = loadOverhead();
         // The daily rollup keeps the value record current; a session-start hook must not scan transcripts itself.
         const week = valuePeriod(loadValue(), since, now);
@@ -948,7 +950,7 @@ if (cmd === '_optimize-hook') {
         ? savedSummary(s, 0).split('\n')[0] // the per-session drop; the value section above has the totals
         : 'Run `limitcast trim` once to record your starting context, then check back here.';
   }
-  const samples = [...load(since), ...(await readCodex(since))];
+  const samples = [...load(since), ...(await readCodex(since)), ...grokHistory(since, now)];
   const blocks = loadBlocks(since);
   const usage = await readUsage(Math.min(since - days() * 86400_000, now - KEEP_MS), {}); // one read feeds both below
   const value = await refreshValue(usage);
@@ -967,7 +969,7 @@ if (cmd === '_optimize-hook') {
     );
   else if (args.includes('--html')) {
     // results, the current windows and the burn report on one page, opened in the browser.
-    const rows = forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS))]), now);
+    const rows = forecastAll(oneClaudeAccount([...load(now - KEEP_MS), ...(await readCodex(now - KEEP_MS)), ...grokSamples(now)]), now);
     const burn = burnReport(
       usage.filter((u) => u.t >= since),
       { since, now },
@@ -1163,7 +1165,7 @@ async function refreshValue(preread) {
   const o = loadOverhead();
   // limitcast started watching at its first status-line reading (or first measurement), not when Codex's logs begin.
   const start = Math.min(now, o?.first.at ?? now, ...claude.map((s) => s.t));
-  const v = foldEvents(loadValue(), { now, samples: [...claude, ...(await readCodex(since))], blocks: loadBlocks(since), start });
+  const v = foldEvents(loadValue(), { now, samples: [...claude, ...(await readCodex(since)), ...grokHistory(since, now)], blocks: loadBlocks(since), start });
   await scanSessions(v, { root: claudeRoot(), baseline: o ? { at: o.first.at, chars: o.first.chars } : null, now });
   // Recalibrate from the last 8 days when there is enough data; keep the last good calibration otherwise.
   const usage = preread ? preread.filter((u) => u.t >= since) : await readUsage(since, {});
@@ -1244,10 +1246,11 @@ function undoMessage(e) {
 /**
  * Keep the latest feed's structure (key names and rate_limits only, no prompt or path content) for diagnosing parsing.
  * @param {any} feed
+ * @param {string} [file]
  */
-function saveFeedShape(feed) {
+function saveFeedShape(feed, file = 'last-feed.json') {
   const shape = { at: now, keys: Object.keys(feed ?? {}), session_id: feed?.session_id, rate_limits: feed?.rate_limits };
-  writeFileSync(join(stateDir(), 'last-feed.json'), JSON.stringify(shape, null, 2));
+  writeFileSync(join(stateDir(), file), JSON.stringify(shape, null, 2));
 }
 
 function readStdin() {

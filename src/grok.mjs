@@ -463,6 +463,38 @@ export function grokSamples(now, { root = grokRoot(), budget = getGrokBudget() }
 }
 
 /**
+ * Past Grok window readings for `results` and the value rollup: for every 5-hour and 7-day window since `since`,
+ * the running spend against the user's dollar cap, one reading per turn. `grokSamples` only builds the current
+ * window, which left every earlier Grok block without readings and made `results` invent its outcome.
+ * Real weekly readings (`grok-usage on`) replace a 7-day cap, as in `grokSamples`.
+ * @param {number} since epoch ms
+ * @param {number} now epoch ms
+ * @param {{root?:string, budget?:ReturnType<typeof getGrokBudget>}} [opts]
+ * @returns {Sample[]}
+ */
+export function grokHistory(since, now, { root = grokRoot(), budget = getGrokBudget() } = {}) {
+  const quota = grokQuotaSamples(now).filter((s) => s.t >= since);
+  if (!budget) return quota;
+  const turns = grokCosts(root, since);
+  /** @type {Sample[]} */
+  const out = [...quota];
+  for (const win of /** @type {const} */ (['5h', '7d'])) {
+    const cap = budget[win];
+    if (!(cap > 0) || (win === '7d' && quota.length)) continue;
+    const len = windowMs(win);
+    for (let start = alignedStart(since, win); start <= now; start += len) {
+      let spent = 0;
+      for (const t of turns) {
+        if (t.t < start || t.t >= start + len || t.t > now) continue;
+        spent += t.usd;
+        out.push({ t: t.t, src: 'grok', win, pct: Math.min(100, (spent / cap) * 100), reset: (start + len) / 1000 });
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Wire Grok's status line and, with `guard`, a PreToolUse hook on `spawn_subagent`.
  * @param {{guard:boolean, self:string, home?:string}} opts
  * @returns {string[]}

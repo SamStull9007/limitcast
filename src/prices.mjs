@@ -63,10 +63,11 @@ export function priceFor(model, table) {
 
 /**
  * API-equivalent dollars of one model call, or null when its model has no price.
- * @param {{model?:string, input:number, cacheWrite:number, cacheWrite1h?:number, cacheRead:number, output:number}} u
+ * @param {{model?:string, input:number, cacheWrite:number, cacheWrite1h?:number, cacheRead:number, output:number, costUsd?:number}} u
  * @param {Record<string, Price>} [table]
  */
 export function callCost(u, table = priceTable()) {
+  if (typeof u.costUsd === 'number' && Number.isFinite(u.costUsd)) return u.costUsd; // the tool's own record of this usage
   const base = priceFor(u.model, table);
   if (!base) return null;
   const p = base.over && u.input + u.cacheWrite + u.cacheRead > base.over.above ? { ...base, ...base.over } : base;
