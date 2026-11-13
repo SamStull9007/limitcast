@@ -16,7 +16,10 @@ const CAPABILITIES = {
 const validTool = (name) => typeof name === 'string' && /^[\w:.-]{1,100}$/.test(name) && !Object.hasOwn(Object.prototype, name);
 /** The tool catalog a session can declare, per host. Claude sessions with many connectors declare a few hundred tools. */
 const CATALOG_LIMIT = 400;
-export const normServer = (name) => String(name).toLowerCase().replace(/[^a-z0-9]/g, '_');
+export const normServer = (name) =>
+  String(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '_');
 /**
  * The MCP server a tool call belongs to, by the name each host reports: Codex `mcp__<server>__<tool>`, Grok `<server>__<tool>`.
  * Claude's own `mcp__<server>__<tool>` names are pruned per tool, not per server.
@@ -421,7 +424,13 @@ export function capabilityProposals(state, host, servers = []) {
   if (!h || h.completed < 5 || h.prompts < 10) return [];
   const keep = state.config.keep ?? [];
   const idleServers = () => {
-    const used = new Set([...(h.usedServers ?? []), ...h.usedTools.map((t) => serverOf(host, t)).filter(Boolean).map(normServer)]);
+    const used = new Set([
+      ...(h.usedServers ?? []),
+      ...h.usedTools
+        .map((t) => serverOf(host, t))
+        .filter(Boolean)
+        .map(normServer),
+    ]);
     const kept = new Set(keep.map(normServer));
     return servers.filter((s) => s.enabled !== false && !used.has(normServer(s.name)) && !kept.has(normServer(s.name))).map((s) => s.name);
   };

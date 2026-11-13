@@ -10,8 +10,8 @@ import { alignedStart, grokHistory, installGrok } from '../src/grok.mjs';
 import { runGuard } from '../src/guard.mjs';
 import { findDuplicate, forgetInflight, rememberInflight, spawnIdentity } from '../src/inflight.mjs';
 import { install, uninstall } from '../src/install.mjs';
-import { capabilityProposals, changeOptimization, normalizeEvent, processEvent, readOptimization, repository } from '../src/optimize.mjs';
 import { transitions } from '../src/notify.mjs';
+import { capabilityProposals, changeOptimization, normalizeEvent, processEvent, readOptimization, repository } from '../src/optimize.mjs';
 import { costOf } from '../src/prices.mjs';
 import { blockOutcomes } from '../src/results.mjs';
 import { pinnedModel, setSubagentModel } from '../src/subagents.mjs';
@@ -174,7 +174,20 @@ test('the status line keeps Grok and Claude feed shapes in separate files', () =
 
 const hostState = (host, extra = {}) => ({
   version: 1,
-  hosts: { [host]: { sessions: {}, completed: 5, finished: [], prompts: 10, used: [], usedTools: [], usedServers: [], catalog: {}, productive: [], ...extra } },
+  hosts: {
+    [host]: {
+      sessions: {},
+      completed: 5,
+      finished: [],
+      prompts: 10,
+      used: [],
+      usedTools: [],
+      usedServers: [],
+      catalog: {},
+      productive: [],
+      ...extra,
+    },
+  },
   facts: [],
   receipts: [],
   config: { learn: false, map: false, keep: [] },
@@ -198,7 +211,13 @@ test('Codex proposes unused MCP servers beside its built-in packages, matching h
 
 test('hook events record which MCP server each host called, on their own list that outlives the tool-name cap', () => {
   const state = hostState('grok');
-  const call = (host, tool, i) => ({ session_id: 's1', hook_event_name: 'PostToolUse', tool_name: tool, tool_input: {}, tool_use_id: `${host}-${i}` });
+  const call = (host, tool, i) => ({
+    session_id: 's1',
+    hook_event_name: 'PostToolUse',
+    tool_name: tool,
+    tool_input: {},
+    tool_use_id: `${host}-${i}`,
+  });
   processEvent(state, normalizeEvent(call('grok', 'demo51-mcp__demo51_health', 1), 'grok'));
   assert.deepEqual(state.hosts.grok.usedServers, ['demo51_mcp']);
   const codex = hostState('codex');
@@ -269,7 +288,8 @@ test('after-reset accepts --src grok and says what Grok needs when there is noth
 test('Codex 0.169 lists multi_agent as deprecated: that is still a control, while a removed key is not', () => {
   const r = gitRepo();
   const bins = tmp('lc-parity-features-');
-  const features = (multiAgent) => `#!${process.execPath}\nconsole.log(${JSON.stringify(`multi_agent ${multiAgent}\ngoals stable true\nview_image stable true`)});\n`;
+  const features = (multiAgent) =>
+    `#!${process.execPath}\nconsole.log(${JSON.stringify(`multi_agent ${multiAgent}\ngoals stable true\nview_image stable true`)});\n`;
   const previous = process.env.PATH;
   process.env.PATH = `${bins}:${previous}`;
   try {

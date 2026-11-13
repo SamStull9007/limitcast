@@ -85,10 +85,13 @@ export function validateGrok(repo, disabled = []) {
 
 /** `<host> mcp list --json` reports the settings the host actually loads, so an untrusted project that ignores the file shows up here. */
 function checkServersOff(command, repo, names, label) {
-  const list = JSON.parse(execFileSync(command, ['mcp', 'list', '--json'], { cwd: repo.root, encoding: 'utf8', timeout: 10_000, maxBuffer: 1_000_000 }));
+  const list = JSON.parse(
+    execFileSync(command, ['mcp', 'list', '--json'], { cwd: repo.root, encoding: 'utf8', timeout: 10_000, maxBuffer: 1_000_000 }),
+  );
   if (!Array.isArray(list)) throw new Error(`${label} returned an unexpected MCP server list`);
   for (const name of names) {
-    if (list.find((s) => s?.name === name)?.enabled !== false) throw new Error(`${label} ignored the project setting for ${name}; check project trust`);
+    if (list.find((s) => s?.name === name)?.enabled !== false)
+      throw new Error(`${label} ignored the project setting for ${name}; check project trust`);
   }
 }
 

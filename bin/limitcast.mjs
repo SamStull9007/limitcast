@@ -33,10 +33,10 @@ import {
   applyGrokTrim,
   getGrokBudget,
   grokConfigPath,
+  grokHistory,
   grokPresent,
   grokQuotaDue,
   grokQuotaEnabled,
-  grokHistory,
   grokSamples,
   grokServers,
   grokSessionLine,
@@ -1066,8 +1066,7 @@ if (cmd === '_optimize-hook') {
     console.log('Usage: limitcast after-reset [--src claude|codex|grok] [--window 5h|7d] [--detach] -- <command...>');
     process.exit(1);
   }
-  const samples =
-    src === 'codex' ? await readCodex(now - KEEP_MS) : src === 'grok' ? grokSamples(now) : oneClaudeAccount(load(now - KEEP_MS));
+  const samples = src === 'codex' ? await readCodex(now - KEEP_MS) : src === 'grok' ? grokSamples(now) : oneClaudeAccount(load(now - KEEP_MS));
   const rows = forecastAll(samples, now).filter((x) => x.src === src);
   // Without --window, use the shortest window this tool reports: a Codex plan may report only a 7-day window.
   const f = flag('--window') ? rows.find((x) => x.win === flag('--window')) : (rows.find((x) => x.win === '5h') ?? rows.find((x) => x.win === '7d'));
@@ -1172,7 +1171,12 @@ async function refreshValue(preread) {
   const o = loadOverhead();
   // limitcast started watching at its first status-line reading (or first measurement), not when Codex's logs begin.
   const start = Math.min(now, o?.first.at ?? now, ...claude.map((s) => s.t));
-  const v = foldEvents(loadValue(), { now, samples: [...claude, ...(await readCodex(since)), ...grokHistory(since, now)], blocks: loadBlocks(since), start });
+  const v = foldEvents(loadValue(), {
+    now,
+    samples: [...claude, ...(await readCodex(since)), ...grokHistory(since, now)],
+    blocks: loadBlocks(since),
+    start,
+  });
   await scanSessions(v, { root: claudeRoot(), baseline: o ? { at: o.first.at, chars: o.first.chars } : null, now });
   // Recalibrate from the last 8 days when there is enough data; keep the last good calibration otherwise.
   const usage = preread ? preread.filter((u) => u.t >= since) : await readUsage(since, {});

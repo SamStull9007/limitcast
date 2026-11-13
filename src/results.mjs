@@ -291,7 +291,9 @@ export function resultsReport({ now, days, samples, blocks, pro, saved, value = 
           : o.outcome === 'under'
             ? `reset at ${Math.round(o.peak)}%`
             : `now at ${Math.round(o.peak)}%, resets ${when(o.reset)}`;
-      out.push(`- ${when(o.t)}: ${name(o)} at ${Math.round(o.pct)}%, forecast out in ~${Math.max(0, Math.round((o.wall - o.t) / 60_000))} min; ${what}`);
+      out.push(
+        `- ${when(o.t)}: ${name(o)} at ${Math.round(o.pct)}%, forecast out in ~${Math.max(0, Math.round((o.wall - o.t) / 60_000))} min; ${what}`,
+      );
     }
   }
   if (st.switches)
