@@ -120,7 +120,7 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
   limitcast optimize status          inspect repository evidence, proposals and optimization receipts
   limitcast optimize learn on|off     learn safe check-command alternatives; three independent sessions to promote
   limitcast optimize map [on|off]     show a bounded source-symbol map or opt into session-start injection
-  limitcast optimize capabilities --codex   preview unused built-in packages; --apply <names> / --undo
+  limitcast optimize capabilities [--codex|--grok]  preview unused tools (Claude), built-in packages and MCP servers (Codex), MCP servers (Grok); --apply <names> / --undo
   limitcast results [--days N]       limits you reached, how far ahead limitcast warned, what the guard blocked
                     [--share]        totals only, safe to post
   limitcast license                  show the MIT license status

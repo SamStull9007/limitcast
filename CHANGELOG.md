@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+Codex and Grok parity, from an audit of how each host was handled.
+
+- Fix: `optimize capabilities --codex` failed on Codex 0.169 (it lists `multi_agent` as "deprecated", which is still a control).
+- New: the optimizer proposes MCP servers that no session in the repository called, for Codex and Grok, and switches them off per project (`.codex/config.toml`, `.grok/config.toml`, `enabled = false`). Same safeguards as Claude: five sessions of evidence, a keep list, a journaled write, a post-write check against `codex mcp list` / `grok mcp list`, and an undo that restores exact bytes. Grok has no persistent setting for built-in tools, so it proposes servers only. The Claude tool catalog now holds 400 tools instead of 200.
+- Fix: a model pinned for Grok (`subagent-model explore grok-4.3`) was applied to Claude spawns.
+- Fix: the duplicate-spawn hold never fired for Codex, whose `spawn_agent` sends `message`; a Grok `resume_from` re-run is no longer held as a duplicate. Codex and Grok now send `SubagentStop` to clear the hold (`install --guard` adds the hook; approve it in Codex).
+- Fix: `results`, the weekly line and the value rollup judged every past Grok block without readings, so outcomes were invented. Grok windows are rebuilt from the spend ledger, and percentages round.
+- Fix: Grok's status line overwrote the Claude feed file that `doctor` checks. Notifications say "Grok". Session labels in the burn report use the end of the id, because Codex and Grok ids start with a timestamp.
+- Fix: Grok cost in `report` uses the cost Grok recorded for each turn instead of pricing the whole turn at the long-context rate (about 1.8x too high).
+
 ## 0.19.2 — 2026-11-11
 
 - Fix optimizer learning so replacements preserve the verification check. Lint, build, type-check and unrelated test runners cannot substitute for one another; incompatible historical replacements are excluded from injected context.

@@ -30,18 +30,21 @@ Replacements must preserve the check: Python launcher variants for the same pyte
 
 Only a small whitelist of test/build/check commands is eligible. Raw prompts, output and arbitrary instructions are not retained or injected. At most four active facts and 1,000 characters are injected per session. The deterministic mode learns command alternatives. Optional model learning also selects successful verification commands; arbitrary repository prose is intentionally excluded. Inspect the facts and retire any that no longer apply; they are evidence, not commands that Limitcast executes.
 
-## Built-in capabilities
+## Built-in capabilities and MCP servers
 
 ```sh
 limitcast optimize capabilities --codex
 limitcast optimize keep image_media,collaboration
 limitcast optimize capabilities --codex --apply goals
+limitcast optimize capabilities --grok --apply some-server
 limitcast optimize capabilities --codex --undo
 ```
 
-Preview is read-only. Five observed sessions and ten prompts are required. Any observed use or a keep-list entry protects a capability. On Codex the candidates are `collaboration`, `goals` and `image_media`; the CLI must expose supported feature controls, and a post-write check must confirm the requested setting is actually disabled. Untrusted projects that ignore the file fail that check and roll back. Host-side or administrator policy may still determine the final tool surface.
+Preview is read-only. Five observed sessions and ten prompts are required. Any observed use or a keep-list entry protects a capability. On Codex the candidates are `collaboration`, `goals` and `image_media`, plus every MCP server in your Codex `config.toml` that no session in this repository has called. On Grok the candidates are the MCP servers in your Grok `config.toml` that no session in this repository has called; Grok has no persistent setting that removes a built-in tool, so there are no built-in candidates.
 
-For Claude, omit `--codex`. The optimizer reads bounded tool-name declarations from the session transcript at Stop/SessionEnd; a tool needs five declared-but-unused sessions before it is proposed. Missing declarations yield no proposal. Core reading, editing, shell, search, questions, web and skill tools are protected. Existing MCP trim remains available separately for all three original hosts. Grok has no built-in capability-pruning implementation.
+Applying a server writes `[mcp_servers.<name>]` with `enabled = false` to the project's `.codex/config.toml` or `.grok/config.toml`. Your user-level definition stays untouched, and the project table only overrides `enabled`. The host must expose supported controls, and a post-write check (`codex features list`, `codex mcp list --json`, `grok mcp list --json`) must confirm the requested setting is actually off. Untrusted projects that ignore the file fail that check and roll back. Host-side or administrator policy may still determine the final tool surface.
+
+For Claude, omit `--codex`. The optimizer reads bounded tool-name declarations from the session transcript at Stop/SessionEnd; a tool needs five declared-but-unused sessions before it is proposed. The tool catalog holds up to 400 tools per repository. Missing declarations yield no proposal. Core reading, editing, shell, search, questions, web and skill tools are protected. Existing MCP trim remains available separately for all three original hosts; it works across all your sessions, while these proposals look only at the current repository.
 
 Applying a named proposal is explicit, not automatic. Tracked files, symlinks, unsupported controls and explicit conflicting settings are refused. A write-ahead receipt supports recovery after an interrupted apply. Undo restores the exact original bytes only while the resulting file still matches; subsequent user edits cause a refusal rather than data loss. Restored items are protected from later proposals. A capability file created in a repository is local configuration: review it before committing any configuration changes.
 

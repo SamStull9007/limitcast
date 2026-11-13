@@ -1,5 +1,5 @@
 import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
-import { applyCapabilities, capabilityStatus, restoreCapabilities } from './capabilities.mjs';
+import { applyCapabilities, capabilityStatus, configuredServers, restoreCapabilities } from './capabilities.mjs';
 import { reserveModelJob, startModelWorker } from './model-optimize.mjs';
 import { capabilityProposals, changeOptimization, HOSTS, normalizeEvent, processEvent, readOptimization, repository } from './optimize.mjs';
 import { installOptimizerHost } from './optimizer-hosts.mjs';
@@ -121,7 +121,9 @@ export function runOptimize(args, cwd = process.cwd()) {
   return {
     config: state.config,
     facts: state.facts.length,
-    hosts: Object.fromEntries(HOSTS.map((h) => [h, { completedSessions: state.hosts[h]?.completed ?? 0, proposed: capabilityProposals(state, h) }])),
+    hosts: Object.fromEntries(
+      HOSTS.map((h) => [h, { completedSessions: state.hosts[h]?.completed ?? 0, proposed: capabilityProposals(state, h, configuredServers(h)) }]),
+    ),
     receipts: state.receipts,
     applied: Object.fromEntries(Object.entries(state.applied ?? {}).map(([h, a]) => [h, a.names])),
   };

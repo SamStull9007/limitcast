@@ -5,10 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { applyCapabilities, patchMcpServers, restoreCapabilities, validateCodex, validateGrok } from '../src/capabilities.mjs';
 import { alignedStart, grokHistory, installGrok } from '../src/grok.mjs';
 import { runGuard } from '../src/guard.mjs';
 import { findDuplicate, forgetInflight, rememberInflight, spawnIdentity } from '../src/inflight.mjs';
 import { install, uninstall } from '../src/install.mjs';
+import { capabilityProposals, changeOptimization, normalizeEvent, processEvent, readOptimization, repository } from '../src/optimize.mjs';
 import { transitions } from '../src/notify.mjs';
 import { costOf } from '../src/prices.mjs';
 import { blockOutcomes } from '../src/results.mjs';
@@ -168,4 +170,137 @@ test('the status line keeps Grok and Claude feed shapes in separate files', () =
   assert.equal(existsSync(join(state, 'last-feed.json')), false, 'a Grok feed must not satisfy the Claude feed check');
   run({ session_id: 's', rate_limits: { five_hour: { used_percentage: 10, resets_at: Math.floor(Date.now() / 1000) + 3600 } } });
   assert.ok(existsSync(join(state, 'last-feed.json')));
+});
+
+const hostState = (host, extra = {}) => ({
+  version: 1,
+  hosts: { [host]: { sessions: {}, completed: 5, finished: [], prompts: 10, used: [], usedTools: [], usedServers: [], catalog: {}, productive: [], ...extra } },
+  facts: [],
+  receipts: [],
+  config: { learn: false, map: false, keep: [] },
+});
+
+test('Grok proposes MCP servers no session in the repository called, and a keep-list entry protects one', () => {
+  const state = hostState('grok', { usedTools: ['basic-memory__search_notes', 'Read'] });
+  const servers = [{ name: 'basic-memory' }, { name: 'demo51-mcp' }, { name: 'firecrawl', enabled: false }];
+  assert.deepEqual(capabilityProposals(state, 'grok', servers), ['demo51-mcp']);
+  state.config.keep.push('demo51-mcp');
+  assert.deepEqual(capabilityProposals(state, 'grok', servers), []);
+  assert.deepEqual(capabilityProposals(hostState('grok', { completed: 4 }), 'grok', servers), [], 'five sessions first');
+  assert.deepEqual(capabilityProposals(hostState('grok'), 'grok', []), [], 'no configured servers, nothing to propose');
+});
+
+test('Codex proposes unused MCP servers beside its built-in packages, matching hyphens to underscores', () => {
+  const state = hostState('codex', { used: ['image_media', 'collaboration'], usedTools: ['mcp__tool_router__call_tool'] });
+  const servers = [{ name: 'tool-router' }, { name: 'deja' }];
+  assert.deepEqual(capabilityProposals(state, 'codex', servers), ['goals', 'deja']);
+});
+
+test('hook events record which MCP server each host called, on their own list that outlives the tool-name cap', () => {
+  const state = hostState('grok');
+  const call = (host, tool, i) => ({ session_id: 's1', hook_event_name: 'PostToolUse', tool_name: tool, tool_input: {}, tool_use_id: `${host}-${i}` });
+  processEvent(state, normalizeEvent(call('grok', 'demo51-mcp__demo51_health', 1), 'grok'));
+  assert.deepEqual(state.hosts.grok.usedServers, ['demo51_mcp']);
+  const codex = hostState('codex');
+  processEvent(codex, normalizeEvent(call('codex', 'mcp__deja__deja', 2), 'codex'));
+  assert.deepEqual(codex.hosts.codex.usedServers, ['deja']);
+  const full = hostState('grok', { usedTools: Array.from({ length: 200 }, (_, i) => `x__t${i}`) });
+  processEvent(full, normalizeEvent(call('grok', 'late-server__tool', 3), 'grok'));
+  assert.ok(full.hosts.grok.usedServers.includes('late_server'), 'a server called after the tool list filled up still counts as used');
+});
+
+test('patchMcpServers adds an enabled=false table and refuses a server the project already configures', () => {
+  assert.equal(patchMcpServers('', ['demo']), '[mcp_servers.demo]\nenabled = false # limitcast optimizer\n');
+  const next = patchMcpServers('[features]\ngoals = false\n', ['a', 'b-c']);
+  assert.match(next, /^\[features\]\ngoals = false\n\n\[mcp_servers\.a\]\nenabled = false/);
+  assert.match(next, /\[mcp_servers\.b-c\]\nenabled = false/);
+  assert.throws(() => patchMcpServers('[mcp_servers.demo]\ncommand = "x"\n', ['demo']), /preserve explicit/);
+  assert.throws(() => patchMcpServers('', ['bad name']), /unsupported MCP server name/);
+});
+
+const gitRepo = () => {
+  const root = tmp('lc-parity-repo-');
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  return repository(root);
+};
+
+test('applying Grok MCP servers is journaled, validated, undoable, and rolled back when Grok ignores the file', () => {
+  fresh();
+  process.env.GROK_HOME = tmp('lc-parity-grok-home-');
+  writeFileSync(join(process.env.GROK_HOME, 'config.toml'), '[mcp_servers.demo51-mcp]\ncommand = "x"\n\n[mcp_servers.basic-memory]\ncommand = "y"\n');
+  const r = gitRepo();
+  changeOptimization(r, (s) => Object.assign(s, hostState('grok', { usedTools: ['basic-memory__search_notes'] })));
+  assert.throws(() => applyCapabilities(r, 'grok', ['basic-memory'], { validate() {} }), /protected, used, or lacks evidence/);
+  const seen = [];
+  const out = applyCapabilities(r, 'grok', ['demo51-mcp'], { validate: (repo, names = []) => seen.push(names.slice()) });
+  assert.deepEqual(seen, [['demo51-mcp']]);
+  assert.equal(out.path, join(r.root, '.grok/config.toml'));
+  assert.match(readFileSync(out.path, 'utf8'), /\[mcp_servers\.demo51-mcp\]\nenabled = false/);
+  assert.deepEqual(readOptimization(r).applied.grok.names, ['demo51-mcp']);
+  assert.equal(restoreCapabilities(r, 'grok').restored, true);
+  assert.equal(existsSync(out.path), false, 'a file the optimizer created is removed again');
+  assert.ok(readOptimization(r).config.keep.includes('demo51-mcp'), 'a restored server is protected from later proposals');
+
+  const ignored = gitRepo();
+  changeOptimization(ignored, (s) => Object.assign(s, hostState('grok', { usedTools: [] })));
+  assert.throws(
+    () =>
+      applyCapabilities(ignored, 'grok', ['demo51-mcp'], {
+        validate() {
+          throw new Error('Grok ignored the project setting for demo51-mcp; check project trust');
+        },
+      }),
+    /check project trust/,
+  );
+  assert.equal(readOptimization(ignored).applied?.grok, undefined);
+  assert.equal(existsSync(join(ignored.root, '.grok/config.toml')), false);
+});
+
+test('Codex 0.169 lists multi_agent as deprecated: that is still a control, while a removed key is not', () => {
+  const r = gitRepo();
+  const bins = tmp('lc-parity-features-');
+  const features = (multiAgent) => `#!${process.execPath}\nconsole.log(${JSON.stringify(`multi_agent ${multiAgent}\ngoals stable true\nview_image stable true`)});\n`;
+  const previous = process.env.PATH;
+  process.env.PATH = `${bins}:${previous}`;
+  try {
+    writeFileSync(join(bins, 'codex'), features('deprecated true'), { mode: 0o755 });
+    validateCodex(r); // exposes every control: no throw
+    writeFileSync(join(bins, 'codex'), features('removed true'), { mode: 0o755 });
+    assert.throws(() => validateCodex(r), /does not expose supported multi_agent control/);
+  } finally {
+    process.env.PATH = previous;
+  }
+});
+
+test('Codex applies MCP servers and built-in packages together, and the host check reads the real project directory', () => {
+  fresh();
+  const codexHome = tmp('lc-parity-codex-home-');
+  process.env.CODEX_HOME = codexHome;
+  writeFileSync(join(codexHome, 'config.toml'), '[mcp_servers.deja]\ncommand = "x"\n');
+  const r = gitRepo();
+  changeOptimization(r, (s) => Object.assign(s, hostState('codex', { used: ['image_media', 'collaboration'] })));
+  const out = applyCapabilities(r, 'codex', ['goals', 'deja'], { validate() {} });
+  const text = readFileSync(out.path, 'utf8');
+  assert.match(text, /\[features\]\ngoals = false/);
+  assert.match(text, /\[mcp_servers\.deja\]\nenabled = false/);
+  restoreCapabilities(r, 'codex');
+
+  for (const [validate, command, listed, name] of [
+    [validateGrok, 'grok', '[{"name":"demo51-mcp","enabled":false}]', 'demo51-mcp'],
+    [validateCodex, 'codex', '[{"name":"deja","enabled":false}]', 'deja'],
+  ]) {
+    const bins = tmp('lc-parity-bin-');
+    const script = (json) =>
+      `#!${process.execPath}\nif(process.cwd()!==${JSON.stringify(r.root)})process.exit(2);\nconst a=process.argv.slice(2).join(' ');\nif(a==='features list')console.log('multi_agent stable false\\ngoals stable false\\nview_image stable false');\nelse if(a==='mcp list --json')console.log(${JSON.stringify(json)});\nelse process.exit(3);\n`;
+    const previous = process.env.PATH;
+    process.env.PATH = `${bins}:${previous}`;
+    try {
+      writeFileSync(join(bins, command), script(listed), { mode: 0o755 });
+      validate(r, [name]);
+      writeFileSync(join(bins, command), script(listed.replace('false', 'true')), { mode: 0o755 });
+      assert.throws(() => validate(r, [name]), /ignored the project setting.*project trust/);
+    } finally {
+      process.env.PATH = previous;
+    }
+  }
 });

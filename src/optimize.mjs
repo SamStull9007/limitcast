@@ -14,6 +14,19 @@ const CAPABILITIES = {
   image_media: /view_image|imagegen|image_generation|generatedImage|emitImage/,
 };
 const validTool = (name) => typeof name === 'string' && /^[\w:.-]{1,100}$/.test(name) && !Object.hasOwn(Object.prototype, name);
+/** The tool catalog a session can declare, per host. Claude sessions with many connectors declare a few hundred tools. */
+const CATALOG_LIMIT = 400;
+export const normServer = (name) => String(name).toLowerCase().replace(/[^a-z0-9]/g, '_');
+/**
+ * The MCP server a tool call belongs to, by the name each host reports: Codex `mcp__<server>__<tool>`, Grok `<server>__<tool>`.
+ * Claude's own `mcp__<server>__<tool>` names are pruned per tool, not per server.
+ */
+export function serverOf(host, tool) {
+  if (typeof tool !== 'string') return undefined;
+  if (host === 'codex') return tool.startsWith('mcp__') ? tool.split('__')[1] : undefined;
+  if (host === 'grok') return tool.includes('__') ? tool.split('__')[0] : undefined;
+  return undefined;
+}
 
 export function repository(cwd = process.cwd()) {
   const root = realpathSync(execFileSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 2000 }).trim());
@@ -198,7 +211,7 @@ export function normalizeEvent(hook, host) {
       ? hook.tools
           .map((t) => (typeof t === 'string' ? t : t?.name))
           .filter(validTool)
-          .slice(0, 200)
+          .slice(0, CATALOG_LIMIT)
       : [],
   };
 }
@@ -261,6 +274,7 @@ export function processEvent(state, e, now = Date.now()) {
     prompts: 0,
     used: [],
     usedTools: [],
+    usedServers: [],
     catalog: {},
     productive: [],
   });
@@ -274,8 +288,11 @@ export function processEvent(state, e, now = Date.now()) {
   };
   host.used = [...new Set([...host.used, ...e.capabilities])];
   if (validTool(e.name) && host.usedTools.length < 200) host.usedTools = [...new Set([...host.usedTools, e.name])];
+  // Servers are tracked on their own: a used server must stay protected after the 200-name tool list fills up.
+  const server = serverOf(e.host, e.name);
+  if (server && (host.usedServers ??= []).length < 200) host.usedServers = [...new Set([...host.usedServers, normServer(server)])];
   for (const tool of e.tools) {
-    if (Object.keys(host.catalog).length < 200) host.catalog[tool] ??= { used: host.usedTools.includes(tool), sessions: [] };
+    if (Object.keys(host.catalog).length < CATALOG_LIMIT) host.catalog[tool] ??= { used: host.usedTools.includes(tool), sessions: [] };
   }
   if (Object.hasOwn(host.catalog, e.name)) host.catalog[e.name].used = true;
   if (e.event === 'SessionStart' || (e.host === 'grok' && /^PostToolUse(?:Failure)?$/.test(e.event) && !session.injected)) {
@@ -390,11 +407,26 @@ export function processEvent(state, e, now = Date.now()) {
   return {};
 }
 
-export function capabilityProposals(state, host) {
+/**
+ * What `optimize capabilities` can propose to switch off in this repository, from the evidence of its own sessions.
+ * Claude: declared tools never used. Codex: three built-in packages, plus configured MCP servers never called.
+ * Grok: configured MCP servers never called (Grok has no persistent setting that removes a built-in tool).
+ * Every host needs five completed sessions and ten prompts first, and a keep-list entry always protects a name.
+ * @param {any} state
+ * @param {string} host
+ * @param {{name:string, enabled?:boolean}[]} [servers] the MCP servers the host has configured (from its config.toml)
+ */
+export function capabilityProposals(state, host, servers = []) {
   const h = state.hosts[host];
   if (!h || h.completed < 5 || h.prompts < 10) return [];
   const keep = state.config.keep ?? [];
-  if (host === 'codex') return Object.keys(CAPABILITIES).filter((c) => !h.used.includes(c) && !keep.includes(c));
+  const idleServers = () => {
+    const used = new Set([...(h.usedServers ?? []), ...h.usedTools.map((t) => serverOf(host, t)).filter(Boolean).map(normServer)]);
+    const kept = new Set(keep.map(normServer));
+    return servers.filter((s) => s.enabled !== false && !used.has(normServer(s.name)) && !kept.has(normServer(s.name))).map((s) => s.name);
+  };
+  if (host === 'codex') return [...Object.keys(CAPABILITIES).filter((c) => !h.used.includes(c) && !keep.includes(c)), ...idleServers()];
+  if (host === 'grok') return idleServers();
   if (host === 'claude')
     return Object.entries(h.catalog)
       .filter(([n, t]) => !CORE_TOOLS.test(n) && !t.used && t.sessions.length >= 5 && !keep.includes(n))
