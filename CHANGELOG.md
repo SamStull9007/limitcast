@@ -10,6 +10,7 @@ Codex and Grok parity, from an audit of how each host was handled.
 - Fix: the duplicate-spawn hold never fired for Codex, whose `spawn_agent` sends `message`; a Grok `resume_from` re-run is no longer held as a duplicate. Codex and Grok now send `SubagentStop` to clear the hold (`install --guard` adds the hook; approve it in Codex).
 - Fix: `results`, the weekly line and the value rollup judged every past Grok block without readings, so outcomes were invented. Grok windows are rebuilt from the spend ledger, and percentages round.
 - Fix: Grok's status line overwrote the Claude feed file that `doctor` checks. Notifications say "Grok". Session labels in the burn report use the end of the id, because Codex and Grok ids start with a timestamp.
+- Fix: `after-reset` accepts `--src grok`, and without `--window` uses the shortest window the tool reports (a Codex plan with only a 7-day window used to fail on the default 5h).
 - Fix: Grok cost in `report` uses the cost Grok recorded for each turn instead of pricing the whole turn at the long-context rate (about 1.8x too high).
 
 ## 0.19.2 — 2026-11-11

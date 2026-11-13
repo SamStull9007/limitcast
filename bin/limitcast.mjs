@@ -158,7 +158,7 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
                                              and when your Claude limit itself changes
   limitcast notify ntfy <topic|url>|off      also send them to your phone (ntfy.sh)
   limitcast notify webhook <url>|off         also send them to a Slack or Discord webhook
-  limitcast after-reset [--src claude|codex] [--window 5h|7d] [--detach] -- <command>
+  limitcast after-reset [--src claude|codex|grok] [--window 5h|7d] [--detach] -- <command>
                                              run a heavy job once the window has reset
   limitcast results --html [--out FILE]      results, current windows and the burn report as one page
   limitcast report [--days N] [--out FILE]   tokens by tool, day, project, model and session
@@ -1062,15 +1062,22 @@ if (cmd === '_optimize-hook') {
   const sep = args.indexOf('--');
   const command = sep >= 0 ? args.slice(sep + 1) : [];
   const src = flag('--src') ?? 'claude';
-  const win = flag('--window') ?? '5h';
   if (!command.length) {
-    console.log('Usage: limitcast after-reset [--src claude|codex] [--window 5h|7d] [--detach] -- <command...>');
+    console.log('Usage: limitcast after-reset [--src claude|codex|grok] [--window 5h|7d] [--detach] -- <command...>');
     process.exit(1);
   }
-  const samples = src === 'codex' ? await readCodex(now - KEEP_MS) : oneClaudeAccount(load(now - KEEP_MS));
-  const f = forecastAll(samples, now).find((x) => x.src === src && x.win === win);
+  const samples =
+    src === 'codex' ? await readCodex(now - KEEP_MS) : src === 'grok' ? grokSamples(now) : oneClaudeAccount(load(now - KEEP_MS));
+  const rows = forecastAll(samples, now).filter((x) => x.src === src);
+  // Without --window, use the shortest window this tool reports: a Codex plan may report only a 7-day window.
+  const f = flag('--window') ? rows.find((x) => x.win === flag('--window')) : (rows.find((x) => x.win === '5h') ?? rows.find((x) => x.win === '7d'));
+  const win = f?.win ?? flag('--window') ?? '5h';
   if (!f) {
-    console.log(`No ${src} ${win} readings yet, so the reset time is unknown.`);
+    console.log(
+      src === 'grok'
+        ? 'No grok readings yet, so the reset time is unknown. Set a dollar cap first: limitcast budget grok <usd>'
+        : `No ${src} ${win} readings yet, so the reset time is unknown.`,
+    );
     process.exit(1);
   }
   const at = resetTarget(f, now);

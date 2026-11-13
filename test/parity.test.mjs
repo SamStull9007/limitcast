@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -254,6 +254,16 @@ test('applying Grok MCP servers is journaled, validated, undoable, and rolled ba
   );
   assert.equal(readOptimization(ignored).applied?.grok, undefined);
   assert.equal(existsSync(join(ignored.root, '.grok/config.toml')), false);
+});
+
+test('after-reset accepts --src grok and says what Grok needs when there is nothing to wait for', () => {
+  const state = tmp('lc-parity-after-');
+  const env = { ...process.env, LIMITCAST_STATE: state, GROK_HOME: join(state, 'nogrok'), CODEX_HOME: join(state, 'nocodex') };
+  const run = (...args) => spawnSync('node', [bin, 'after-reset', ...args], { env, encoding: 'utf8', timeout: 20000 });
+  const none = run('--src', 'grok', '--', 'true');
+  assert.equal(none.status, 1);
+  assert.match(none.stdout, /No grok readings yet.*limitcast budget grok/);
+  assert.match(run().stdout, /\[--src claude\|codex\|grok\]/);
 });
 
 test('Codex 0.169 lists multi_agent as deprecated: that is still a control, while a removed key is not', () => {
