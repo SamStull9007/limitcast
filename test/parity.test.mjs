@@ -251,7 +251,7 @@ test('applying Grok MCP servers is journaled, validated, undoable, and rolled ba
   changeOptimization(r, (s) => Object.assign(s, hostState('grok', { usedTools: ['basic-memory__search_notes'] })));
   assert.throws(() => applyCapabilities(r, 'grok', ['basic-memory'], { validate() {} }), /protected, used, or lacks evidence/);
   const seen = [];
-  const out = applyCapabilities(r, 'grok', ['demo51-mcp'], { validate: (repo, names = []) => seen.push(names.slice()) });
+  const out = applyCapabilities(r, 'grok', ['demo51-mcp'], { validate: (_repo, names = []) => seen.push(names.slice()) });
   assert.deepEqual(seen, [['demo51-mcp']]);
   assert.equal(out.path, join(r.root, '.grok/config.toml'));
   assert.match(readFileSync(out.path, 'utf8'), /\[mcp_servers\.demo51-mcp\]\nenabled = false/);

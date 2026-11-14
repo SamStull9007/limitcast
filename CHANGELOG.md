@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.19.3 — 2026-11-13
 
 Codex and Grok parity, from an audit of how each host was handled.
 
