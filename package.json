@@ -1,6 +1,6 @@
 {
   "name": "limitcast",
-  "version": "0.19.3",
+  "version": "0.19.4",
   "description": "Claude Code usage limits: forecast Codex and Grok too.",
   "type": "module",
   "bin": {

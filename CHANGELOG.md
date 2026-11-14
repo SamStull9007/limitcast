@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.19.4 — 2026-11-13
 
 The rest of the Codex and Grok parity audit, checked against live Codex 0.169 and Grok 1.0.77 sessions.
 
