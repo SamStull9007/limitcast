@@ -57,23 +57,38 @@ export function grokUsedServers(since, root = grokRoot()) {
 }
 
 /**
- * Sizes from the newest session: the system prompt Grok loaded and the tool list (characters).
+ * Sizes from the newest interactive session (a subagent's child session is skipped: it carries its own prompt): the
+ * system prompt Grok loaded, the tool list, and the instruction files (AGENTS.md and the like), all in characters, and
+ * `at`, when the session started.
  * @param {string} [root]
- * @returns {{prompt:number, tools:number}|null}
+ * @returns {{prompt:number, tools:number, agentsMd:number, at?:number}|null}
  */
 export function grokStartup(root = grokRoot()) {
-  const usage = newestFile(root, (n) => n === 'usage.json');
-  if (!usage) return null;
-  const dir = dirname(usage);
-  const size = (/** @type {string} */ n) => {
-    const p = join(dir, n);
-    return existsSync(p) ? statSync(p).size : 0;
-  };
-  return { prompt: size('system_prompt.txt'), tools: size('tool_definitions.json') };
+  for (const usage of newestFiles(root, (n) => n === 'usage.json').slice(0, 40)) {
+    const dir = dirname(usage);
+    const json = (/** @type {string} */ n) => {
+      try {
+        return JSON.parse(readFileSync(join(dir, n), 'utf8'));
+      } catch {
+        return null;
+      }
+    };
+    const summary = json('summary.json');
+    if (summary?.session_kind === 'subagent') continue;
+    const at = Date.parse(summary?.created_at);
+    const size = (/** @type {string} */ n) => {
+      const p = join(dir, n);
+      return existsSync(p) ? statSync(p).size : 0;
+    };
+    const files = json('prompt_context.json')?.agents_md_files;
+    const agentsMd = Array.isArray(files) ? files.reduce((a, f) => a + String(f?.content ?? '').length, 0) : 0;
+    return { prompt: size('system_prompt.txt'), tools: size('tool_definitions.json'), agentsMd, ...(Number.isFinite(at) ? { at } : {}) };
+  }
+  return null;
 }
 
 /**
- * @param {{servers:{name:string, enabled:boolean|undefined}[], used:Set<string>, usedMonth?:Set<string>|null, startup:{prompt:number, tools:number}|null, days:number, pro:boolean, keep?:string[]}} r
+ * @param {{servers:{name:string, enabled:boolean|undefined}[], used:Set<string>, usedMonth?:Set<string>|null, startup:{prompt:number, tools:number, agentsMd?:number}|null, days:number, pro:boolean, keep?:string[]}} r
  *   keep: the `trim keep` list; unused servers on it are reported as kept and left out of `unused`.
  *   usedMonth: normalized names used in 30 days. Servers in it stay out of `unused`.
  */
@@ -85,11 +100,14 @@ export function grokTrimReport({ servers, used, usedMonth = null, startup, days,
   const unused = idle.filter((s) => !kept.includes(s) && !standing.includes(s));
   const tok = (/** @type {number} */ c) => `${(c / 4000).toFixed(1)}k`;
   const out = ['# limitcast trim --grok', ''];
-  if (startup)
+  if (startup) {
+    const files = startup.agentsMd ? ` and ~${tok(startup.agentsMd)} of instruction files` : '';
+    const total = startup.prompt + startup.tools + (startup.agentsMd ?? 0);
     out.push(
-      `Grok sessions start with ~${tok(startup.prompt)} tokens of system prompt and ~${tok(startup.tools)} of tool definitions, re-sent on every turn.`,
+      `Grok sessions start with ~${tok(startup.prompt)} tokens of system prompt, ~${tok(startup.tools)} of tool definitions${files}${startup.agentsMd ? ` (about ${tok(total)} in all, estimated from file sizes)` : ''}, re-sent on every turn.`,
       '',
     );
+  }
   out.push(`## MCP servers: ${on.length} on, ${unused.length + standing.length} not used in ${days} days`);
   if (standing.length)
     out.push('', `${standing.length} used in the last 30 days, so \`trim --apply\` leaves them on:`, ...standing.map((s) => `- ${s.name}`));
@@ -541,11 +559,12 @@ export function installGrok({ guard, alerts = false, self, home = grokHome() }) 
       hooks.PostToolUse = [
         { matcher: 'Bash|Read|Grep|WebFetch|mcp__.*', hooks: [{ type: 'command', command: `${self} tool-check --src grok`, timeout: 10 }] },
       ];
+      hooks.SessionStart = [{ hooks: [{ type: 'command', command: `${self} drift --hook --src grok`, timeout: 15 }] }];
     }
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify({ hooks }, null, 2)}\n`);
     if (guard) changes.push('added the Grok subagent guard (matcher spawn_subagent) and its subagent-stop hook');
-    if (alerts) changes.push('added the Grok large tool-output notice and fat-tool limit check');
+    if (alerts) changes.push('added the Grok starting-context alert, large tool-output notice and fat-tool limit check');
   }
   return changes;
 }
@@ -792,22 +811,29 @@ function grokSessionFiles(root, since, name) {
  * @param {(name:string)=>boolean} keep
  */
 function newestFile(dir, keep) {
-  if (!existsSync(dir)) return null;
-  let best = null;
-  let bestM = -1;
+  return newestFiles(dir, keep)[0] ?? null;
+}
+
+/**
+ * Every file under `dir` that `keep` accepts, newest first.
+ * @param {string} dir
+ * @param {(name:string)=>boolean} keep
+ * @returns {string[]}
+ */
+function newestFiles(dir, keep) {
+  if (!existsSync(dir)) return [];
+  /** @type {{p:string, m:number}[]} */
+  const found = [];
   /** @param {string} d */
   const walk = (d) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const p = join(d, e.name);
       if (e.isDirectory()) walk(p);
-      else if (keep(e.name)) {
-        const m = statSync(p).mtimeMs;
-        if (m > bestM) [best, bestM] = [p, m];
-      }
+      else if (keep(e.name)) found.push({ p, m: statSync(p).mtimeMs });
     }
   };
   walk(dir);
-  return best;
+  return found.sort((a, b) => b.m - a.m).map((f) => f.p);
 }
 
 /** @param {string} path @param {string} text */

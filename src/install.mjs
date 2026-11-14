@@ -139,8 +139,12 @@ export function install({
     upsertGuard(codex, { matcher: CODEX_MATCHER, hooks: [{ type: 'command', command: `${self} guard`, timeout: 10 }] });
     // A subagent's stop clears the duplicate-spawn hold; without it a finished spawn blocks its own retry for 30 minutes.
     upsertHook(codex, 'SubagentStop', { matcher: '', hooks: [{ type: 'command', command: `${self} subagent-receipt`, timeout: 15 }] }, isReceipt);
+    // Codex has no status line, so its limit notifications (limitcast notify on) are raised from a throttled Stop hook.
+    upsertHook(codex, 'Stop', { matcher: '', hooks: [{ type: 'command', command: `${self} codex-notify --hook`, timeout: 5 }] }, isCodexNotify);
     writeSettings(codexPath, codex);
-    changes.push('added the Codex subagent guard (Codex runs it after you trust it: start Codex and approve the new hooks)');
+    changes.push(
+      'added the Codex subagent guard and limit notifications (Codex runs them after you trust them: start Codex and approve the new hooks)',
+    );
   }
   if (alerts && existsSync(join(codexPath, '..'))) {
     const codex = readSettings(codexPath);
@@ -159,8 +163,14 @@ export function install({
       { matcher: 'mcp__.*', hooks: [{ type: 'command', command: `${self} tool-limit --src codex`, timeout: 10 }] },
       isToolLimit,
     );
+    upsertHook(
+      codex,
+      'SessionStart',
+      { matcher: '', hooks: [{ type: 'command', command: `${self} drift --hook --src codex`, timeout: 15 }] },
+      isAlert,
+    );
     writeSettings(codexPath, codex);
-    changes.push('added the Codex large tool-output notice and fat-tool limit check (approve the new hooks in Codex)');
+    changes.push('added the Codex starting-context alert, large tool-output notice and fat-tool limit check (approve the new hooks in Codex)');
   }
   if (grokPresent(grokDir)) changes.push(...installGrok({ guard, alerts, self, home: grokDir }));
   if (optimize && existsSync(join(codexPath, '..'))) {
@@ -261,12 +271,14 @@ export function uninstall({ path = settingsPath(), codexPath = codexHooksPath(),
   if (existsSync(codexPath)) {
     const codex = readSettings(codexPath);
     const list = codex.hooks?.PreToolUse ?? [];
-    const ours = (/** @type {any} */ h) => isOptimizer(h) || isReceipt(h) || isToolCheck(h) || isToolLimit(h);
+    const ours = (/** @type {any} */ h) => isOptimizer(h) || isReceipt(h) || isToolCheck(h) || isToolLimit(h) || isCodexNotify(h) || isAlert(h);
     if (list.some(isGuard) || Object.values(codex.hooks ?? {}).some((entries) => entries.some(ours))) {
       backup(codexPath);
       codex.hooks.PreToolUse = list.filter((/** @type {any} */ h) => !isGuard(h) && !isToolLimit(h));
       if (codex.hooks.SubagentStop) codex.hooks.SubagentStop = codex.hooks.SubagentStop.filter((/** @type {any} */ h) => !isReceipt(h));
       if (codex.hooks.PostToolUse) codex.hooks.PostToolUse = codex.hooks.PostToolUse.filter((/** @type {any} */ h) => !isToolCheck(h));
+      if (codex.hooks.Stop) codex.hooks.Stop = codex.hooks.Stop.filter((/** @type {any} */ h) => !isCodexNotify(h));
+      if (codex.hooks.SessionStart) codex.hooks.SessionStart = codex.hooks.SessionStart.filter((/** @type {any} */ h) => !isAlert(h));
       removeOptimizerHooks(codex);
       writeSettings(codexPath, codex);
       changes.push('removed the Codex subagent guard');
@@ -320,6 +332,7 @@ const isPromptCheck = runs(/\bprompt-check\b/);
 const isReceipt = runs(/\bsubagent-receipt\b/);
 const isToolCheck = runs(/\btool-check\b/);
 const isToolLimit = runs(/\btool-limit\b/);
+const isCodexNotify = runs(/\bcodex-notify\b/);
 const isOptimizer = runs(/\b_optimize-hook\b/);
 
 /** @param {string} path */

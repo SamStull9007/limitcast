@@ -24,6 +24,7 @@ import {
 } from '../src/apply.mjs';
 import { calibrate, limitChange, limitChangeMessage, windowPct } from '../src/calibrate.mjs';
 import { applyCodexTrim, codexConfigPath, codexServers, codexStartup, codexTrimReport, codexUsedServers, undoCodexTrim } from '../src/codex.mjs';
+import { codexHooks, trustLine } from '../src/codex-trust.mjs';
 import { coldCost, coldMessage, coldNotice, firstNotice, firstWarning } from '../src/cold.mjs';
 import { unknownFlag } from '../src/flags.mjs';
 import { forecastAll, oneClaudeAccount, resetTarget } from '../src/forecast.mjs';
@@ -65,12 +66,22 @@ import {
   spawnIdentity,
 } from '../src/inflight.mjs';
 import { insightsReport, insightsShare, periodInsights } from '../src/insights.mjs';
-import { doctor, install, installedFeatures, readSettings, settingsPath, uninstall } from '../src/install.mjs';
+import { codexHooksPath, doctor, install, installedFeatures, readSettings, settingsPath, uninstall } from '../src/install.mjs';
 import { memoryCheck, memoryDir, memoryReport, scanMemory } from '../src/memory.mjs';
-import { buildNotifierApp, loadChannels, notifierApp, notifyChanges, notifyEnabled, send, setChannel, setNotify } from '../src/notify.mjs';
+import {
+  buildNotifierApp,
+  codexNotifyDue,
+  loadChannels,
+  notifierApp,
+  notifyChanges,
+  notifyEnabled,
+  send,
+  setChannel,
+  setNotify,
+} from '../src/notify.mjs';
 import { onboardingReport } from '../src/onboarding.mjs';
 import { runOptimizationHook, runOptimize } from '../src/optimize-cli.mjs';
-import { driftMessage, loadOverhead, recordOverhead, savedPerSession, savedSummary, snapshot } from '../src/overhead.mjs';
+import { driftMessage, hostSnapshot, loadOverhead, recordOverhead, savedPerSession, savedSummary, snapshot } from '../src/overhead.mjs';
 import { advise, getPlan, loadPeaks, PLANS, planPrices, planStats, recordPeaks, setPlan } from '../src/plan.mjs';
 import { costOf, fmtUsd } from '../src/prices.mjs';
 import { hostSubagentUsage, stopHost } from '../src/receipts.mjs';
@@ -180,7 +191,7 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
 const [cmd, ...args] = process.argv.slice(2);
 const now = Date.now();
 // Hooks run unattended and fail open; everything else rejects a mistyped option instead of ignoring it.
-const typo = ['guard', 'prompt-check', 'tool-check', 'tool-limit', 'subagent-receipt', 'drift', 'statusline'].includes(cmd)
+const typo = ['guard', 'prompt-check', 'tool-check', 'tool-limit', 'subagent-receipt', 'codex-notify', 'drift', 'statusline'].includes(cmd)
   ? undefined
   : unknownFlag(args);
 if (typo) {
@@ -537,6 +548,23 @@ if (cmd === '_optimize-hook') {
   } catch {
     /* a hook must never break the session */
   }
+} else if (cmd === 'codex-notify') {
+  // Codex has no status line to raise a notification from. A Stop hook (installed with --guard) calls this with --hook; at most
+  // every few minutes it starts the check below in the background, so no Codex turn waits on reading the rollouts.
+  try {
+    if (args.includes('--hook')) {
+      readStdin();
+      if (notifyEnabled() && codexNotifyDue(now))
+        spawn(process.execPath, [fileURLToPath(import.meta.url), 'codex-notify'], { detached: true, stdio: 'ignore' }).unref();
+    } else if (notifyEnabled()) {
+      notifyChanges(
+        forecastAll(oneClaudeAccount(await readCodex(now - KEEP_MS)), now).filter((f) => f.src === 'codex'),
+        clock,
+      );
+    }
+  } catch {
+    /* a hook must never break the session */
+  }
 } else if (cmd === 'plan') {
   if (args[0] === 'set') {
     const id = args[1];
@@ -735,6 +763,21 @@ if (cmd === '_optimize-hook') {
   }
   const checks = await healthChecks();
   saveHealth(checks);
+  // The key in Codex's config.toml only says a hook was approved once, not that this version of it was. When limitcast has hooks
+  // in Codex, ask Codex itself which ones it trusts (it takes a second, so it belongs here and not in the daily background check).
+  try {
+    if (readFileSync(codexHooksPath(), 'utf8').includes('limitcast')) {
+      const rows = await codexHooks();
+      const line = rows ? trustLine(rows) : null;
+      if (line) {
+        const at = checks.findIndex((c) => c.line.startsWith('Codex subagent guard installed'));
+        if (at >= 0) checks.splice(at, 1);
+        checks.push(line);
+      }
+    }
+  } catch {
+    /* no Codex hooks file, or Codex did not answer: the checks above stand */
+  }
   // Memory is per project: shown here, but kept out of the saved health that the daily background check overwrites.
   const mem = memoryCheck(scanMemory(memoryDir()));
   if (mem) checks.push(mem);
@@ -930,13 +973,21 @@ if (cmd === '_optimize-hook') {
 } else if (cmd === 'drift') {
   // SessionStart hook: tells the user (systemMessage, never the model's context) when starting context grew.
   const hook = args.includes('--hook');
+  const host = hookHost();
   try {
-    const latest = await latestInteractiveTranscript(claudeRoot());
-    const d = latest ? recordOverhead(snapshot(latest)) : null;
+    // Claude Code: the last interactive transcript. Codex and Grok (`--src`): the sizes their last interactive session logged.
+    const claudeLatest = host === 'claude' ? await latestInteractiveTranscript(claudeRoot()) : null;
+    const start = host === 'codex' ? await codexStartup() : host === 'grok' ? grokStartup() : null;
+    const latest = claudeLatest ?? start;
+    const d = claudeLatest
+      ? recordOverhead(snapshot(claudeLatest))
+      : start && host !== 'claude'
+        ? recordOverhead(hostSnapshot(host, start), host)
+        : null;
     if (hook) {
-      const lines = d?.alert ? [driftMessage(d)] : [];
+      const lines = d?.alert ? [driftMessage(d, host)] : [];
       // Claude Code may have rewritten the files `trim --apply` changed: put the cuts back for the next session.
-      const re = reapplyTrim();
+      const re = host === 'claude' ? reapplyTrim() : { reapplied: [] };
       if (re.reapplied.length)
         lines.push(
           `limitcast: Claude Code had undone ${re.reapplied.length} of your trim cuts; they're back from your next session. (limitcast trim --undo to drop them)`,
@@ -953,9 +1004,9 @@ if (cmd === '_optimize-hook') {
         );
       }
       if (lines.length) console.log(JSON.stringify({ systemMessage: lines.join('\n') }));
-    } else if (!latest) console.log('No interactive Claude Code session found yet.');
+    } else if (!latest) console.log(`No interactive ${host === 'claude' ? 'Claude Code' : host === 'codex' ? 'Codex' : 'Grok'} session found yet.`);
     else if (!d) console.log('Starting context recorded. limitcast will tell you when it grows.');
-    else console.log(d.alert ? forTerminal(driftMessage(d)) : 'No meaningful change in your starting context since the last session.');
+    else console.log(d.alert ? forTerminal(driftMessage(d, host)) : 'No meaningful change in your starting context since the last session.');
   } catch (e) {
     if (!hook) throw e; // a hook must never break session start
   }

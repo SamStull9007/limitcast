@@ -14,6 +14,23 @@ const NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok' };
 
 export const notifyEnabled = () => existsSync(flag());
 
+/**
+ * True at most once every few minutes (Codex has no status line, so a Stop hook asks this before it starts the background check).
+ * @param {number} now epoch ms
+ * @param {number} [gapMs]
+ */
+export function codexNotifyDue(now, gapMs = 180_000) {
+  const mark = join(stateDir(), 'notify-codex.at');
+  try {
+    if (now - Number(readFileSync(mark, 'utf8')) < gapMs) return false;
+  } catch {
+    /* never checked */
+  }
+  mkdirSync(stateDir(), { recursive: true });
+  writeFileSync(mark, String(now));
+  return true;
+}
+
 /** @param {boolean} on */
 export function setNotify(on) {
   mkdirSync(stateDir(), { recursive: true });

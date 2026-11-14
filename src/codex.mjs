@@ -91,34 +91,64 @@ export async function codexUsedServers(since, root = join(codexHome(), 'sessions
 }
 
 /**
- * Sizes from the newest rollout's head: the AGENTS.md chain Codex loaded and its own base instructions (characters).
- * @returns {Promise<{agentsMd:number, base:number}|null>}
+ * What a rollout's head shows of how the session started. A subagent's rollout is its own thread (forked, with its own
+ * instructions), so it says nothing about what your interactive sessions load.
+ * @param {string} file
+ * @returns {Promise<{subagent:boolean, agentsMd:number, base:number, first?:number, at?:number}>}
  */
-export async function codexStartup(root = join(codexHome(), 'sessions')) {
-  const files = jsonlFiles(root, 0, (n) => n.startsWith('rollout-'))
-    .map((p) => ({ p, m: statSync(p).mtimeMs }))
-    .sort((a, b) => b.m - a.m);
-  if (!files.length) return null;
+async function rolloutHead(file) {
   let agentsMd = 0;
   let base = 0;
+  let subagent = false;
+  /** @type {number|undefined} */
+  let first;
+  /** @type {number|undefined} */
+  let at;
   let n = 0;
-  const rl = createInterface({ input: createReadStream(files[0].p), crlfDelay: Infinity });
+  const rl = createInterface({ input: createReadStream(file), crlfDelay: Infinity });
   for await (const line of rl) {
-    if (++n > 40) break;
+    if (++n > 400) break;
     try {
       const ev = JSON.parse(line);
-      if (ev.type === 'session_meta') base = String(ev.payload?.base_instructions?.text ?? '').length;
+      if (ev.type === 'session_meta') {
+        base = String(ev.payload?.base_instructions?.text ?? '').length;
+        subagent = ev.payload?.thread_source === 'subagent' || Boolean(ev.payload?.source?.subagent);
+        const started = Date.parse(ev.payload?.timestamp ?? ev.timestamp);
+        if (Number.isFinite(started)) at = started;
+      }
       if (ev.type === 'world_state') agentsMd = String(ev.payload?.state?.agents_md?.text ?? '').length;
+      const total = ev?.payload?.info?.total_token_usage;
+      if (total?.input_tokens) {
+        first = total.input_tokens; // the first model call's whole prompt: what a session starts with, measured
+        break;
+      }
     } catch {
       /* skip */
     }
   }
   rl.close();
-  return { agentsMd, base };
+  return { subagent, agentsMd, base, ...(first ? { first } : {}), ...(at ? { at } : {}) };
 }
 
 /**
- * @param {{servers:{name:string, enabled:boolean|undefined}[], used:Set<string>, usedMonth?:Set<string>|null, startup:{agentsMd:number, base:number}|null, days:number, pro:boolean, keep?:string[]}} r
+ * Sizes from the newest interactive rollout's head: the AGENTS.md chain Codex loaded and its own base instructions
+ * (characters), `first`, the tokens of its first model call when the log reaches one, and `at`, when it started.
+ * @returns {Promise<{agentsMd:number, base:number, first?:number, at?:number}|null>}
+ */
+export async function codexStartup(root = join(codexHome(), 'sessions')) {
+  const files = jsonlFiles(root, 0, (n) => n.startsWith('rollout-'))
+    .map((p) => ({ p, m: statSync(p).mtimeMs }))
+    .sort((a, b) => b.m - a.m)
+    .slice(0, 40);
+  for (const f of files) {
+    const { subagent, ...sizes } = await rolloutHead(f.p);
+    if (!subagent) return sizes;
+  }
+  return null;
+}
+
+/**
+ * @param {{servers:{name:string, enabled:boolean|undefined}[], used:Set<string>, usedMonth?:Set<string>|null, startup:{agentsMd:number, base:number, first?:number}|null, days:number, pro:boolean, keep?:string[]}} r
  *   keep: the `trim keep` list; unused servers on it are reported as kept and left out of `unused`.
  *   usedMonth: normalized names used in 30 days. Servers in it stay out of `unused`.
  */
@@ -132,7 +162,9 @@ export function codexTrimReport({ servers, used, usedMonth = null, startup, days
   const out = ['# limitcast trim --codex', ''];
   if (startup)
     out.push(
-      `Codex sessions start with ~${tok(startup.agentsMd)} tokens of AGENTS.md (your instruction files) and ~${tok(startup.base)} of Codex's own instructions, re-sent on every turn.`,
+      startup.first
+        ? `Your latest Codex session started with ${(startup.first / 1000).toFixed(1)}k tokens on its first call (measured): ~${tok(startup.agentsMd)} of AGENTS.md (your instruction files), ~${tok(startup.base)} of Codex's own instructions, and the rest tool definitions and environment context, all re-sent on every turn.`
+        : `Codex sessions start with ~${tok(startup.agentsMd)} tokens of AGENTS.md (your instruction files) and ~${tok(startup.base)} of Codex's own instructions, re-sent on every turn.`,
       '',
     );
   out.push(`## MCP servers: ${on.length} on, ${unused.length + standing.length} not used in ${days} days`);

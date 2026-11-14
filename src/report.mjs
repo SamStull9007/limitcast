@@ -45,6 +45,15 @@ export function burnReport(usage, { since, now }) {
     const side = sum(claude.filter((u) => u.sidechain));
     lines.push('', `Subagents used **${pct(side, sum(claude))}** of Claude tokens.`);
   }
+  // Codex and Grok run a subagent as a thread of its own; its usage counts under the session that spawned it.
+  for (const [src, name] of /** @type {const} */ ([
+    ['codex', 'Codex'],
+    ['grok', 'Grok'],
+  ])) {
+    const own = usage.filter((u) => u.src === src);
+    const side = sum(own.filter((u) => u.sidechain));
+    if (side) lines.push('', `Subagents used **${pct(side, sum(own))}** of ${name} tokens.`);
+  }
 
   table(
     lines,

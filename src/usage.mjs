@@ -83,7 +83,7 @@ export function claudeActivity(line, act) {
 /**
  * Codex rollout lines → usage. token_count events carry a running total, so emit the increase since the last one.
  * @param {string} line
- * @param {{prev:any, cwd:string, model:string}} st per-file state
+ * @param {{prev:any, cwd:string, model:string, sidechain?:boolean, parent?:string}} st per-file state
  * @param {string} session
  * @returns {Usage|null}
  */
@@ -97,6 +97,11 @@ export function codexUsage(line, st, session) {
     }
     st.cwd = ev?.payload?.cwd ?? st.cwd;
     st.model = ev?.payload?.model ?? st.model;
+    if (ev?.type === 'session_meta' && (ev.payload?.thread_source === 'subagent' || ev.payload?.source?.subagent)) {
+      // A subagent is a forked thread with a rollout of its own: its usage belongs to the thread that spawned it.
+      st.sidechain = true;
+      st.parent = ev.payload?.parent_thread_id ?? ev.payload?.source?.subagent?.thread_spawn?.parent_thread_id;
+    }
     return null;
   }
   if (!line.includes('"total_token_usage"')) return null;
@@ -114,7 +119,18 @@ export function codexUsage(line, st, session) {
   const input = (tot.input_tokens ?? 0) - (p.input_tokens ?? 0) - cached;
   const output = (tot.output_tokens ?? 0) - (p.output_tokens ?? 0);
   if (input + cached + output <= 0) return null;
-  return { t, src: 'codex', session, project: st.cwd, model: st.model, sidechain: false, input, cacheWrite: 0, cacheRead: cached, output };
+  return {
+    t,
+    src: 'codex',
+    session: st.sidechain && st.parent ? st.parent : session,
+    project: st.cwd,
+    model: st.model,
+    sidechain: Boolean(st.sidechain),
+    input,
+    cacheWrite: 0,
+    cacheRead: cached,
+    output,
+  };
 }
 
 /**
@@ -122,9 +138,10 @@ export function codexUsage(line, st, session) {
  * @param {any} ledger parsed usage.json
  * @param {string} session
  * @param {string} project
+ * @param {boolean} [sidechain] the ledger of a subagent's child session
  * @returns {Usage[]}
  */
-export function grokUsage(ledger, session, project) {
+export function grokUsage(ledger, session, project, sidechain = false) {
   /** @type {Usage[]} */
   const out = [];
   for (const turn of Array.isArray(ledger?.turns) ? ledger.turns : []) {
@@ -144,7 +161,7 @@ export function grokUsage(ledger, session, project) {
       session,
       project,
       model,
-      sidechain: false,
+      sidechain,
       input,
       cacheWrite,
       cacheRead,
@@ -162,17 +179,43 @@ export function grokUsage(ledger, session, project) {
  */
 function grokLedgers(root, since) {
   if (!existsSync(root)) return [];
+  /** @type {{file:string, session:string, project:string, sidechain:boolean, parent?:string}[]} */
   const out = [];
+  // A subagent runs as a child session of its own; the parent's subagents/<id>/meta.json names the pair.
+  /** @type {Map<string, string>} */
+  const parentOf = new Map();
   for (const proj of readdirSync(root, { withFileTypes: true })) {
     if (!proj.isDirectory()) continue;
     for (const sess of readdirSync(join(root, proj.name), { withFileTypes: true })) {
-      const file = join(root, proj.name, sess.name, 'usage.json');
+      const dir = join(root, proj.name, sess.name);
+      const file = join(dir, 'usage.json');
       if (sess.isDirectory() && existsSync(file) && statSync(file).mtimeMs >= since) {
-        out.push({ file, session: sess.name, project: safeDecode(proj.name) });
+        out.push({ file, session: sess.name, project: safeDecode(proj.name), sidechain: summaryKind(dir) === 'subagent' });
+      }
+      const sub = join(dir, 'subagents');
+      if (sess.isDirectory() && existsSync(sub) && statSync(sub).mtimeMs >= since) {
+        for (const child of readdirSync(sub, { withFileTypes: true })) {
+          try {
+            const meta = JSON.parse(readFileSync(join(sub, child.name, 'meta.json'), 'utf8'));
+            if (typeof meta?.child_session_id === 'string' && typeof meta?.parent_session_id === 'string')
+              parentOf.set(meta.child_session_id, meta.parent_session_id);
+          } catch {
+            /* a subagent still being written, or not a directory */
+          }
+        }
       }
     }
   }
-  return out;
+  return out.map((e) => ({ ...e, sidechain: e.sidechain || parentOf.has(e.session), parent: parentOf.get(e.session) }));
+}
+
+/** @param {string} dir a Grok session directory @returns {string|undefined} */
+function summaryKind(dir) {
+  try {
+    return JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8'))?.session_kind;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -240,20 +283,20 @@ export async function readUsage(since, roots = {}, activity) {
   // Keep entries for files this run didn't need (another period) while they are recent; drop the rest.
   for (const [f, e] of Object.entries(cache)) if (!next[f] && e.m >= Date.now() - CACHE_KEEP_MS && existsSync(f)) next[f] = e;
   if (dirty || Object.keys(next).length !== Object.keys(cache).length) saveUsageCache(next);
-  for (const { file, session, project } of grokLedgers(roots.grok ?? grokRoot(), since)) {
+  for (const { file, session, project, sidechain, parent } of grokLedgers(roots.grok ?? grokRoot(), since)) {
     let ledger;
     try {
       ledger = JSON.parse(readFileSync(file, 'utf8'));
     } catch {
       continue; // being written right now; picked up next run
     }
-    for (const u of grokUsage(ledger, session, project)) if (u.t >= since) out.push(u);
+    for (const u of grokUsage(ledger, sidechain && parent ? parent : session, project, sidechain)) if (u.t >= since) out.push(u);
   }
   return out;
 }
 
 const CACHE_KEEP_MS = 35 * 86400_000;
-const USAGE_CACHE_VERSION = 3; // 3: Grok records carry costUsd; 2: records carry cacheWrite1h. An older cache is read again
+const USAGE_CACHE_VERSION = 4; // 4: Codex subagent rollouts are sidechain usage of their parent thread; 3: Grok records carry costUsd; 2: records carry cacheWrite1h. An older cache is read again
 const usageCacheFile = () => join(stateDir(), 'usage-cache.json');
 
 /** @returns {Record<string, {s:number, m:number, u:Usage[], a?:{skills:string[], mcp:string[]}}>} */

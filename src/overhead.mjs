@@ -30,53 +30,79 @@ export function drift(prev, cur) {
   return { delta: cur.chars - prev.chars, grew, alert: cur.chars - prev.chars >= ALERT_CHARS || grew.length > 0 };
 }
 
-const file = () => join(stateDir(), 'overhead.json');
+/** Claude Code's record is overhead.json (`saved` and `results` read it); Codex and Grok keep their own beside it. @param {string} [host] */
+const file = (host = 'claude') => join(stateDir(), host === 'claude' ? 'overhead.json' : `overhead-${host}.json`);
 
-/** @returns {{first:Snapshot, last:Snapshot}|null} */
-export function loadOverhead() {
+/**
+ * Codex and Grok sessions have no transcript of pieces, so their starting context is the few sizes their logs hold.
+ * @param {'codex'|'grok'} host
+ * @param {{at?:number, agentsMd:number, base?:number, prompt?:number, tools?:number}} s sizes in characters
+ * @returns {Snapshot}
+ */
+export function hostSnapshot(host, s) {
+  /** @type {Record<string, number>} */
+  const items =
+    host === 'codex'
+      ? { 'Instruction files|AGENTS.md': s.agentsMd, "Codex|Codex's own instructions": s.base ?? 0 }
+      : { 'Instruction files|AGENTS.md': s.agentsMd, 'Grok|system prompt': s.prompt ?? 0, 'Grok|tool definitions': s.tools ?? 0 };
+  return { at: s.at ?? 0, chars: Object.values(items).reduce((a, c) => a + c, 0), items };
+}
+
+/**
+ * @param {string} [host]
+ * @returns {{first:Snapshot, last:Snapshot}|null}
+ */
+export function loadOverhead(host = 'claude') {
   try {
-    return JSON.parse(readFileSync(file(), 'utf8'));
+    return JSON.parse(readFileSync(file(host), 'utf8'));
   } catch {
     return null;
   }
 }
 
-/** @param {{first:Snapshot, last:Snapshot}} s */
-export function saveOverhead(s) {
+/**
+ * @param {{first:Snapshot, last:Snapshot}} s
+ * @param {string} [host]
+ */
+export function saveOverhead(s, host = 'claude') {
   mkdirSync(stateDir(), { recursive: true });
-  writeFileSync(file(), JSON.stringify(s));
+  writeFileSync(file(host), JSON.stringify(s));
 }
 
 /**
  * Record `cur` and return what changed since the last recorded session (null the first time).
  * A snapshot of the same session as last time changes nothing.
  * @param {Snapshot} cur
+ * @param {string} [host]
  */
-export function recordOverhead(cur) {
-  const s = existsSync(file()) ? loadOverhead() : null;
+export function recordOverhead(cur, host = 'claude') {
+  const s = existsSync(file(host)) ? loadOverhead(host) : null;
   if (!s) {
-    saveOverhead({ first: cur, last: cur });
+    saveOverhead({ first: cur, last: cur }, host);
     return null;
   }
   if (cur.at === s.last.at) return { delta: 0, grew: [], alert: false };
   const d = drift(s.last, cur);
-  saveOverhead({ first: s.first, last: cur });
+  saveOverhead({ first: s.first, last: cur }, host);
   return d;
 }
 
 const tok = (/** @type {number} */ chars) => Math.round(chars / 4);
 const label = (/** @type {string} */ key) => key.replace('|', ': ').replace(/\/Users\/[^/]+/, '~');
+const NAMES = /** @type {Record<string, string>} */ ({ claude: 'Claude Code', codex: 'Codex', grok: 'Grok' });
 
 /**
  * One-line alert for the user (never the model) when starting context grew.
  * @param {ReturnType<typeof drift>} d
+ * @param {string} [host]
  */
-export function driftMessage(d) {
+export function driftMessage(d, host = 'claude') {
   const items = d.grew
     .slice(0, 3)
     .map((g) => `${label(g.key)} ${g.isNew ? 'new' : '+'}~${(tok(g.delta) / 1000).toFixed(1)}k`)
     .join(', ');
-  return `limitcast: your Claude Code starting context grew ~${(tok(d.delta) / 1000).toFixed(1)}k tokens since your last session${items ? ` (${items})` : ''}. Run \`limitcast trim\` for details.`;
+  const more = host === 'claude' ? ' Run `limitcast trim` for details.' : ` Run \`limitcast trim --${host}\` for details.`;
+  return `limitcast: your ${NAMES[host] ?? host} starting context grew ~${(tok(d.delta) / 1000).toFixed(1)}k tokens since your last session${items ? ` (${items})` : ''}.${more}`;
 }
 
 /**

@@ -5,12 +5,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { codexStartup, codexTrimReport } from '../src/codex.mjs';
+import { codexHooks, trustLine } from '../src/codex-trust.mjs';
+import { grokStartup, grokTrimReport } from '../src/grok.mjs';
 import { install, uninstall } from '../src/install.mjs';
+import { codexNotifyDue, transitions } from '../src/notify.mjs';
 import { callCost, costOf } from '../src/prices.mjs';
 import { codexSubagentUsage, grokSubagentUsage, stopHost } from '../src/receipts.mjs';
+import { burnReport } from '../src/report.mjs';
 import { spawnNotice } from '../src/subagents.mjs';
 import { mcpParts, toolKey, toolNotice } from '../src/toolcheck.mjs';
 import { toolLimitDecision } from '../src/toollimit.mjs';
+import { readUsage } from '../src/usage.mjs';
 import { foldEvents } from '../src/value.mjs';
 
 const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
@@ -237,6 +243,7 @@ test('install --alerts adds the tool hooks for Codex and Grok beside the guard, 
     codex.PreToolUse.some((h) => h.hooks[0].command.endsWith(' guard')),
     'the guard stays',
   );
+  assert.equal(codex.Stop[0].hooks[0].command, `${self} codex-notify --hook`);
   const grokHooks = JSON.parse(readFileSync(join(grokDir, 'hooks', 'limitcast.json'), 'utf8')).hooks;
   assert.ok(grokHooks.SubagentStop, 'installing alerts later keeps the Grok guard hooks');
   assert.deepEqual(
@@ -250,6 +257,202 @@ test('install --alerts adds the tool hooks for Codex and Grok beside the guard, 
   const after = JSON.parse(readFileSync(codexPath, 'utf8')).hooks;
   assert.equal(JSON.stringify(after).includes('limitcast'), false);
   assert.equal(existsSync(join(grokDir, 'hooks', 'limitcast.json')), false);
+});
+
+test('trim: the start-context measure skips subagent sessions and uses the first call (Codex) or the instruction files (Grok)', async () => {
+  const day = join(tmp('lc-parity2-cx-'), '2026', '11', '13');
+  mkdirSync(day, { recursive: true });
+  const rows = (meta, first) =>
+    [
+      { type: 'session_meta', payload: { base_instructions: { text: 'b'.repeat(8000) }, ...meta } },
+      { type: 'world_state', payload: { state: { agents_md: { text: 'a'.repeat(4000) } } } },
+      ...(first ? [{ type: 'event_msg', payload: { info: { total_token_usage: { input_tokens: first } } } }] : []),
+    ]
+      .map((r) => JSON.stringify(r))
+      .join('\n');
+  writeFileSync(join(day, 'rollout-main.jsonl'), rows({ thread_source: 'user' }, 31_000));
+  await new Promise((r) => setTimeout(r, 20));
+  writeFileSync(join(day, 'rollout-child.jsonl'), rows({ thread_source: 'subagent', source: { subagent: {} } }, 90_000)); // the newest
+  const startup = await codexStartup(join(day, '..', '..', '..'));
+  assert.deepEqual(startup, { agentsMd: 4000, base: 8000, first: 31_000 });
+  const report = codexTrimReport({ servers: [], used: new Set(), startup, days: 7, pro: true });
+  assert.match(
+    report.text,
+    /Your latest Codex session started with 31\.0k tokens on its first call \(measured\): ~1\.0k of AGENTS\.md \(your instruction files\), ~2\.0k of Codex's own instructions/,
+  );
+
+  const root = tmp('lc-parity2-gk-');
+  const session = (id, kind) => {
+    const dir = join(root, '%2Fwork', id);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'usage.json'), '{}');
+    writeFileSync(join(dir, 'summary.json'), JSON.stringify(kind ? { session_kind: kind } : {}));
+    writeFileSync(join(dir, 'system_prompt.txt'), 's'.repeat(8000));
+    writeFileSync(join(dir, 'tool_definitions.json'), 't'.repeat(40_000));
+    writeFileSync(
+      join(dir, 'prompt_context.json'),
+      JSON.stringify({ agents_md_files: [{ content: 'a'.repeat(12_000) }, { content: 'b'.repeat(4000) }] }),
+    );
+  };
+  session('main-1');
+  await new Promise((r) => setTimeout(r, 20));
+  session('child-1', 'subagent');
+  const g = grokStartup(root);
+  assert.deepEqual(g, { prompt: 8000, tools: 40_000, agentsMd: 16_000 });
+  assert.match(
+    grokTrimReport({ servers: [], used: new Set(), startup: g, days: 7, pro: true }).text,
+    /~2\.0k tokens of system prompt, ~10\.0k of tool definitions and ~4\.0k of instruction files \(about 16\.0k in all, estimated from file sizes\)/,
+  );
+  assert.equal(grokStartup(join(root, 'none')), null);
+});
+
+test('report: Codex and Grok subagent threads count as subagent usage of the session that spawned them', async () => {
+  const base = tmp('lc-parity2-attr-');
+  const codex = join(base, 'codex');
+  const grok = join(base, 'grok');
+  mkdirSync(codex, { recursive: true });
+  const ts = new Date().toISOString();
+  const rollout = (id, meta, out) =>
+    writeFileSync(
+      join(codex, `rollout-2026-11-13T10-00-00-${id}.jsonl`),
+      [
+        { type: 'session_meta', payload: { id, cwd: '/work', model: 'gpt-6.1-sol', ...meta } },
+        {
+          timestamp: ts,
+          type: 'event_msg',
+          payload: { info: { total_token_usage: { input_tokens: 1000, cached_input_tokens: 0, output_tokens: out } } },
+        },
+      ]
+        .map((r) => JSON.stringify(r))
+        .join('\n'),
+    );
+  rollout('parent-thread', {}, 1000);
+  rollout(
+    'child-thread',
+    { parent_thread_id: 'parent-thread', thread_source: 'subagent', source: { subagent: { thread_spawn: { parent_thread_id: 'parent-thread' } } } },
+    1000,
+  );
+  const ledger = (dir, kind) => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'summary.json'), JSON.stringify(kind ? { session_kind: kind } : {}));
+    writeFileSync(
+      join(dir, 'usage.json'),
+      JSON.stringify({
+        turns: [
+          {
+            endedAt: ts,
+            inputTokens: 1000,
+            outputTokens: 1000,
+            cachedReadTokens: 0,
+            cacheCreationTokens: 0,
+            costUsdTicks: 1,
+            primaryModelId: 'grok-4.6',
+          },
+        ],
+      }),
+    );
+  };
+  ledger(join(grok, '%2Fwork', 'g-parent'), undefined);
+  ledger(join(grok, '%2Fwork', 'g-child'), 'subagent');
+  mkdirSync(join(grok, '%2Fwork', 'g-parent', 'subagents', 'g-child'), { recursive: true });
+  writeFileSync(
+    join(grok, '%2Fwork', 'g-parent', 'subagents', 'g-child', 'meta.json'),
+    JSON.stringify({ child_session_id: 'g-child', parent_session_id: 'g-parent' }),
+  );
+  const usage = await readUsage(0, { claude: join(base, 'none'), codex, grok });
+  const by = (src, sidechain) => usage.filter((u) => u.src === src && u.sidechain === sidechain);
+  assert.equal(by('codex', true).length, 1);
+  assert.equal(by('codex', true)[0].session, 'parent-thread', 'attributed to the spawning thread');
+  assert.equal(by('grok', true)[0].session, 'g-parent');
+  assert.equal(by('grok', false)[0].session, 'g-parent');
+  const text = burnReport(usage, { since: 0, now: Date.now() });
+  assert.match(text, /Subagents used \*\*50%\*\* of Codex tokens\./);
+  assert.match(text, /Subagents used \*\*50%\*\* of Grok tokens\./);
+  assert.doesNotMatch(text, /g-child|child-thr/, 'no child session is listed as a session of its own');
+});
+
+test('doctor asks Codex which limitcast hooks it trusts, and names the ones waiting for approval', async () => {
+  const dir = tmp('lc-parity2-trust-');
+  const server = join(dir, 'fake-app-server.mjs');
+  writeFileSync(
+    server,
+    `import { createInterface } from 'node:readline';
+const hooks = [
+  { key: '/h/.codex/hooks.json:pre_tool_use:0:0', trustStatus: 'trusted', enabled: true, command: '/bin/sh /s/limitcast-hook.sh guard' },
+  { key: '/h/.codex/hooks.json:subagent_stop:0:0', trustStatus: 'untrusted', enabled: true, command: '/bin/sh /s/limitcast-hook.sh subagent-receipt' },
+  { key: '/h/.codex/hooks.json:stop:0:0', trustStatus: 'modified', enabled: true, command: '/bin/sh /s/limitcast-hook.sh codex-notify --hook' },
+  { key: '/h/.codex/hooks.json:stop:1:0', trustStatus: 'untrusted', enabled: true, command: 'someone-elses-hook' },
+];
+createInterface({ input: process.stdin }).on('line', (l) => {
+  const m = JSON.parse(l);
+  if (m.method === 'initialize') console.log(JSON.stringify({ id: m.id, result: {} }));
+  if (m.method === 'hooks/list') console.log(JSON.stringify({ id: m.id, result: { data: [{ hooks }] } }));
+});
+`,
+  );
+  const rows = await codexHooks({ command: [process.execPath, server], timeoutMs: 10_000 });
+  assert.equal(rows?.length, 4);
+  const line = trustLine(rows ?? []);
+  assert.equal(line?.ok, false);
+  assert.match(
+    line?.line ?? '',
+    /^Codex hooks: 2 of 3 limitcast hooks are not trusted \(subagent_stop:0:0, stop:0:0\): start Codex, open \/hooks and approve them/,
+  );
+  assert.deepEqual(trustLine((rows ?? []).filter((h) => h.trustStatus === 'trusted')), {
+    ok: true,
+    line: 'Codex hooks: all 1 limitcast hooks are trusted',
+  });
+  assert.equal(trustLine([rows?.[3]]), null, "another tool's hook says nothing");
+  assert.equal(await codexHooks({ command: [join(dir, 'no-such-codex')], timeoutMs: 2000 }), null, 'no Codex: no answer, no failure');
+});
+
+test('drift: Codex and Grok get a starting-context alert from the sizes their logs hold, with their own baseline', async () => {
+  const { state, env } = stopState();
+  const day = join(state, '.codex', 'sessions', '2026', '11', '13');
+  mkdirSync(day, { recursive: true });
+  const session = (name, started, agents) =>
+    writeFileSync(
+      join(day, name),
+      [
+        { type: 'session_meta', payload: { timestamp: started, base_instructions: { text: 'b'.repeat(8000) } } },
+        { type: 'world_state', payload: { state: { agents_md: { text: 'a'.repeat(agents) } } } },
+      ]
+        .map((r) => JSON.stringify(r))
+        .join('\n'),
+    );
+  const drift = (src) => spawnSync('node', [bin, 'drift', '--hook', '--src', src], { env, input: '{}', encoding: 'utf8', timeout: 30000 });
+  const messages = (r) => (r.stdout.trim() ? JSON.parse(r.stdout).systemMessage : '');
+  session('rollout-1.jsonl', '2026-11-13T10:00:00Z', 4000);
+  assert.doesNotMatch(messages(drift('codex')), /starting context grew/, 'the first session only sets the baseline');
+  await new Promise((r) => setTimeout(r, 20));
+  session('rollout-2.jsonl', '2026-11-13T11:00:00Z', 12_000);
+  assert.match(
+    messages(drift('codex')),
+    /^limitcast: your Codex starting context grew ~2\.0k tokens since your last session \(Instruction files: AGENTS\.md \+~2\.0k\)\. Run `limitcast trim --codex` for details\.$/m,
+  );
+  assert.equal(messages(drift('codex')), '', 'the same session again says nothing');
+  assert.equal(existsSync(join(state, 'overhead.json')), false, "Claude's baseline file is not touched");
+  assert.equal(existsSync(join(state, 'overhead-codex.json')), true);
+  assert.equal(drift('grok').status, 0, 'no Grok sessions yet: nothing to record, no failure');
+});
+
+test('Codex notifications: a throttled Stop hook starts the check, and a Codex window is named', () => {
+  assert.equal(codexNotifyDue(1_000_000), true);
+  assert.equal(codexNotifyDue(1_000_000 + 60_000), false, 'asked again within three minutes');
+  assert.equal(codexNotifyDue(1_000_000 + 200_000), true);
+  const now = Date.now();
+  const rows = [{ src: 'codex', win: '7d', pct: 100, reset: now + 86_400_000, wall: now, verdict: 'HIT' }];
+  const { messages } = transitions(rows, {}, () => 'Friday 9am', now);
+  assert.deepEqual(messages, ['Codex 7d limit reached. Resets Friday 9am.']);
+
+  const { env } = stopState();
+  env.CODEX_HOME = join(env.LIMITCAST_STATE, 'nocodex');
+  const hook = () => spawnSync('node', [bin, 'codex-notify', '--hook'], { env, input: '{}', encoding: 'utf8', timeout: 20000 });
+  assert.equal(hook().status, 0);
+  assert.equal(existsSync(join(env.LIMITCAST_STATE, 'notify-codex.at')), false, 'notifications are off: nothing is started');
+  writeFileSync(join(env.LIMITCAST_STATE, 'notify.on'), '');
+  assert.equal(hook().status, 0);
+  assert.equal(existsSync(join(env.LIMITCAST_STATE, 'notify-codex.at')), true, 'on: the check was started');
 });
 
 test('the spawn hint counts only the receipts of the tool that is spawning', () => {

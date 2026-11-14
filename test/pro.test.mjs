@@ -367,7 +367,8 @@ test('install appends the Codex guard last so trusted hooks keep their positions
     matcher: '.*spawn_agent.*',
     hooks: [{ type: 'command', command: '/n /lc/limitcast.mjs guard', timeout: 10 }],
   });
-  assert.deepEqual(codex.hooks.Stop, [h0]);
+  assert.deepEqual(codex.hooks.Stop[0], h0, 'existing Stop hooks keep their place');
+  assert.equal(codex.hooks.Stop[1].hooks[0].command, '/n /lc/limitcast.mjs codex-notify --hook', 'the notification hook is appended last');
 
   // A later hook added by the user stays after ours; re-install updates ours in place.
   codex.hooks.PreToolUse.push({ matcher: 'x', hooks: [{ type: 'command', command: 'later' }] });
@@ -389,6 +390,7 @@ test('install appends the Codex guard last so trusted hooks keep their positions
     false,
   );
   assert.equal(codex.hooks.PreToolUse.length, 3);
+  assert.deepEqual(codex.hooks.Stop, [h0], 'uninstall removes the notification hook too');
 });
 
 test('install skips Codex when it is not installed', () => {
