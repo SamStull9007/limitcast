@@ -270,6 +270,9 @@ test('tool-check learns result sizes for Grok, and tool-limit then holds a fat c
   const stats = readFileSync(join(env.LIMITCAST_STATE, 'tool-sizes-grok.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
   assert.deepEqual(stats[0], { k: 'mcp:basic-memory', n: 8000 });
   assert.equal(stats.length, 4);
+  // A payload larger than a pipe's buffer (a real tool result can be 100 KB or more) must arrive whole.
+  const huge = run('tool-check', { sessionId: 's2', toolName: 'big-server__dump', toolInput: {}, toolResult: 'z'.repeat(300_000) });
+  assert.match(JSON.parse(huge.stdout).systemMessage, /^limitcast: that big-server dump result was ≈75k tokens/);
   const held = run('tool-limit', { sessionId: 's1', toolUseId: 'call-1', toolName: 'basic-memory__search_notes', toolInput: { query: 'q' } });
   const out = JSON.parse(held.stdout).hookSpecificOutput;
   assert.equal(out.permissionDecision, 'deny');

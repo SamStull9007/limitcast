@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // @ts-check
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync, readSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -1365,12 +1365,30 @@ function saveFeedShape(feed, file = 'last-feed.json') {
   writeFileSync(join(stateDir(), file), JSON.stringify(shape, null, 2));
 }
 
+/**
+ * The whole of stdin. A host that pipes a large payload (a tool result can be 100 KB or more) may hand us a non-blocking pipe,
+ * where readFileSync(0) throws EAGAIN once the pipe runs dry and the rest of the payload is lost. Wait for the writer instead,
+ * for at most ten seconds.
+ */
 function readStdin() {
-  try {
-    return readFileSync(0, 'utf8');
-  } catch {
-    return '';
+  const chunks = [];
+  const buf = Buffer.alloc(65536);
+  const until = Date.now() + 10_000;
+  for (;;) {
+    let n = 0;
+    try {
+      n = readSync(0, buf, 0, buf.length, null);
+    } catch (e) {
+      if (/** @type {NodeJS.ErrnoException} */ (e).code === 'EAGAIN' && Date.now() < until) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+        continue;
+      }
+      break; // EOF on some platforms, or a closed or unreadable stdin: what arrived so far is what we have
+    }
+    if (n === 0) break;
+    chunks.push(Buffer.from(buf.subarray(0, n)));
   }
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 /** @param {number|null} ms */
