@@ -16,10 +16,11 @@ import { claudeUsage } from './usage.mjs';
 /** @typedef {{at:number, turns:number, savedPerTurn:number, calls?:number[]}} SessionValue  calls: main-thread timestamps; absent in legacy records */
 /** @typedef {{src:string, win:string, at:number, lead:number|null, unseen:boolean}} HitValue  lead: minutes of warning */
 /** @typedef {{t:number, src:string, win:string, shadow:boolean, outcome:string}} BlockValue */
-/** @typedef {{since:number, contextSince?:number, scanned:number, sessions:Record<string, SessionValue>, hits:Record<string, HitValue>, blocks:Record<string, BlockValue>, switches?:Record<string, {shadow:boolean}>, calib?:{fresh:number, read:number, n:number, at:number}, calibHistory?:{fresh:number, read:number, n:number, at:number}[], limitChange?:{from:number, to:number, at:number}}} Value
+/** @typedef {{since:number, contextSince?:number, scanned:number, sessions:Record<string, SessionValue>, hits:Record<string, HitValue>, blocks:Record<string, BlockValue>, switches?:Record<string, {shadow:boolean}>, calib?:{fresh:number, read:number, n:number, at:number}, calibHistory?:{fresh:number, read:number, n:number, at:number}[], limitChange?:{from:number, to:number, at:number}, outcomesVersion?:number}} Value
  *   calibHistory: one calibration of the last 3 days per day, to notice limit changes */
 
 const file = () => join(stateDir(), 'value.json');
+const OUTCOMES_VERSION = 2;
 const tok = (/** @type {number} */ chars) => Math.round(chars / 4);
 
 /** @returns {Value} */
@@ -62,6 +63,17 @@ export function saveValue(v) {
  */
 export function foldEvents(v, { now, samples, blocks, start }) {
   v.since ||= start ?? Math.min(now, ...samples.map((s) => s.t));
+  if ((v.outcomesVersion ?? 1) < OUTCOMES_VERSION) {
+    // Through 0.19.2 a Grok block was judged against no Grok readings, so every one that had reset was recorded as "under".
+    // Judge the ones the block log still holds again; the rest cannot be, so they say so instead of keeping a guess.
+    const live = new Set(blocks.filter((x) => !x.kind).map((x) => String(x.t)));
+    for (const [key, b] of Object.entries(v.blocks)) {
+      if (b.src !== 'grok' || b.outcome === 'hit') continue;
+      if (live.has(key)) delete v.blocks[key];
+      else b.outcome = 'unknown';
+    }
+    v.outcomesVersion = OUTCOMES_VERSION;
+  }
   // As readings age out (8 days), a later look sees less: keep what was recorded while they all existed.
   // Limits before limitcast was watching (Codex logs reach back further) are replays, not warnings you got.
   for (const h of limitHits(samples).filter((x) => x.at >= v.since)) {

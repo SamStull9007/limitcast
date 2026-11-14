@@ -4,13 +4,15 @@ import { join } from 'node:path';
 import { stateDir } from './store.mjs';
 
 // What your tokens would cost at the API's list prices ("API-equivalent cost"). A subscription is not billed this way:
-// it is a yardstick for what the plan covers. Claude and Grok models; any other model is left out, never priced at 0.
+// it is a yardstick for what the plan covers. Claude, Grok and the OpenAI models Codex runs; any other model is left out,
+// never priced at 0.
 
 /**
  * USD per million tokens. input/output: base prices; readX: cache read as a multiple of input; over: the prices that
  * apply to a call whose whole prompt is above `above` tokens. Cache writes default to 1.25x input (5 minutes) or 2x
  * (1 hour) for Claude; Grok sets writeX 1 (xAI lists cached input, not a write multiplier).
- * Sources: platform.claude.com/docs/en/about-claude/pricing and docs.x.ai/developers/models, read 2026-10-26.
+ * Sources: platform.claude.com/docs/en/about-claude/pricing and docs.x.ai/developers/models, read 2026-10-26 (xAI rows checked
+ * again 2026-11-13 against docs.x.ai/developers/pricing); developers.openai.com/api/docs/pricing, read 2026-11-13.
  * Override or add models in ~/.local/state/limitcast/prices.json:
  * {"models": {"claude-opus-4-1": {"input": 15, "output": 75, "readX": 0.1}}}.
  * @typedef {{input:number, output:number, readX:number, writeX?:number, write1hX?:number, over?:{above:number, input:number, output:number, readX?:number}}} Price
@@ -28,6 +30,11 @@ export const PRICES = {
   'grok-4.3': { input: 1.25, output: 2.5, readX: 0.16, writeX: 1, write1hX: 1, over: { above: 200_000, input: 2.5, output: 5 } },
   'grok-4.20': { input: 1.25, output: 2.5, readX: 0.16, writeX: 1, write1hX: 1, over: { above: 200_000, input: 2.5, output: 5 } },
   'grok-build-0.1': { input: 1, output: 2, readX: 0.2, writeX: 1, write1hX: 1, over: { above: 200_000, input: 2, output: 4 } },
+  // OpenAI (Codex): cached input is listed in $/1M and a Codex log records no cache writes. Above 272k prompt tokens the whole
+  // request bills 2x input and cache rates and 1.5x output. gpt-5.6-sol's price is promotional until 2026-11-30.
+  // `codex-auto-review` is a routing alias OpenAI lists no price for, so it stays unpriced.
+  'gpt-6.1-sol': { input: 2, output: 10, readX: 0.05, over: { above: 272_000, input: 4, output: 15 } },
+  'gpt-5.6-sol': { input: 4, output: 20, readX: 0.1, over: { above: 272_000, input: 8, output: 30 } },
 };
 
 const WRITE_5M = 1.25;
