@@ -84,7 +84,7 @@ import { runOptimizationHook, runOptimize } from '../src/optimize-cli.mjs';
 import { driftMessage, hostSnapshot, loadOverhead, recordOverhead, savedPerSession, savedSummary, snapshot } from '../src/overhead.mjs';
 import { advise, getPlan, loadPeaks, PLANS, planPrices, planStats, recordPeaks, setPlan } from '../src/plan.mjs';
 import { costOf, fmtUsd } from '../src/prices.mjs';
-import { hostSubagentUsage, stopHost } from '../src/receipts.mjs';
+import { deferReceipt, hostSubagentUsage, settleReceipts, stopHost } from '../src/receipts.mjs';
 import { burnReport } from '../src/report.mjs';
 import { loadBlocks, logBlock, resultsReport, resultsShare, resultsStats, weeklyDue, weeklyLine } from '../src/results.mjs';
 import { claudeSamples, readCodex } from '../src/sources.mjs';
@@ -207,6 +207,14 @@ const hookHost = () => {
   const s = flag('--src');
   return s === 'codex' || s === 'grok' ? s : 'claude';
 };
+/** Grok writes a finished subagent's usage after its stop hook ran: log the receipts parked at the stop. Never throws. */
+const settleGrokReceipts = () => {
+  try {
+    settleReceipts(now);
+  } catch {
+    /* a hook must never break the session */
+  }
+};
 const days = () => {
   const n = Number(flag('--days') ?? 7);
   if (!Number.isFinite(n) || n <= 0 || !Number.isFinite(new Date(now - n * 86400_000).getTime())) {
@@ -326,6 +334,7 @@ if (cmd === '_optimize-hook') {
   if (process.env.LIMITCAST_ALLOW === '1') process.exit(0);
   try {
     const hook = JSON.parse(readStdin());
+    settleGrokReceipts();
     const id = spawnIdentity(hook);
     const live = pruneInflight(loadInflight(), now);
     const dup = id ? findDuplicate(live, id) : null;
@@ -428,6 +437,7 @@ if (cmd === '_optimize-hook') {
     const hook = JSON.parse(readStdin());
     // `--src codex|grok` (set by install) reads that tool's payload and its live-learned sizes; Claude's come from `report --why`.
     const host = hookHost();
+    if (host === 'grok') settleGrokReceipts();
     const name = String(hook?.tool_name ?? hook?.toolName ?? '');
     const stats = host === 'claude' ? loadToolStats() : loadLiveStats(host);
     const d = name ? toolLimitDecision(name, hook?.tool_input ?? hook?.toolInput, stats, { host, rewrite: host !== 'codex' }) : null;
@@ -480,6 +490,7 @@ if (cmd === '_optimize-hook') {
     {
       const hook = JSON.parse(readStdin());
       const host = hookHost();
+      if (host === 'grok') settleGrokReceipts();
       const name = String(hook?.tool_name ?? hook?.toolName ?? '');
       const response = hook?.tool_response ?? hook?.tool_result ?? hook?.toolResult;
       // Codex and Grok have no 5-hour calibration, and no transcript report to learn tool sizes from: learn them here.
@@ -511,7 +522,10 @@ if (cmd === '_optimize-hook') {
     const host = stopHost(hook);
     if (host !== 'claude') {
       const type = String(hook?.agent_type ?? hook?.subagentType ?? hook?.agentType ?? '');
+      if (host === 'grok') settleGrokReceipts();
       const got = type ? hostSubagentUsage(hook) : null;
+      // Grok has not written this subagent's usage yet (it does a moment after the stop): park it for the next hook.
+      if (!got?.usage.calls && host === 'grok' && type) deferReceipt(now, type, hook);
       if (got?.usage.calls) {
         const { usage } = got;
         logSubagent({
@@ -974,6 +988,7 @@ if (cmd === '_optimize-hook') {
   // SessionStart hook: tells the user (systemMessage, never the model's context) when starting context grew.
   const hook = args.includes('--hook');
   const host = hookHost();
+  if (host === 'grok') settleGrokReceipts();
   try {
     // Claude Code: the last interactive transcript. Codex and Grok (`--src`): the sizes their last interactive session logged.
     const claudeLatest = host === 'claude' ? await latestInteractiveTranscript(claudeRoot()) : null;

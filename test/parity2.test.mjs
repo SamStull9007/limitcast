@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { codexStartup, codexTrimReport } from '../src/codex.mjs';
 import { codexHooks, trustLine } from '../src/codex-trust.mjs';
 import { grokStartup, grokTrimReport } from '../src/grok.mjs';
+import { findDuplicate, forgetInflight, rememberInflight, spawnIdentity } from '../src/inflight.mjs';
 import { install, uninstall } from '../src/install.mjs';
 import { codexNotifyDue, transitions } from '../src/notify.mjs';
 import { callCost, costOf } from '../src/prices.mjs';
@@ -157,6 +158,68 @@ test('a Grok subagent receipt reads the child session ledger and never the paren
   assert.equal(ledger()[0].src, 'grok');
   // A hook that only names the parent session finds no child ledger, so there is no receipt.
   assert.equal(grokSubagentUsage({ sessionId: 'parent-1', transcriptPath: join(root, '%2Fwork', 'parent-1', 'chat_history.jsonl') }, root), null);
+});
+
+test("Grok writes a subagent's usage after its stop hook: the receipt is parked, then settled by the next hook", () => {
+  const { state, env, stop, ledger } = stopState();
+  const root = join(state, '.grok', 'sessions');
+  const transcript = join(root, '%2Fwork', 'child-2', 'updates.jsonl');
+  const hook = { sessionId: 'child-2', subagentId: 'child-2', subagentType: 'explore', transcriptPath: transcript };
+  assert.equal(stop(hook).stdout, '', 'nothing to price yet, nothing printed');
+  assert.deepEqual(ledger(), []);
+  assert.equal(JSON.parse(readFileSync(join(state, 'pending-receipts.json'), 'utf8')).length, 1);
+  grokChild(root, '%2Fwork', 'child-2', 'subagent', 1_947_037_200); // Grok writes the ledger a moment after the stop
+  const next = spawnSync('node', [bin, 'tool-check', '--src', 'grok'], {
+    env,
+    input: JSON.stringify({ sessionId: 's', toolName: 'read_file', toolResult: 'x' }),
+    encoding: 'utf8',
+  });
+  assert.equal(next.status, 0);
+  const [entry] = ledger();
+  assert.deepEqual([entry.src, entry.type, entry.id, entry.calls], ['grok', 'explore', 'child-2', 14]);
+  assert.equal(entry.usd.toFixed(4), '0.1947');
+  assert.equal(JSON.parse(readFileSync(join(state, 'pending-receipts.json'), 'utf8')).length, 0, 'settled receipts leave the queue');
+});
+
+test('Codex as seen live: spawn_agent arguments are encrypted, so a duplicate is the same task name; a custom CODEX_HOME is still Codex', () => {
+  // Shapes captured from a real `codex exec` 0.169 run (gpt-6.1-sol): the hook's tool name joins namespace and name, the
+  // message is a Fernet-style token that differs on every call, and no agent_type was given.
+  const spawn = (message, task_name = 'read_hello') => ({
+    session_id: 'parent-1',
+    hook_event_name: 'PreToolUse',
+    tool_name: 'collaborationspawn_agent',
+    tool_input: { task_name, message },
+    tool_use_id: 'call_1',
+  });
+  const token = (seed) => `gAAAAABq97nu${seed}ne3NeLXmiVsuUE6bJX8V0rpEwUomOidCJsxCnWcjH7Sp8F0Y5JZsFFP3_F4rA7GEjg4aw4-qZKRYbjV7r_ZMkzJXEsReEaz0xu`;
+  const a = spawnIdentity(spawn(token('3')));
+  assert.deepEqual([a?.src, a?.type, a?.prompt], ['codex', 'default', 'task read_hello']);
+  assert.equal(spawnIdentity(spawn(token('9')))?.hash, a?.hash, 'the same task, encrypted differently, is still a duplicate');
+  assert.notEqual(spawnIdentity(spawn(token('3'), 'read_other'))?.hash, a?.hash);
+  assert.ok(findDuplicate(rememberInflight([], a, Date.now()), spawnIdentity(spawn(token('7')))));
+  // Its stop reports agent_type "default", which is the type recorded above, so the stop clears the hold.
+  assert.deepEqual(forgetInflight(rememberInflight([], a, Date.now()), 'parent-1', 'default', Date.now()), []);
+  const stop = {
+    session_id: 'parent-1',
+    turn_id: 't1',
+    transcript_path: '/tmp/lc/codex/sessions/2026/11/13/rollout-2026-11-13T19-31-20-aaa.jsonl',
+    agent_transcript_path: '/tmp/lc/codex/sessions/2026/11/13/rollout-2026-11-13T19-31-26-bbb.jsonl',
+    hook_event_name: 'SubagentStop',
+    agent_id: 'bbb',
+    agent_type: 'default',
+  };
+  assert.equal(stopHost(stop), 'codex');
+  const { turn_id: _t, ...noTurn } = stop;
+  assert.equal(stopHost(noTurn), 'codex', 'a rollout path alone says Codex');
+  assert.equal(
+    stopHost({
+      session_id: 's',
+      agent_id: 'a',
+      agent_type: 'Explore',
+      agent_transcript_path: '/Users/you/.claude/projects/p/s/subagents/agent-a.jsonl',
+    }),
+    'claude',
+  );
 });
 
 test('tool names: Grok says server__tool and read_file, Codex and Claude say mcp__server__tool', () => {

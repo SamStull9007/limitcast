@@ -235,6 +235,30 @@ test('patchMcpServers adds an enabled=false table and refuses a server the proje
   assert.match(next, /\[mcp_servers\.b-c\]\nenabled = false/);
   assert.throws(() => patchMcpServers('[mcp_servers.demo]\ncommand = "x"\n', ['demo']), /preserve explicit/);
   assert.throws(() => patchMcpServers('', ['bad name']), /unsupported MCP server name/);
+  assert.equal(
+    patchMcpServers('', ['demo'], true),
+    '[mcp_servers.demo]\ncommand = "true" # never runs: the server is off\nenabled = false # limitcast optimizer\n',
+  );
+});
+
+test('the home directory is never a project: apply points to trim instead of editing the user config', () => {
+  fresh();
+  const home = tmp('lc-parity-home-');
+  const prev = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: home });
+    const r = repository(home);
+    for (const host of ['codex', 'grok']) {
+      changeOptimization(r, (s) => Object.assign(s, hostState(host, { usedTools: [] })));
+      assert.throws(
+        () => applyCapabilities(r, host, ['demo'], { validate() {} }),
+        new RegExp(`is your home directory.*limitcast trim --${host} --apply`),
+      );
+    }
+  } finally {
+    process.env.HOME = prev;
+  }
 });
 
 const gitRepo = () => {
@@ -254,7 +278,9 @@ test('applying Grok MCP servers is journaled, validated, undoable, and rolled ba
   const out = applyCapabilities(r, 'grok', ['demo51-mcp'], { validate: (_repo, names = []) => seen.push(names.slice()) });
   assert.deepEqual(seen, [['demo51-mcp']]);
   assert.equal(out.path, join(r.root, '.grok/config.toml'));
-  assert.match(readFileSync(out.path, 'utf8'), /\[mcp_servers\.demo51-mcp\]\nenabled = false/);
+  // Grok replaces a server with the project's entry whole and ignores one with no command: a stub that never runs.
+  assert.match(readFileSync(out.path, 'utf8'), /\[mcp_servers\.demo51-mcp\]\ncommand = "true"[^\n]*\nenabled = false/);
+  assert.doesNotMatch(readFileSync(out.path, 'utf8'), /"x"/, "the user's own command is never copied into the repository");
   assert.deepEqual(readOptimization(r).applied.grok.names, ['demo51-mcp']);
   assert.equal(restoreCapabilities(r, 'grok').restored, true);
   assert.equal(existsSync(out.path), false, 'a file the optimizer created is removed again');

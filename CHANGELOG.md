@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+The rest of the Codex and Grok parity audit, checked against live Codex 0.169 and Grok 1.0.77 sessions.
+
+- Fix: Grok pruning never took effect. Grok replaces a user-level MCP server with the project's entry whole and ignores one that has no command, so `optimize capabilities --grok --apply` (0.19.3) wrote a file that Grok skipped and always rolled back. It now writes a stub (`command = "true"`, `enabled = false`) that never runs and copies nothing of your server's definition. Checked with the real CLI: `grok mcp list` shows the server off, and a headless Grok session does not start it. In your home directory, where the project file is your own user config, `--apply` now points to `trim --codex|--grok --apply` instead.
+- New: subagent receipts for Codex and Grok. Codex prices the child's rollout at the stop; Grok writes a subagent's usage about a second after its stop hook, so the receipt is parked and logged by the next hook (the start of your next session at the latest). Both are in API-equivalent dollars and feed the spawn hint and `results`; the hint counts only the receipts of the tool that is spawning (the Grok hint used to mix in Claude's).
+- New: the fat-tool notice and limit check for Codex and Grok (`install --alerts`). Tool names are normalized per host (Grok's `server__tool` and `read_file`), result sizes are learned from the hooks as they run, Grok may lower a limit in place, and Codex is held with a message that names the limit to use.
+- New: starting-context alert for Codex and Grok (`install --alerts`), each with its own baseline beside Claude's. `trim --codex` reports the measured first-call prompt of your latest interactive session; `trim --codex` and `--grok` skip subagent sessions when measuring.
+- New: Codex limit notifications (`notify on`) from a throttled Stop hook, because Codex has no status line to raise them from (`install --guard`).
+- New: Codex price rows (`gpt-6.1-sol`, `gpt-5.6-sol`, from OpenAI's pricing page, read 2026-11-13; `codex-auto-review` has no list price and stays unpriced). The xAI rows were checked again.
+- Fix: Codex encrypts `spawn_agent` arguments, so the duplicate-spawn hold now compares the task name the model gave, and a Codex subagent with no type is "default" on both the spawn and the stop. A Codex home other than `~/.codex` is recognized by its payload.
+- Fix: Codex and Grok subagent threads count as subagent usage of the session that spawned them in `report` ("Subagents used N% of Codex tokens").
+- Fix: `doctor` asks Codex itself which limitcast hooks it trusts (`hooks/list`) instead of looking for a key in `config.toml`, so an edited hook that still has a key is reported.
+- Fix: old Grok "under" outcomes in the value record are judged again from the rebuilt Grok readings, or marked unknown when the block is gone.
+
 ## 0.19.3 — 2026-11-13
 
 Codex and Grok parity, from an audit of how each host was handled.

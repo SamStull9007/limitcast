@@ -10,6 +10,7 @@ import { stateDir } from './store.mjs';
 // 30 minutes is forgotten anyway: a missed stop must not hold the same prompt for the rest of the day.
 
 export const INFLIGHT_MS = 30 * 60_000;
+const ENCRYPTED = /^gAAAA[A-Za-z0-9_=-]{40,}$/; // a Fernet token, the shape Codex gave an encrypted spawn_agent message
 
 /** @typedef {{sid:string, type:string, hash:string, t:number}} Inflight */
 
@@ -25,12 +26,16 @@ export function spawnIdentity(hook) {
   const input = hook?.tool_input ?? hook?.toolInput ?? {};
   // Grok re-runs a finished subagent with resume_from: the same prompt again is a continuation, not a duplicate.
   if (input?.resume_from || input?.resumeFrom) return null;
-  const type = String(input?.subagent_type ?? input?.subagentType ?? input?.agent_type ?? '').trim();
+  // Codex names no type when the model leaves it out, and reports such a subagent as "default" when it stops.
+  const type = String(input?.subagent_type ?? input?.subagentType ?? input?.agent_type ?? (src === 'codex' ? 'default' : '')).trim();
   // Claude and Grok send `prompt`; Codex spawn_agent sends `message` (or `items`, a list of text parts).
   const items = Array.isArray(input?.items) ? input.items.map((x) => (typeof x === 'string' ? x : (x?.text ?? ''))).join(' ') : '';
-  const prompt = String(input?.prompt || input?.message || input?.description || input?.task || items || '')
+  let prompt = String(input?.prompt || input?.message || input?.description || input?.task || items || '')
     .replace(/\s+/g, ' ')
     .trim();
+  // Codex encrypts spawn_agent arguments (a live call carried a `gAAAA…` token as its message), and the same prompt encrypts
+  // differently each time, so identical prompts cannot be told apart by content. The task name the model gave it still can.
+  if (src === 'codex' && (!prompt || ENCRYPTED.test(prompt)) && input?.task_name) prompt = `task ${String(input.task_name).trim()}`;
   const sid = String(hook?.session_id ?? hook?.sessionId ?? '').trim();
   if (!type || !prompt || !sid) return null;
   const hash = createHash('sha256').update(`${type.toLowerCase()}\0${prompt}`).digest('hex').slice(0, 16);

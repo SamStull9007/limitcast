@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { codexConfigPath, codexServers } from './codex.mjs';
 import { grokServers } from './grok.mjs';
@@ -22,16 +23,23 @@ export function configuredServers(host) {
 }
 
 /**
- * Add `[mcp_servers.<name>] enabled = false` tables to a project config.toml. The user-level definition (command, env)
- * stays where it is: the project table only overrides `enabled`. Refuses a server the file already configures.
+ * Add `[mcp_servers.<name>] enabled = false` tables to a project config.toml. Refuses a server the file already configures.
+ * Codex merges the table into the user-level definition, which stays where it is (command, env). Grok replaces the server
+ * with the project's entry whole, and ignores one that has no command; `stub` writes a command that never runs, because the
+ * server is disabled, so nothing of the user's definition (arguments, tokens, headers) is copied into the repository.
+ * @param {string} text
+ * @param {string[]} names
+ * @param {boolean} [stub]
  */
-export function patchMcpServers(text, names) {
+export function patchMcpServers(text, names, stub = false) {
   const existing = codexServers(text);
   for (const name of names) {
     if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) throw new Error(`unsupported MCP server name ${name}`);
     if (existing.some((s) => s.name === name)) throw new Error(`preserve explicit ${name} server setting; change it yourself`);
   }
-  const tables = names.map((name) => `[mcp_servers.${name}]\nenabled = false # limitcast optimizer`).join('\n\n');
+  const tables = names
+    .map((name) => `[mcp_servers.${name}]\n${stub ? 'command = "true" # never runs: the server is off\n' : ''}enabled = false # limitcast optimizer`)
+    .join('\n\n');
   const body = text.trimEnd();
   return `${body ? `${body}\n\n` : ''}${tables}\n`;
 }
@@ -100,6 +108,11 @@ export function applyCapabilities(repo, host, names, { validate = host === 'grok
     throw new Error('choose proposed Claude tools, or Codex or Grok capabilities and MCP servers');
   const file = configPath(repo, host);
   safePath(repo, file);
+  if (host !== 'claude' && [homedir(), realpathSync(homedir())].includes(repo.root))
+    // In the home directory the "project" file is the user's own config, which already holds every server it could turn off.
+    throw new Error(
+      `this repository is your home directory, so ${CONFIG[host]} is your own ${host === 'codex' ? 'Codex' : 'Grok'} config; use \`limitcast trim --${host} --apply\` to turn servers off everywhere`,
+    );
   if (host === 'codex') validate(repo);
   const servers = configuredServers(host);
   const result = changeOptimization(repo, (state) => {
@@ -115,7 +128,7 @@ export function applyCapabilities(repo, host, names, { validate = host === 'grok
       after = before ?? '';
       if (features.length) after = patchCodexCapabilities(after, features);
       if (mcp.length) after = patchMcpServers(after, mcp);
-    } else if (host === 'grok') after = patchMcpServers(before ?? '', names);
+    } else if (host === 'grok') after = patchMcpServers(before ?? '', names, true);
     else {
       const cfg = JSON.parse(before ?? '{}');
       if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) throw new Error('settings must be an object');
