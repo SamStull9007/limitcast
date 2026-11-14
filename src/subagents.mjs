@@ -2,12 +2,15 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { fmtUsd } from './prices.mjs';
 import { stateDir, updateConfig } from './store.mjs';
 
 // Subagent receipts and budgets. A SubagentStop hook prices each finished subagent against the 5-hour window
 // (from the user's own calibration) and logs it; the guard holds new subagents once a window's budget is spent.
 
-/** @typedef {{t:number, id?:string, sid?:string, type?:string, calls:number, fresh:number, read:number, pct?:number}} SubagentEntry */
+/** @typedef {{t:number, id?:string, sid?:string, type?:string, src?:'claude'|'codex'|'grok', calls:number, fresh:number, read:number, pct?:number, usd?:number}} SubagentEntry
+ *   src: the tool that ran it (absent = Claude Code, before receipts covered the others); pct: % of Claude's 5-hour window;
+ *   usd: API-equivalent dollars (Codex and Grok, which have no 5-hour calibration) */
 
 const ledger = () => join(stateDir(), 'subagents.jsonl');
 const configFile = () => join(stateDir(), 'config.json');
@@ -45,10 +48,13 @@ export function subagentUsage(path) {
  * @param {string} type
  * @param {{fresh:number, read:number, calls:number}} u
  * @param {number|null} pct
+ * @param {number|null} [usd] API-equivalent dollars, for a tool with no 5-hour calibration
  */
-export function receiptMessage(type, u, pct) {
+export function receiptMessage(type, u, pct, usd = null) {
   const what = type ? `that ${type} subagent` : 'that subagent';
   const calls = `${u.calls} call${u.calls === 1 ? '' : 's'}`;
+  if (pct === null && usd !== null)
+    return `limitcast: ${what} used ${k(u.fresh + u.read)} tokens, ${k(u.fresh)} of them new (${calls}): about ${fmtUsd(usd)} at API list prices.`;
   if (pct === null) return `limitcast: ${what} used ${k(u.fresh + u.read)} tokens, ${k(u.fresh)} of them new (${calls}).`;
   return `limitcast: ${what} used ≈${pct < 1 ? pct.toFixed(2) : pct.toFixed(1)}% of your 5-hour window (${calls}, ${k(u.fresh)} new tokens).`;
 }
@@ -67,9 +73,12 @@ const NOTICE_MIN_PCT = 1; // a typical run under 1% of a window is not worth a m
  * @param {SubagentEntry[]} entries
  * @param {unknown} type the subagent type about to start
  * @param {{pct:number, verdict:string}|undefined} win the current 5-hour window
+ * @param {'claude'|'codex'|'grok'} [src] the tool about to spawn it: only its own receipts count (type names differ by tool)
  */
-export function spawnNotice(entries, type, win) {
-  const priced = entries.filter((e) => typeof e.pct === 'number');
+export function spawnNotice(entries, type, win, src = 'claude') {
+  const mine = entries.filter((e) => (e.src ?? 'claude') === src);
+  if (src !== 'claude') return dollarNotice(mine, type, win);
+  const priced = mine.filter((e) => typeof e.pct === 'number');
   const same = typeof type === 'string' && type ? priced.filter((e) => e.type === type) : [];
   const runs = same.length >= NOTICE_MIN_RUNS ? same : priced;
   if (runs.length < NOTICE_MIN_RUNS) return null;
@@ -80,6 +89,28 @@ export function spawnNotice(entries, type, win) {
   const who = runs === same ? `${type} subagents have` : 'Your subagents have';
   const used = win ? `; this window is ${Math.round(win.pct)}% used` : '';
   return `limitcast: ${who} cost you a median ≈${pct1(median)}% (max ≈${pct1(sorted.at(-1) ?? 0)}%) of a 5-hour window over ${runs.length} runs${used}.`;
+}
+
+const NOTICE_MIN_USD = 0.1; // the dollar counterpart of the 1% floor
+
+/**
+ * The same hint for Codex and Grok, which have no 5-hour calibration: what that kind has cost in API-equivalent dollars.
+ * @param {SubagentEntry[]} entries receipts of the spawning tool
+ * @param {unknown} type
+ * @param {{pct:number, verdict:string}|undefined} win
+ */
+function dollarNotice(entries, type, win) {
+  const priced = entries.filter((e) => typeof e.usd === 'number');
+  const same = typeof type === 'string' && type ? priced.filter((e) => e.type === type) : [];
+  const runs = same.length >= NOTICE_MIN_RUNS ? same : priced;
+  if (runs.length < NOTICE_MIN_RUNS) return null;
+  const sorted = runs.map((e) => /** @type {number} */ (e.usd)).sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  if (median < NOTICE_MIN_USD && win?.verdict !== 'NEAR') return null;
+  const who = runs === same ? `${type} subagents have` : 'Your subagents have';
+  const used = win ? `; this window is ${Math.round(win.pct)}% used` : '';
+  return `limitcast: ${who} cost a median ≈${fmtUsd(median)} (max ≈${fmtUsd(sorted.at(-1) ?? 0)}) at API list prices over ${runs.length} runs${used}.`;
 }
 
 /** @param {SubagentEntry} e */

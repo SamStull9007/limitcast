@@ -2,6 +2,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { claudeAccounts, forecast } from './forecast.mjs';
+import { fmtUsd } from './prices.mjs';
 import { stateDir } from './store.mjs';
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */
@@ -315,14 +316,31 @@ export function resultsReport({ now, days, samples, blocks, pro, saved, value = 
   const recent = subagents.filter((e) => e.t >= now - days * 86400_000);
   if (recent.length || st.colds || st.coldNotices) {
     out.push('', '## Subagents and cold caches');
-    const priced = recent.filter((e) => e.pct !== undefined).map((e) => /** @type {number} */ (e.pct));
-    if (recent.length)
+    const claude = recent.filter((e) => (e.src ?? 'claude') === 'claude');
+    const priced = claude.filter((e) => e.pct !== undefined).map((e) => /** @type {number} */ (e.pct));
+    const named = recent.length > claude.length; // name the tool only once another tool's subagents are listed too
+    if (claude.length)
       out.push(
-        `${recent.length} subagent${recent.length === 1 ? '' : 's'} finished` +
+        `${claude.length} ${named ? 'Claude Code subagent' : 'subagent'}${claude.length === 1 ? '' : 's'} finished` +
           (priced.length
             ? `, ≈${pctText(priced.reduce((a, b) => a + b, 0))} of a 5-hour window in all; the biggest ≈${pctText(Math.max(...priced))}.${pro ? '' : " Pro shows each one's cost when it finishes and can cap them per window."}`
             : '.'),
       );
+    // Codex and Grok have no 5-hour calibration, so their receipts are in API-equivalent dollars, which are not a bill.
+    for (const [host, name] of /** @type {const} */ ([
+      ['codex', 'Codex'],
+      ['grok', 'Grok'],
+    ])) {
+      const runs = recent.filter((e) => e.src === host);
+      if (!runs.length) continue;
+      const usd = runs.filter((e) => typeof e.usd === 'number').map((e) => /** @type {number} */ (e.usd));
+      out.push(
+        `${runs.length} ${name} subagent${runs.length === 1 ? '' : 's'} finished` +
+          (usd.length
+            ? `, about ${fmtUsd(usd.reduce((a, b) => a + b, 0))} at API list prices in all; the biggest ${fmtUsd(Math.max(...usd))}.`
+            : '.'),
+      );
+    }
     if (st.colds)
       out.push(
         `${pro ? 'Held' : 'Pro would have held'} ${st.colds} message${st.colds === 1 ? '' : 's'} sent after the prompt cache had expired` +

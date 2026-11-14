@@ -35,7 +35,7 @@ test('Haiku is priced higher for a call whose whole prompt is over 100k tokens',
 
 test('every listed price keeps the 5x output-to-input ratio (a typo in the table would break it)', () => {
   for (const [id, p] of Object.entries(PRICES)) {
-    if (id.startsWith('grok-')) continue;
+    if (id.startsWith('grok-') || id.startsWith('gpt-')) continue; // other vendors set their own ratios
     close(p.output / p.input, 5);
     if (p.over) close(p.over.output / p.over.input, 5);
     assert.ok(p.readX > 0 && p.readX <= 0.1, id);

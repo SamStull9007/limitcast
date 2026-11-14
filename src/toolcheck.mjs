@@ -9,11 +9,47 @@ import { stateDir } from './store.mjs';
 
 export const BIG_RESULT = 20_000; // estimated tokens of one result worth a notice
 
+/** Grok's own names for the tools Claude Code calls Bash, Read, Grep and so on. Codex already says Bash. */
+const NATIVE = /** @type {Record<string, string>} */ ({
+  run_terminal_command: 'Bash',
+  run_terminal_cmd: 'Bash',
+  read_file: 'Read',
+  grep: 'Grep',
+  search_replace: 'Edit',
+  hashline_edit: 'Edit',
+  web_fetch: 'WebFetch',
+  web_search: 'WebSearch',
+});
+
 /**
- * The name a tool goes by in reports: MCP tools by server ("mcp:claude_ai_HubSpot"), the rest as they are.
+ * An MCP tool's server and tool name. Claude Code and Codex say `mcp__server__tool`; Grok says `server__tool` (its built-in
+ * tools never contain a double underscore). Null for anything else.
  * @param {string} name
+ * @param {'claude'|'codex'|'grok'} [host]
+ * @returns {{server:string, tool:string}|null}
  */
-export const toolKey = (name) => (name.startsWith('mcp__') ? `mcp:${name.split('__')[1]}` : name);
+export function mcpParts(name, host = 'claude') {
+  if (name.startsWith('mcp__')) {
+    const [, server = '', ...rest] = name.split('__');
+    return server ? { server, tool: rest.join('__') } : null;
+  }
+  if (host === 'grok' && name.includes('__')) {
+    const [server, ...rest] = name.split('__');
+    return server ? { server, tool: rest.join('__') } : null;
+  }
+  return null;
+}
+
+/**
+ * The name a tool goes by in reports: MCP tools by server ("mcp:claude_ai_HubSpot"), the rest by the Claude Code name.
+ * @param {string} name
+ * @param {'claude'|'codex'|'grok'} [host]
+ */
+export function toolKey(name, host = 'claude') {
+  const mcp = mcpParts(name, host);
+  if (mcp) return `mcp:${mcp.server}`;
+  return Object.hasOwn(NATIVE, name) ? NATIVE[name] : name;
+}
 
 /**
  * What to ask for next time, or null when there is nothing to suggest (a Skill loads whole).
@@ -45,16 +81,22 @@ export function resultTokens(response) {
  * every later call). Next time: ask for fewer fields and a smaller limit." Null under the threshold.
  * @param {string} toolName
  * @param {unknown} response
- * @param {{fresh:number}|null|undefined} calib % of the 5-hour window per million new tokens
+ * @param {{fresh:number}|null|undefined} calib % of the 5-hour window per million new tokens (Claude Code only)
  * @param {number} [threshold]
+ * @param {'claude'|'codex'|'grok'} [host]
  */
-export function toolNotice(toolName, response, calib, threshold = BIG_RESULT) {
+export function toolNotice(toolName, response, calib, threshold = BIG_RESULT, host = 'claude') {
   const tokens = resultTokens(response);
   if (tokens < threshold) return null;
-  const [, server, ...rest] = toolName.startsWith('mcp__') ? toolName.split('__') : ['', toolName];
-  const label = toolName.startsWith('mcp__') ? `${server.replace(/^claude_ai_/, '')} ${rest.join('__')}` : toolName;
-  const pct = calib ? ` (≈${((tokens / 1e6) * calib.fresh).toFixed(2)}% of a 5-hour window to write, then re-read on every later call)` : '';
-  const tip = tipFor(toolKey(toolName));
+  const mcp = mcpParts(toolName, host);
+  const label = mcp ? `${mcp.server.replace(/^claude_ai_/, '')} ${mcp.tool}` : toolName;
+  const pct =
+    calib && host === 'claude'
+      ? ` (≈${((tokens / 1e6) * calib.fresh).toFixed(2)}% of a 5-hour window to write, then re-read on every later call)`
+      : host === 'claude'
+        ? ''
+        : ' (written once as new tokens, then re-read on every later call)';
+  const tip = tipFor(toolKey(toolName, host));
   return `limitcast: that ${label} result was ≈${Math.round(tokens / 1000)}k tokens${pct}.${tip ? ` Next time: ${tip}.` : ''}`;
 }
 

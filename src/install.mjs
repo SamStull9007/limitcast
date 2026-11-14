@@ -142,7 +142,27 @@ export function install({
     writeSettings(codexPath, codex);
     changes.push('added the Codex subagent guard (Codex runs it after you trust it: start Codex and approve the new hooks)');
   }
-  if (grokPresent(grokDir)) changes.push(...installGrok({ guard, self, home: grokDir }));
+  if (alerts && existsSync(join(codexPath, '..'))) {
+    const codex = readSettings(codexPath);
+    backup(codexPath);
+    // Codex has no Read or Grep tool; its fat results come from shell commands and MCP tools. The check learns each
+    // tool's usual result size as it goes, and only MCP calls (which take a limit) are held.
+    upsertHook(
+      codex,
+      'PostToolUse',
+      { matcher: 'Bash|mcp__.*', hooks: [{ type: 'command', command: `${self} tool-check --src codex`, timeout: 10 }] },
+      isToolCheck,
+    );
+    upsertHook(
+      codex,
+      'PreToolUse',
+      { matcher: 'mcp__.*', hooks: [{ type: 'command', command: `${self} tool-limit --src codex`, timeout: 10 }] },
+      isToolLimit,
+    );
+    writeSettings(codexPath, codex);
+    changes.push('added the Codex large tool-output notice and fat-tool limit check (approve the new hooks in Codex)');
+  }
+  if (grokPresent(grokDir)) changes.push(...installGrok({ guard, alerts, self, home: grokDir }));
   if (optimize && existsSync(join(codexPath, '..'))) {
     const codex = readSettings(codexPath);
     backup(codexPath);
@@ -241,10 +261,12 @@ export function uninstall({ path = settingsPath(), codexPath = codexHooksPath(),
   if (existsSync(codexPath)) {
     const codex = readSettings(codexPath);
     const list = codex.hooks?.PreToolUse ?? [];
-    if (list.some(isGuard) || Object.values(codex.hooks ?? {}).some((entries) => entries.some((h) => isOptimizer(h) || isReceipt(h)))) {
+    const ours = (/** @type {any} */ h) => isOptimizer(h) || isReceipt(h) || isToolCheck(h) || isToolLimit(h);
+    if (list.some(isGuard) || Object.values(codex.hooks ?? {}).some((entries) => entries.some(ours))) {
       backup(codexPath);
-      codex.hooks.PreToolUse = list.filter((/** @type {any} */ h) => !isGuard(h));
+      codex.hooks.PreToolUse = list.filter((/** @type {any} */ h) => !isGuard(h) && !isToolLimit(h));
       if (codex.hooks.SubagentStop) codex.hooks.SubagentStop = codex.hooks.SubagentStop.filter((/** @type {any} */ h) => !isReceipt(h));
+      if (codex.hooks.PostToolUse) codex.hooks.PostToolUse = codex.hooks.PostToolUse.filter((/** @type {any} */ h) => !isToolCheck(h));
       removeOptimizerHooks(codex);
       writeSettings(codexPath, codex);
       changes.push('removed the Codex subagent guard');

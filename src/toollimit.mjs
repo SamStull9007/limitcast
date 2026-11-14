@@ -1,7 +1,7 @@
 // @ts-check
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { stateDir } from './store.mjs';
+import { stateDir, writeAtomic } from './store.mjs';
 import { toolKey } from './toolcheck.mjs';
 
 // PreToolUse: a tool whose recent results are fat, and whose call sets no limit, is denied before it runs.
@@ -47,6 +47,52 @@ export function loadToolStats() {
   }
 }
 
+// Codex and Grok have no per-tool attribution report to feed the stats, so the tool-check hook records the size of each
+// result it sees: a tool name and a token estimate per line, never the result. The newest 1000 lines are the stats.
+const LIVE_LINES = 1000;
+const LIVE_PRUNE_BYTES = 120_000;
+const liveFile = (/** @type {string} */ host) => join(stateDir(), `tool-sizes-${host}.jsonl`);
+
+/**
+ * @param {string} host
+ * @param {string} key a toolKey
+ * @param {number} tokens estimated size of one result
+ * shortcut: the trim can drop a line another hook appends in that instant; it only blurs an average.
+ */
+export function recordToolSize(host, key, tokens) {
+  mkdirSync(stateDir(), { recursive: true });
+  const file = liveFile(host);
+  appendFileSync(file, `${JSON.stringify({ k: key, n: Math.round(tokens) })}\n`);
+  if (statSync(file).size > LIVE_PRUNE_BYTES) writeAtomic(file, `${readFileSync(file, 'utf8').trim().split('\n').slice(-LIVE_LINES).join('\n')}\n`);
+}
+
+/**
+ * Average result size per tool for a host that records them live. Empty until the hook has seen some calls.
+ * @param {string} host
+ * @returns {Record<string, ToolStat>}
+ */
+export function loadLiveStats(host) {
+  /** @type {Map<string, {tokens:number, calls:number}>} */
+  const sums = new Map();
+  try {
+    for (const line of readFileSync(liveFile(host), 'utf8').trim().split('\n').slice(-LIVE_LINES)) {
+      try {
+        const { k, n } = JSON.parse(line);
+        if (typeof k !== 'string' || !Number.isFinite(n)) continue;
+        const e = sums.get(k) ?? { tokens: 0, calls: 0 };
+        e.tokens += n;
+        e.calls += 1;
+        sums.set(k, e);
+      } catch {
+        /* a partial line */
+      }
+    }
+  } catch {
+    return {};
+  }
+  return toolStats(sums);
+}
+
 /**
  * Limit-shaped numbers anywhere in the arguments, a few levels down (MCP tools nest them).
  * @param {unknown} input
@@ -90,10 +136,12 @@ const k = (/** @type {number} */ n) => `${Math.max(1, Math.round(n / 1000))}k`;
  * @param {string} toolName
  * @param {unknown} input
  * @param {Record<string, ToolStat>} stats
+ * @param {{host?:'claude'|'codex'|'grok', rewrite?:boolean}} [o] rewrite: false for a host that may not honor a rewritten
+ *   input (Codex), so a limit that is too large is denied with the number to use instead of being lowered in place
  * @returns {{deny:string}|{updatedInput:any, reason:string}|null}
  */
-export function toolLimitDecision(toolName, input, stats) {
-  const key = toolKey(toolName);
+export function toolLimitDecision(toolName, input, stats, { host = 'claude', rewrite = true } = {}) {
+  const key = toolKey(toolName, host);
   const stat = stats?.[key];
   if (!stat || stat.calls < MIN_CALLS || stat.avg < FAT_AVG) return null;
   const args = typeof input === 'string' ? tryJson(input) : input;
@@ -112,6 +160,11 @@ export function toolLimitDecision(toolName, input, stats) {
   if (limits.some((f) => f.value > 0 && f.value <= cap)) return null;
   const big = limits.find((f) => f.value > cap);
   const label = toolName === 'Read' || key === 'Read' ? 'Read' : key.replace(/^mcp:/, '');
+  if (big && !rewrite) {
+    return {
+      deny: `limitcast: ${label} results average ≈${k(stat.avg)} tokens a call over ${stat.calls} calls. Use a limit of ${cap} or fewer (this call asked for ${big.value}), then retry. Set LIMITCAST_ALLOW=1 to run it as written.`,
+    };
+  }
   if (big) {
     return {
       updatedInput: setAt(obj, big.path, cap),

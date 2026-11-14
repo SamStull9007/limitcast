@@ -499,7 +499,7 @@ export function grokHistory(since, now, { root = grokRoot(), budget = getGrokBud
  * @param {{guard:boolean, self:string, home?:string}} opts
  * @returns {string[]}
  */
-export function installGrok({ guard, self, home = grokHome() }) {
+export function installGrok({ guard, alerts = false, self, home = grokHome() }) {
   if (!grokPresent(home)) return [];
   const changes = [];
   const cfgPath = join(home, 'config.toml');
@@ -518,24 +518,34 @@ export function installGrok({ guard, self, home = grokHome() }) {
       );
     }
   }
-  if (guard) {
-    const path = join(home, 'hooks', 'limitcast.json');
+  const path = join(home, 'hooks', 'limitcast.json');
+  // One file holds both parts, so installing one never drops the other that an earlier install added.
+  const prev = existsSync(path) ? readFileSync(path, 'utf8') : '';
+  const mine = prev.includes(MARK) ? prev : '';
+  const wantGuard = guard || /\bsubagent-receipt\b/.test(mine);
+  const wantAlerts = alerts || /\btool-check\b/.test(mine);
+  if (wantGuard || wantAlerts) {
+    /** @type {Record<string, any[]>} */
+    const hooks = {};
+    if (wantGuard) {
+      hooks.PreToolUse = [{ matcher: 'spawn_subagent', hooks: [{ type: 'command', command: `${self} guard`, timeout: 10 }] }];
+      // A subagent's stop clears the duplicate-spawn hold (the payload carries `subagentType`, not `agent_type`).
+      hooks.SubagentStop = [{ hooks: [{ type: 'command', command: `${self} subagent-receipt`, timeout: 15 }] }];
+    }
+    if (wantAlerts) {
+      // Grok accepts Claude's tool names in a matcher (Read is read_file) and its MCP calls as mcp__server__tool.
+      (hooks.PreToolUse ??= []).push({
+        matcher: 'Read|Grep|mcp__.*',
+        hooks: [{ type: 'command', command: `${self} tool-limit --src grok`, timeout: 10 }],
+      });
+      hooks.PostToolUse = [
+        { matcher: 'Bash|Read|Grep|WebFetch|mcp__.*', hooks: [{ type: 'command', command: `${self} tool-check --src grok`, timeout: 10 }] },
+      ];
+    }
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(
-      path,
-      `${JSON.stringify(
-        {
-          hooks: {
-            PreToolUse: [{ matcher: 'spawn_subagent', hooks: [{ type: 'command', command: `${self} guard`, timeout: 10 }] }],
-            // A subagent's stop clears the duplicate-spawn hold (the payload carries `subagentType`, not `agent_type`).
-            SubagentStop: [{ hooks: [{ type: 'command', command: `${self} subagent-receipt`, timeout: 15 }] }],
-          },
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    changes.push('added the Grok subagent guard (matcher spawn_subagent) and its subagent-stop hook');
+    writeFileSync(path, `${JSON.stringify({ hooks }, null, 2)}\n`);
+    if (guard) changes.push('added the Grok subagent guard (matcher spawn_subagent) and its subagent-stop hook');
+    if (alerts) changes.push('added the Grok large tool-output notice and fat-tool limit check');
   }
   return changes;
 }

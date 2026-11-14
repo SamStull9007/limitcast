@@ -73,6 +73,7 @@ import { runOptimizationHook, runOptimize } from '../src/optimize-cli.mjs';
 import { driftMessage, loadOverhead, recordOverhead, savedPerSession, savedSummary, snapshot } from '../src/overhead.mjs';
 import { advise, getPlan, loadPeaks, PLANS, planPrices, planStats, recordPeaks, setPlan } from '../src/plan.mjs';
 import { costOf, fmtUsd } from '../src/prices.mjs';
+import { hostSubagentUsage, stopHost } from '../src/receipts.mjs';
 import { burnReport } from '../src/report.mjs';
 import { loadBlocks, logBlock, resultsReport, resultsShare, resultsStats, weeklyDue, weeklyLine } from '../src/results.mjs';
 import { claudeSamples, readCodex } from '../src/sources.mjs';
@@ -94,8 +95,8 @@ import {
   windowStart,
 } from '../src/subagents.mjs';
 import { forTerminal } from '../src/term.mjs';
-import { firstFlag, toolKey, toolNotice } from '../src/toolcheck.mjs';
-import { loadToolStats, saveToolStats, toolLimitDecision, toolStats } from '../src/toollimit.mjs';
+import { firstFlag, resultTokens, toolKey, toolNotice } from '../src/toolcheck.mjs';
+import { loadLiveStats, loadToolStats, recordToolSize, saveToolStats, toolLimitDecision, toolStats } from '../src/toollimit.mjs';
 import { baseline, contributors, measuredSavings, shareSummary, startupReport, trimReport } from '../src/trim.mjs';
 import { claudeRoot, grokRoot, readUsage } from '../src/usage.mjs';
 import { dailyDue, foldEvents, loadValue, saveValue, scanSessions, valuePeriod, valueSection, valueTotals } from '../src/value.mjs';
@@ -189,6 +190,11 @@ if (typo) {
 const flag = (/** @type {string} */ name) => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
+};
+/** The tool a hook belongs to: `--src codex|grok` on hooks install writes for them, Claude Code otherwise. @returns {'claude'|'codex'|'grok'} */
+const hookHost = () => {
+  const s = flag('--src');
+  return s === 'codex' || s === 'grok' ? s : 'claude';
 };
 const days = () => {
   const n = Number(flag('--days') ?? 7);
@@ -409,19 +415,23 @@ if (cmd === '_optimize-hook') {
   if (process.env.LIMITCAST_ALLOW === '1') process.exit(0);
   try {
     const hook = JSON.parse(readStdin());
+    // `--src codex|grok` (set by install) reads that tool's payload and its live-learned sizes; Claude's come from `report --why`.
+    const host = hookHost();
     const name = String(hook?.tool_name ?? hook?.toolName ?? '');
-    const d = name ? toolLimitDecision(name, hook?.tool_input ?? hook?.toolInput, loadToolStats()) : null;
+    const stats = host === 'claude' ? loadToolStats() : loadLiveStats(host);
+    const d = name ? toolLimitDecision(name, hook?.tool_input ?? hook?.toolInput, stats, { host, rewrite: host !== 'codex' }) : null;
+    const opId = hook?.tool_use_id ?? hook?.toolUseId;
     if (d && 'deny' in d) {
       logBlock({
         t: now,
         kind: 'tool-limit',
-        src: 'claude',
-        win: '5h',
+        src: host,
+        win: host === 'codex' ? '7d' : '5h',
         pct: 0,
         wall: now,
         reset: now,
-        sid: hook.session_id,
-        ...(typeof hook?.tool_use_id === 'string' ? { operation: hook.tool_use_id } : {}),
+        sid: hook.session_id ?? hook.sessionId,
+        ...(typeof opId === 'string' ? { operation: opId } : {}),
       });
       console.log(
         JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: d.deny } }),
@@ -430,13 +440,13 @@ if (cmd === '_optimize-hook') {
       logBlock({
         t: now,
         kind: 'tool-cap',
-        src: 'claude',
-        win: '5h',
+        src: host,
+        win: host === 'codex' ? '7d' : '5h',
         pct: 0,
         wall: now,
         reset: now,
-        sid: hook.session_id,
-        ...(typeof hook?.tool_use_id === 'string' ? { operation: hook.tool_use_id } : {}),
+        sid: hook.session_id ?? hook.sessionId,
+        ...(typeof opId === 'string' ? { operation: opId } : {}),
       });
       console.log(
         JSON.stringify({
@@ -458,9 +468,15 @@ if (cmd === '_optimize-hook') {
   try {
     {
       const hook = JSON.parse(readStdin());
-      const name = String(hook?.tool_name ?? '');
-      const notice = name ? toolNotice(name, hook?.tool_response, loadValue().calib, Number(process.env.LIMITCAST_TOOL_TOKENS) || undefined) : null;
-      if (notice && firstFlag(String(hook.session_id), toolKey(name))) console.log(JSON.stringify({ systemMessage: notice }));
+      const host = hookHost();
+      const name = String(hook?.tool_name ?? hook?.toolName ?? '');
+      const response = hook?.tool_response ?? hook?.tool_result ?? hook?.toolResult;
+      // Codex and Grok have no 5-hour calibration, and no transcript report to learn tool sizes from: learn them here.
+      if (name && host !== 'claude') recordToolSize(host, toolKey(name, host), resultTokens(response));
+      const notice = name
+        ? toolNotice(name, response, host === 'claude' ? loadValue().calib : null, Number(process.env.LIMITCAST_TOOL_TOKENS) || undefined, host)
+        : null;
+      if (notice && firstFlag(String(hook.session_id ?? hook.sessionId), toolKey(name, host))) console.log(JSON.stringify({ systemMessage: notice }));
     }
   } catch {
     /* a hook must never break the session */
@@ -470,8 +486,8 @@ if (cmd === '_optimize-hook') {
   // Pro shows the receipt to the user (systemMessage, never the model). Internal agents (empty type) are skipped.
   try {
     const hook = JSON.parse(readStdin());
-    // Claude Code and Codex send snake_case; Grok sends `sessionId` and `subagentType`. Every host clears the duplicate hold;
-    // only Claude transcripts are priced below (a Codex or Grok transcript yields no calls, so nothing is logged for them).
+    // Claude Code and Codex send snake_case; Grok sends `sessionId` and `subagentType`. Every host clears the duplicate hold
+    // and gets a receipt: Claude's from its transcript, Codex's from the child rollout, Grok's from the child session ledger.
     saveInflight(
       forgetInflight(
         loadInflight(),
@@ -481,7 +497,26 @@ if (cmd === '_optimize-hook') {
       ),
     );
     const path = hook?.agent_transcript_path;
-    if (hook?.agent_type && typeof path === 'string') {
+    const host = stopHost(hook);
+    if (host !== 'claude') {
+      const type = String(hook?.agent_type ?? hook?.subagentType ?? hook?.agentType ?? '');
+      const got = type ? hostSubagentUsage(hook) : null;
+      if (got?.usage.calls) {
+        const { usage } = got;
+        logSubagent({
+          t: now,
+          src: got.src,
+          id: hook.agent_id ?? hook.subagentId,
+          sid: hook.session_id ?? hook.sessionId,
+          type,
+          calls: usage.calls,
+          fresh: usage.fresh,
+          read: usage.read,
+          ...(usage.usd === null ? {} : { usd: usage.usd }),
+        });
+        console.log(JSON.stringify({ systemMessage: receiptMessage(type, usage, null, usage.usd) }));
+      }
+    } else if (hook?.agent_type && typeof path === 'string') {
       const u = subagentUsage(path);
       const calib = loadValue().calib;
       const pct = calib ? windowPct(calib, { writes: u.fresh, reads: u.read }) : null;

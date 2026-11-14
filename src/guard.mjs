@@ -160,9 +160,15 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
   // Not blocked, but a window is tight: run a new Claude subagent on Sonnet instead of the main (usually Opus) model.
   const input = hook?.tool_input ?? hook?.toolInput;
   const tight = forecasts.find((x) => x.src === 'claude' && (x.verdict === 'AT_RISK' || x.verdict === 'NEAR'));
-  const type = String(input?.subagent_type ?? input?.subagentType ?? '');
+  const type = String(input?.subagent_type ?? input?.subagentType ?? input?.agent_type ?? '');
   const pinned = isUnset(input?.model) && type && src ? pinnedModel(type, src) : undefined;
   if (src === 'grok') return grokPinOrNotice(input, type, pinned, forecasts, now, preview, operation);
+  if (src === 'codex') {
+    // Codex has no Sonnet switch or model pin here; it gets the same "what this kind of subagent has cost" hint.
+    if (preview) return null;
+    const notice = spawnNotice(loadSubagents(now - 30 * 86400_000), type, undefined, 'codex');
+    return notice ? { notice } : null;
+  }
   if (src !== 'claude') return null;
   const model = pinned ?? input?.model;
   if (!tight || !switchable(model)) {
@@ -287,6 +293,6 @@ function grokPinOrNotice(input, type, pinned, forecasts, now, preview, operation
   }
   if (preview) return null;
   const win = forecasts.find((x) => x.src === 'grok' && x.win === '5h' && x.verdict !== 'RESET');
-  const notice = spawnNotice(loadSubagents(now - 30 * 86400_000), type, win);
+  const notice = spawnNotice(loadSubagents(now - 30 * 86400_000), type, win, 'grok');
   return notice ? { notice } : null;
 }
