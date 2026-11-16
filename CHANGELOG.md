@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — audit remediation
+## 0.20.0 — 2026-11-15
 
 - Fix: MCP arguments are never rewritten or denied by the generic result limiter. Large-output notices remain; only native Read/Grep controls are enforced.
 - Fix: live settings locks cannot be evicted based on age. Dead-owner recovery and release check unique ownership. Malformed existing settings are preserved and refused.
