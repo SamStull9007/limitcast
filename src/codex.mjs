@@ -1,9 +1,10 @@
 // @ts-check
-import { chmodSync, copyFileSync, createReadStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, createReadStream, existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { stateDir } from './store.mjs';
+import { stateDir, withStateLock } from './store.mjs';
+import { commitTransaction, editText, readLedger, recoverTransaction } from './transaction.mjs';
 import { jsonlFiles } from './usage.mjs';
 
 // `limitcast trim --codex`: what Codex loads before you type (AGENTS.md, MCP servers) and which servers you never use.
@@ -71,19 +72,30 @@ export function setEnabled(toml, changes) {
  */
 export async function codexUsedServers(since, root = join(codexHome(), 'sessions')) {
   const used = new Set();
+  used.observed = false;
+  used.complete = true;
   for (const f of jsonlFiles(root, since, (n) => n.startsWith('rollout-'))) {
     const rl = createInterface({ input: createReadStream(f), crlfDelay: Infinity });
     for await (const line of rl) {
-      if (line.includes('"McpToolCall"')) {
-        try {
-          const item = JSON.parse(line)?.payload?.item;
-          if (item?.type === 'McpToolCall' && typeof item.server === 'string') used.add(norm(item.server));
-        } catch {
-          /* a torn line */
-        }
-      } else if (line.includes('"namespace":"mcp__')) {
-        const ns = /"namespace":"mcp__([^"]+)"/.exec(line)?.[1];
-        if (ns) used.add(norm(ns));
+      if (!line.trim()) continue;
+      try {
+        const row = JSON.parse(line);
+        const p = row.payload;
+        const item = p?.item;
+        if (row.type === 'response_item' && ['function_call', 'custom_tool_call'].includes(p?.type)) {
+          used.observed = true;
+          const server = /^mcp__(.+?)(?:__|$)/.exec(p.namespace ?? '')?.[1] ?? /^mcp__(.+?)__/.exec(p.name ?? '')?.[1];
+          if (server) used.add(norm(server));
+          if (typeof p.name !== 'string') used.complete = false;
+          if ([p.name, p.namespace].some((n) => typeof n === 'string' && n.startsWith('mcp__')) && !server) used.complete = false;
+        } else if (item?.type === 'McpToolCall') {
+          used.observed = true;
+          if (typeof item.server === 'string') used.add(norm(item.server));
+          else used.complete = false;
+        } else if (item?.type === 'CommandExecution') used.observed = true;
+        else if (/ToolCall$/.test(item?.type ?? '')) used.complete = false;
+      } catch {
+        used.complete = false;
       }
     }
   }
@@ -156,8 +168,10 @@ export function codexTrimReport({ servers, used, usedMonth = null, startup, days
   const on = servers.filter((s) => s.enabled !== false);
   const idle = on.filter((s) => !used.has(norm(s.name)));
   const kept = idle.filter((s) => keep.some((k) => norm(k) === norm(s.name)));
+  const history = usedMonth ?? used;
+  const unknown = history.complete === false || history.observed === false ? idle.filter((s) => !kept.includes(s)) : [];
   const standing = usedMonth ? idle.filter((s) => !kept.includes(s) && usedMonth.has(norm(s.name))) : [];
-  const unused = idle.filter((s) => !kept.includes(s) && !standing.includes(s));
+  const unused = idle.filter((s) => !kept.includes(s) && !standing.includes(s) && !unknown.includes(s));
   const tok = (/** @type {number} */ c) => `${(c / 4000).toFixed(1)}k`;
   const out = ['# limitcast trim --codex', ''];
   if (startup)
@@ -168,9 +182,14 @@ export function codexTrimReport({ servers, used, usedMonth = null, startup, days
       '',
     );
   out.push(`## MCP servers: ${on.length} on, ${unused.length + standing.length} not used in ${days} days`);
+  if (unknown.length)
+    out.push(
+      '',
+      `Usage history is missing or incomplete; leaving ${unknown.length} unverified servers on. No pruning is authorized by missing telemetry.`,
+    );
   if (standing.length)
     out.push('', `${standing.length} used in the last 30 days, so \`trim --apply\` leaves them on:`, ...standing.map((s) => `- ${s.name}`));
-  if (!unused.length) out.push(kept.length || standing.length ? 'Nothing else to turn off.' : 'Every server that is on was used.');
+  if (!unused.length) out.push(kept.length || standing.length || unknown.length ? 'Nothing else to turn off.' : 'Every server that is on was used.');
   else if (pro)
     out.push(
       ...unused.map((s) => `- ${s.name}`),
@@ -188,25 +207,15 @@ export function codexTrimReport({ servers, used, usedMonth = null, startup, days
     unused: unused.map((s) => s.name),
     standing: standing.map((s) => s.name),
     kept: kept.map((s) => s.name),
+    unknown: unknown.map((s) => s.name),
   };
-}
-
-/** @param {string} path @param {string} text */
-function writeText(path, text) {
-  const tmp = `${path}.limitcast-tmp`;
-  const mode = existsSync(path) ? statSync(path).mode & 0o777 : 0o600;
-  writeFileSync(tmp, text, { mode });
-  chmodSync(tmp, mode);
-  renameSync(tmp, path);
 }
 
 /** @returns {{at:number, servers:{name:string, prev:boolean|null}[]}[]} */
 function loadLedger() {
-  try {
-    return JSON.parse(readFileSync(ledgerPath(), 'utf8'));
-  } catch {
-    return [];
-  }
+  const entries = readLedger(ledgerPath());
+  if (entries.some((e) => !Array.isArray(e.servers))) throw new Error('invalid Codex trim ledger');
+  return entries;
 }
 
 /**
@@ -214,31 +223,41 @@ function loadLedger() {
  * @param {string[]} names
  */
 export function applyCodexTrim(names, { now = Date.now(), path = codexConfigPath() } = {}) {
-  if (!names.length || !existsSync(path)) return [];
-  const toml = readFileSync(path, 'utf8');
-  const before = new Map(codexServers(toml).map((s) => [s.name, s.enabled]));
-  copyFileSync(path, `${path}.limitcast-backup-${new Date(now).toISOString().replace(/[:.]/g, '-')}`);
-  writeText(path, setEnabled(toml, Object.fromEntries(names.map((n) => [n, false]))));
-  const servers = names.map((name) => ({ name, prev: before.get(name) ?? null }));
-  mkdirSync(stateDir(), { recursive: true });
-  writeFileSync(ledgerPath(), JSON.stringify([...loadLedger(), { at: now, servers }], null, 2));
-  return servers;
+  return withStateLock(() => {
+    recoverTransaction(ledgerPath());
+    const ledger = loadLedger();
+    if (!names.length || !existsSync(path)) return [];
+    let toml;
+    const update = editText(path, (text) => {
+      toml = text;
+      return setEnabled(text, Object.fromEntries(names.map((n) => [n, false])));
+    });
+    const before = new Map(codexServers(toml).map((s) => [s.name, s.enabled]));
+    copyFileSync(path, `${path}.limitcast-backup-${new Date(now).toISOString().replace(/[:.]/g, '-')}`);
+    const servers = names.map((name) => ({ name, prev: before.get(name) ?? null }));
+    commitTransaction(ledgerPath(), [...ledger, { at: now, servers }], [update]);
+    return servers;
+  });
 }
 
 /** Reverse the last --apply: each server goes back to its previous setting (or no `enabled` key). */
 export function undoCodexTrim({ path = codexConfigPath() } = {}) {
-  const ledger = loadLedger();
-  const last = ledger.pop();
-  if (!last || !existsSync(path)) return null;
-  const toml = readFileSync(path, 'utf8');
-  copyFileSync(path, `${path}.limitcast-backup-${new Date().toISOString().replace(/[:.]/g, '-')}`);
-  // Only servers still off: anything turned back on since is left as the user set it.
-  const off = new Set(
-    codexServers(toml)
-      .filter((s) => s.enabled === false)
-      .map((s) => s.name),
-  );
-  writeText(path, setEnabled(toml, Object.fromEntries(last.servers.filter((s) => off.has(s.name)).map((s) => [s.name, s.prev]))));
-  writeFileSync(ledgerPath(), JSON.stringify(ledger, null, 2));
-  return last;
+  return withStateLock(() => {
+    recoverTransaction(ledgerPath());
+    const ledger = loadLedger();
+    const last = ledger.pop();
+    if (!last || !existsSync(path)) return null;
+    const update = editText(path, (toml) => {
+      // Only servers still off: anything turned back on since is left as the user set it.
+      const off = new Set(
+        codexServers(toml)
+          .filter((s) => s.enabled === false)
+          .map((s) => s.name),
+      );
+      return setEnabled(toml, Object.fromEntries(last.servers.filter((s) => off.has(s.name)).map((s) => [s.name, s.prev])));
+    });
+    copyFileSync(path, `${path}.limitcast-backup-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+    commitTransaction(ledgerPath(), ledger, [update]);
+    return last;
+  });
 }

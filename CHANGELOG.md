@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — audit remediation
+
+- Fix: MCP arguments are never rewritten or denied by the generic result limiter. Large-output notices remain; only native Read/Grep controls are enforced.
+- Fix: live settings locks cannot be evicted based on age. Dead-owner recovery and release check unique ownership. Malformed existing settings are preserved and refused.
+- Fix: Claude, Codex and Grok trim/apply/undo persist a write-ahead recovery record before changing configuration. Partial writes recover, and conflicting user edits are preserved for reconciliation.
+- Fix: drift checks preserve explicit user choices, including fully disabled skills and re-enabled servers.
+- Fix: Codex usage parsing accepts flat and namespaced call records, independent of JSON whitespace. Missing or incomplete usage history cannot authorize pruning.
+- Validation: security scans and isolated packed-artifact smoke checks now run in CI. Added persistence, ownership, schema-safety and native model subprocess regressions, including timeout and cancelled-worker behavior.
+- Measurement: optimizer status reports injected context overhead and actual model usage receipts without inferring task success or net savings. The privacy disclosure includes optional Codex-backed model calls.
+- Compatibility: Node.js 22+ is now required; CI tests maintained LTS versions 22, 24 and 26 on macOS and Linux. Node 20 users must upgrade their runtime.
+
 ## 0.19.4 — 2026-11-13
 
 The rest of the Codex and Grok parity audit, checked against live Codex 0.169 and Grok 1.0.77 sessions.

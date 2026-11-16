@@ -6,7 +6,7 @@
   <a href="https://www.npmjs.com/package/limitcast"><code>npm · limitcast</code></a>
   <a href="https://github.com/SamStull9007/limitcast/actions/workflows/ci.yml"><img src="https://github.com/SamStull9007/limitcast/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <a href="LICENSE"><code>MIT license</code></a>
-  <a href="https://nodejs.org"><code>Node.js 20+</code></a>
+  <a href="https://nodejs.org"><code>Node.js 22+</code></a>
 </p>
 
 <p align="center">
@@ -42,7 +42,7 @@
 
 <a id="free-and-open-source"></a>
 
-**Free and open source.** All features are included. No Limitcast account, license key, or subscription required. Runs locally on **macOS and Linux** with **Node.js 20+**.
+**Free and open source.** All features are included. No Limitcast account, license key, or subscription required. Runs locally on **macOS and Linux** with **Node.js 22+**.
 
 <a id="install"></a>
 
@@ -140,10 +140,11 @@ Your findings depend on your local sessions. `trim` inspects first. Use `trim ke
 
 Limitcast reads usage readings and session logs already on your machine. Reports remain local, sharing totals is voluntary, and no billing-service connection is required.
 
-Two optional features make network requests, both **off by default**:
+Three optional features make network requests, all **off by default**:
 
 - **Phone or webhook notifications** send notification text to the service you choose.
 - **Grok weekly usage** reads Grok's existing login and sends it only to grok.com to retrieve your usage. Redirects are refused; the login is never stored or logged by Limitcast.
+- **Optimizer model learning/judging** uses your authenticated Codex CLI and its configured model service. It sends allowlisted check commands, counts and hashed identities; it excludes raw prompts, source text, transcripts and tool output. Calls consume your Codex allowance. [Scope and controls →](docs/optimizer.md#optional-model-learning-and-judging)
 
 Context reductions are estimates against a recorded baseline, not measured causal savings or a lower subscription bill. Forecasts depend on observed usage. [How forecasting and measurement work →](docs/usage.md#how-the-forecast-works)
 

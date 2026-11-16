@@ -9,7 +9,7 @@ import { applyTrim, installedPlugins, planTrim, reapplyTrim, stillLoading, trans
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
 
-test('re-apply: a rewrite that drops every cut puts them back; one turned back on by you stays on', () => {
+test('drift releases changed cuts without overriding any current user choice', () => {
   const dir = tmp('lc-reapply-');
   const prev = process.env.LIMITCAST_STATE;
   process.env.LIMITCAST_STATE = join(dir, 'state');
@@ -22,8 +22,8 @@ test('re-apply: a rewrite that drops every cut puts them back; one turned back o
     assert.deepEqual(reapplyTrim({ settings, claudeJson }), { reapplied: [], released: [] }); // nothing changed
     // Claude Code rewrites ~/.claude.json from memory: both servers gone at once.
     writeFileSync(claudeJson, JSON.stringify({ projects: { '/p': { disabledMcpServers: ['mine'] } } }));
-    assert.deepEqual(reapplyTrim({ settings, claudeJson }).reapplied, ['x', 'y']);
-    assert.deepEqual(JSON.parse(readFileSync(claudeJson, 'utf8')).projects['/p'].disabledMcpServers, ['mine', 'x', 'y']);
+    assert.deepEqual(reapplyTrim({ settings, claudeJson }).released, ['x', 'y']);
+    assert.deepEqual(JSON.parse(readFileSync(claudeJson, 'utf8')).projects['/p'].disabledMcpServers, ['mine']);
     // You turn one skill back on in /skills: limitcast lets it be, and forgets it.
     const s = JSON.parse(readFileSync(settings, 'utf8'));
     delete s.skillOverrides.a;

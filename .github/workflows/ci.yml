@@ -17,7 +17,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        node: [20, 22, 24]
+        node: [22, 24, 26]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -25,3 +25,12 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - run: node --test
+      - run: node scripts/package-smoke.mjs
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: |
+          python3 -m venv "$RUNNER_TEMP/semgrep"
+          "$RUNNER_TEMP/semgrep/bin/pip" install semgrep==1.185.0
+          "$RUNNER_TEMP/semgrep/bin/semgrep" scan --config p/ci --severity ERROR --metrics=off --disable-version-check --error --strict --vim --quiet src bin scripts

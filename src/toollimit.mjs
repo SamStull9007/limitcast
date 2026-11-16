@@ -4,13 +4,12 @@ import { join } from 'node:path';
 import { stateDir, writeAtomic } from './store.mjs';
 import { toolKey } from './toolcheck.mjs';
 
-// PreToolUse: a tool whose recent results are fat, and whose call sets no limit, is denied before it runs.
+// PreToolUse: a native Read/Grep whose recent results are fat is bounded before it runs.
 // Rewriting a limit that is already present but huge keeps the call and caps it. Bash and WebFetch are left
 // alone: they have no limit argument, so a missing one is every call. Stats come from `report --why` / `--jobs`.
 
 export const FAT_AVG = 5_000;
 export const MIN_CALLS = 3;
-const MCP_CAP = 100;
 const READ_CAP = 400;
 const LIMIT_KEYS = new Set(['limit', 'max_results', 'maxresults', 'page_size', 'pagesize', 'top_k', 'topk', 'first']);
 
@@ -142,6 +141,8 @@ const k = (/** @type {number} */ n) => `${Math.max(1, Math.round(n / 1000))}k`;
  */
 export function toolLimitDecision(toolName, input, stats, { host = 'claude', rewrite = true } = {}) {
   const key = toolKey(toolName, host);
+  // MCP argument names do not establish pagination or read-only semantics. Their PostToolUse notices remain available.
+  if (toolName.startsWith('mcp__') || key.startsWith('mcp:')) return null;
   const stat = stats?.[key];
   if (!stat || stat.calls < MIN_CALLS || stat.avg < FAT_AVG) return null;
   const args = typeof input === 'string' ? tryJson(input) : input;
@@ -154,9 +155,9 @@ export function toolLimitDecision(toolName, input, stats, { host = 'claude', rew
       deny: `limitcast: Grep results average ≈${k(stat.avg)} tokens a call over ${stat.calls} calls. Add a path or a glob, then retry. Set LIMITCAST_ALLOW=1 to run it as written.`,
     };
   }
-  if (toolName !== 'Read' && key !== 'Read' && !toolName.startsWith('mcp__') && !key.startsWith('mcp:')) return null;
-  const cap = toolName === 'Read' || key === 'Read' ? READ_CAP : MCP_CAP;
-  const limits = findLimits(obj);
+  if (toolName !== 'Read' && key !== 'Read') return null;
+  const cap = READ_CAP;
+  const limits = findLimits({ limit: obj.limit });
   if (limits.some((f) => f.value > 0 && f.value <= cap)) return null;
   const big = limits.find((f) => f.value > cap);
   const label = toolName === 'Read' || key === 'Read' ? 'Read' : key.replace(/^mcp:/, '');

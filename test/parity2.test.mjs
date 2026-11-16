@@ -233,11 +233,8 @@ test('tool names: Grok says server__tool and read_file, Codex and Claude say mcp
   assert.deepEqual(mcpParts('basic-memory__write_note', 'grok'), { server: 'basic-memory', tool: 'write_note' });
   const big = { 'mcp:basic-memory': { avg: 9000, calls: 6 }, Read: { avg: 9000, calls: 6 } };
   const grok = (name, input) => toolLimitDecision(name, input, big, { host: 'grok' });
-  assert.match(
-    grok('basic-memory__search_notes', { query: 'x' }).deny,
-    /basic-memory results average ≈9k tokens a call over 6 calls\. This call sets no limit/,
-  );
-  assert.equal(grok('basic-memory__search_notes', { query: 'x', limit: 500 }).updatedInput.limit, 100, 'Grok honors a rewritten input');
+  assert.equal(grok('basic-memory__search_notes', { query: 'x' }), null);
+  assert.equal(grok('basic-memory__search_notes', { query: 'x', limit: 500 }), null, 'MCP argument semantics are unknown');
   assert.match(grok('read_file', { path: '/a' }).deny, /Read results average/);
   assert.equal(grok('read_file', { path: '/a', limit: 200 }), null);
   const codex = toolLimitDecision(
@@ -246,7 +243,7 @@ test('tool names: Grok says server__tool and read_file, Codex and Claude say mcp
     { 'mcp:tool_router': { avg: 9000, calls: 6 } },
     { host: 'codex', rewrite: false },
   );
-  assert.match(codex.deny, /Use a limit of 100 or fewer \(this call asked for 500\)/);
+  assert.equal(codex, null);
   assert.match(
     toolNotice('basic-memory__search_notes', 'x'.repeat(100_000), { fresh: 5 }, undefined, 'grok'),
     /^limitcast: that basic-memory search_notes result was ≈25k tokens \(written once as new tokens, then re-read on every later call\)\. Next time: ask for fewer fields/,
@@ -254,7 +251,7 @@ test('tool names: Grok says server__tool and read_file, Codex and Claude say mcp
   assert.doesNotMatch(toolNotice('mcp__x__y', 'x'.repeat(100_000), { fresh: 5 }, undefined, 'codex'), /5-hour/);
 });
 
-test('tool-check learns result sizes for Grok, and tool-limit then holds a fat call', () => {
+test('tool-check learns Grok result sizes while MCP calls retain their original arguments', () => {
   const { env } = stopState();
   const run = (cmd, hook) => spawnSync('node', [bin, cmd, '--src', 'grok'], { env, input: JSON.stringify(hook), encoding: 'utf8', timeout: 20000 });
   for (let i = 0; i < 4; i++) {
@@ -274,9 +271,7 @@ test('tool-check learns result sizes for Grok, and tool-limit then holds a fat c
   const huge = run('tool-check', { sessionId: 's2', toolName: 'big-server__dump', toolInput: {}, toolResult: 'z'.repeat(300_000) });
   assert.match(JSON.parse(huge.stdout).systemMessage, /^limitcast: that big-server dump result was ≈75k tokens/);
   const held = run('tool-limit', { sessionId: 's1', toolUseId: 'call-1', toolName: 'basic-memory__search_notes', toolInput: { query: 'q' } });
-  const out = JSON.parse(held.stdout).hookSpecificOutput;
-  assert.equal(out.permissionDecision, 'deny');
-  assert.match(out.permissionDecisionReason, /basic-memory results average ≈8k tokens a call over 4 calls/);
+  assert.equal(held.stdout, '', 'MCP result history cannot authorize a generic hold');
   const ok = run('tool-limit', { sessionId: 's1', toolName: 'basic-memory__search_notes', toolInput: { query: 'q', limit: 20 } });
   assert.equal(ok.stdout, '');
   assert.equal(run('tool-limit', { sessionId: 's1', toolName: 'other__tool', toolInput: {} }).stdout, '', 'a tool with no history is left alone');
@@ -304,7 +299,10 @@ test('install --alerts adds the tool hooks for Codex and Grok beside the guard, 
   install({ guard: false, alerts: true, path: settings, codexPath, grokDir, self });
   const codex = JSON.parse(readFileSync(codexPath, 'utf8')).hooks;
   assert.equal(codex.PostToolUse[0].hooks[0].command, `${self} tool-check --src codex`);
-  assert.equal(codex.PreToolUse.find((h) => h.hooks[0].command.includes('tool-limit')).matcher, 'mcp__.*');
+  assert.equal(
+    codex.PreToolUse.some((h) => h.hooks[0].command.includes('tool-limit')),
+    false,
+  );
   assert.ok(
     codex.PreToolUse.some((h) => h.hooks[0].command.endsWith(' guard')),
     'the guard stays',

@@ -62,10 +62,9 @@ test('fat tool calls: deny a missing limit, lower one that is too high, leave Ba
   };
   assert.equal(toolLimitDecision('mcp__claude_ai_HubSpot__search', { limit: 20 }, stats), null);
   const denied = toolLimitDecision('mcp__claude_ai_HubSpot__search', { properties: ['name'] }, stats);
-  assert.match(denied.deny, /claude_ai_HubSpot results average ≈8k.*no limit/);
+  assert.equal(denied, null);
   const nested = toolLimitDecision('mcp__claude_ai_HubSpot__search', { query: { max_results: '500' } }, stats);
-  assert.equal(nested.updatedInput.query.max_results, 100);
-  assert.match(nested.reason, /lowered to 100/);
+  assert.equal(nested, null);
   assert.equal(findLimits({ query: { max_results: '500' } })[0].value, 500);
   const read = toolLimitDecision('Read', { file_path: 'a.js' }, stats);
   assert.match(read.deny, /offset and limit/);
@@ -183,14 +182,12 @@ test('CLI: duplicate spawns are held, a short idle is announced, and a fat call 
   const held = JSON.parse(run('prompt-check', prompt).toString());
   assert.equal(held.decision, 'block');
 
-  writeFileSync(join(state, 'tool-stats.json'), JSON.stringify({ 'mcp:claude_ai_HubSpot': { avg: 7700, calls: 9 } }));
-  const open = JSON.parse(run('tool-limit', JSON.stringify({ tool_name: 'mcp__claude_ai_HubSpot__search', tool_input: { q: 'acme' } })).toString());
+  writeFileSync(join(state, 'tool-stats.json'), JSON.stringify({ Read: { avg: 7700, calls: 9 } }));
+  const open = JSON.parse(run('tool-limit', JSON.stringify({ tool_name: 'Read', tool_input: { file_path: 'a' } })).toString());
   assert.equal(open.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(open.hookSpecificOutput.permissionDecisionReason, /no limit/);
-  const capped = JSON.parse(
-    run('tool-limit', JSON.stringify({ tool_name: 'mcp__claude_ai_HubSpot__search', tool_input: { limit: 1000 } })).toString(),
-  );
-  assert.equal(capped.hookSpecificOutput.updatedInput.limit, 100);
+  const capped = JSON.parse(run('tool-limit', JSON.stringify({ tool_name: 'Read', tool_input: { file_path: 'a', limit: 1000 } })).toString());
+  assert.equal(capped.hookSpecificOutput.updatedInput.limit, 400);
   assert.equal(run('tool-limit', JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'ls' } })).toString(), '');
   assert.match(readFileSync(join(state, 'guard.jsonl'), 'utf8'), /"kind":"duplicate"/);
   assert.match(readFileSync(join(state, 'guard.jsonl'), 'utf8'), /"kind":"cold-notice"/);

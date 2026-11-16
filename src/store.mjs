@@ -1,6 +1,20 @@
 // @ts-check
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmdirSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -30,49 +44,80 @@ export function writeAtomic(/** @type {string} */ path, /** @type {string} */ te
   }
 }
 
-const LOCK_STALE_MS = 2_000; // the lock is held for one read and one write; older than this means its owner died
-const LOCK_WAIT_MS = 5_000;
+const LOCK_WAIT_MS = 10_000;
+
+function releaseLock(lock, owner) {
+  try {
+    unlinkSync(join(lock, owner));
+    // A contender can replace the now-empty directory with its populated lock. Never remove that lock recursively.
+    rmdirSync(lock);
+  } catch (error) {
+    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error;
+  }
+}
+
+/** Serialize settings and trim transactions. Publish a populated owner directory atomically; reclaim only dead owners. */
+export function withStateLock(change) {
+  const dir = stateDir();
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const lock = join(dir, 'config.json.lock');
+  const owner = `${process.pid}-${randomUUID()}`;
+  const candidate = `${lock}.${owner}`;
+  mkdirSync(candidate, { mode: 0o700 });
+  let acquired = false;
+  try {
+    writeFileSync(join(candidate, owner), '', { mode: 0o600 });
+    const start = Date.now();
+    for (;;) {
+      try {
+        renameSync(candidate, lock);
+        acquired = true;
+        break;
+      } catch (error) {
+        if (!['EEXIST', 'ENOTEMPTY'].includes(error.code)) throw error;
+      }
+      try {
+        for (const other of readdirSync(lock)) {
+          const pid = /^(\d+)-[a-f0-9-]+$/.exec(other)?.[1];
+          if (!pid) continue;
+          try {
+            process.kill(Number(pid), 0);
+          } catch (error) {
+            if (error.code === 'ESRCH') releaseLock(lock, other);
+            else if (error.code !== 'EPERM') throw error;
+          }
+        }
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+      if (Date.now() - start > LOCK_WAIT_MS) throw new Error('could not lock settings: another limitcast command is changing settings');
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2 + Math.floor(Math.random() * 8));
+    }
+    return change();
+  } finally {
+    if (acquired) releaseLock(lock, owner);
+    rmSync(candidate, { recursive: true, force: true });
+  }
+}
 
 /**
  * Change config.json under a lock: read it, let `change` return the new settings (or the same object to leave the file
  * alone), write it. Without the lock, two commands that each read the file and then each write it lose one change.
- * shortcut: two waiters that break the same stale lock in the same instant can both write; fix with a lockfile library if seen.
  * @param {(cfg: any) => any} change
  */
 export function updateConfig(change) {
-  const dir = stateDir();
-  mkdirSync(dir, { recursive: true });
-  const file = join(dir, 'config.json');
-  const lock = `${file}.lock`;
-  const start = Date.now();
-  for (;;) {
-    try {
-      mkdirSync(lock); // atomic: exactly one process creates it
-      break;
-    } catch (e) {
-      if (/** @type {NodeJS.ErrnoException} */ (e).code !== 'EEXIST') throw e;
-      try {
-        if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) rmSync(lock, { recursive: true, force: true });
-      } catch {
-        /* released while we looked */
-      }
-      if (Date.now() - start > LOCK_WAIT_MS) throw new Error(`could not lock ${file}: another limitcast command is changing settings`);
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-    }
-  }
-  try {
+  return withStateLock(() => {
+    const file = join(stateDir(), 'config.json');
     let cfg = {};
     try {
       cfg = JSON.parse(readFileSync(file, 'utf8'));
-    } catch {
-      /* new or corrupt: start fresh */
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw new Error('cannot read settings JSON; preserve config.json and repair it before retrying');
     }
-    if (!cfg || typeof cfg !== 'object') cfg = {};
+    if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) throw new Error('settings JSON must be an object; preserve config.json');
     const next = change(cfg);
     if (next !== cfg) writeAtomic(file, JSON.stringify(next));
-  } finally {
-    rmSync(lock, { recursive: true, force: true });
-  }
+  });
 }
 
 /**

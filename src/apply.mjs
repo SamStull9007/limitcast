@@ -1,22 +1,10 @@
 // @ts-check
-import {
-  chmodSync,
-  closeSync,
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readdirSync,
-  readFileSync,
-  readSync,
-  renameSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { closeSync, copyFileSync, existsSync, openSync, readdirSync, readFileSync, readSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readSettings, settingsPath } from './install.mjs';
-import { stateDir, updateConfig } from './store.mjs';
+import { stateDir, updateConfig, withStateLock } from './store.mjs';
+import { commitTransaction, editJson, readLedger, recoverTransaction } from './transaction.mjs';
 
 // `trim --apply`: hide unused skills and turn off unused MCP servers through Claude Code's own settings.
 // Skills: `skillOverrides` in ~/.claude/settings.json ("user-invocable-only": the model stops seeing it, /name still works).
@@ -156,26 +144,12 @@ function backup(path) {
   if (existsSync(path)) copyFileSync(path, `${path}.limitcast-backup-${new Date().toISOString().replace(/[:.]/g, '-')}`);
 }
 
-/**
- * Write JSON through a temp file and rename, so a crash or a concurrent reader never sees half a file.
- * @param {string} path @param {any} value
- */
-function writeJson(path, value) {
-  const tmp = `${path}.limitcast-tmp`;
-  // ~/.claude.json can hold credentials: keep the file's own permissions (owner-only for a new file).
-  const mode = existsSync(path) ? statSync(path).mode & 0o777 : 0o600;
-  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode });
-  chmodSync(tmp, mode); // a leftover tmp from a crash keeps its old mode otherwise
-  renameSync(tmp, path);
-}
-
 /** @returns {{at:number, cwd:string, skills:{name:string, prev?:string}[], mcp:string[]}[]} */
 export function loadLedger() {
-  try {
-    return JSON.parse(readFileSync(ledgerPath(), 'utf8'));
-  } catch {
-    return [];
-  }
+  const entries = readLedger(ledgerPath());
+  if (entries.some((e) => typeof e.cwd !== 'string' || !Array.isArray(e.skills) || !Array.isArray(e.mcp)))
+    throw new Error('invalid Claude trim ledger');
+  return entries;
 }
 
 /**
@@ -184,32 +158,43 @@ export function loadLedger() {
  * @param {{cwd:string, now:number, settings?:string, claudeJson?:string}} o
  */
 export function applyTrim(plan, { cwd, now, settings = settingsPath(), claudeJson = claudeJsonPath() }) {
-  const entry = { at: now, cwd, skills: /** @type {{name:string, prev?:string}[]} */ ([]), mcp: /** @type {string[]} */ ([]) };
-  if (plan.hide.length) {
-    const cfg = readSettings(settings);
-    backup(settings);
-    cfg.skillOverrides ??= {};
-    for (const name of plan.hide) {
-      entry.skills.push(name in cfg.skillOverrides ? { name, prev: cfg.skillOverrides[name] } : { name });
-      cfg.skillOverrides[name] = 'user-invocable-only';
+  return withStateLock(() => {
+    recoverTransaction(ledgerPath());
+    const ledger = loadLedger();
+    const updates = [];
+    const entry = { at: now, cwd, skills: /** @type {{name:string, prev?:string}[]} */ ([]), mcp: /** @type {string[]} */ ([]) };
+    if (plan.hide.length) {
+      updates.push(
+        editJson(settings, (cfg) => {
+          cfg.skillOverrides ??= {};
+          for (const name of plan.hide) {
+            if (cfg.skillOverrides[name] !== undefined && cfg.skillOverrides[name] !== 'on') continue;
+            entry.skills.push(name in cfg.skillOverrides ? { name, prev: cfg.skillOverrides[name] } : { name });
+            cfg.skillOverrides[name] = 'user-invocable-only';
+          }
+        }),
+      );
     }
-    writeJson(settings, cfg);
-  }
-  if (plan.disable.length) {
-    const cj = readSettings(claudeJson);
-    backup(claudeJson);
-    cj.projects ??= {};
-    cj.projects[cwd] ??= {};
-    const list = (cj.projects[cwd].disabledMcpServers ??= []);
-    for (const name of plan.disable) if (!list.includes(name)) list.push(name);
-    entry.mcp = [...plan.disable];
-    writeJson(claudeJson, cj);
-  }
-  if (entry.skills.length || entry.mcp.length) {
-    mkdirSync(stateDir(), { recursive: true });
-    writeJson(ledgerPath(), [...loadLedger(), entry]);
-  }
-  return entry;
+    if (plan.disable.length) {
+      updates.push(
+        editJson(claudeJson, (cj) => {
+          cj.projects ??= {};
+          cj.projects[cwd] ??= {};
+          const list = (cj.projects[cwd].disabledMcpServers ??= []);
+          for (const name of plan.disable)
+            if (!list.includes(name)) {
+              list.push(name);
+              entry.mcp.push(name);
+            }
+        }),
+      );
+    }
+    if (entry.skills.length || entry.mcp.length) {
+      for (const change of updates) backup(change.path);
+      commitTransaction(ledgerPath(), [...ledger, entry], updates);
+    }
+    return entry;
+  });
 }
 
 /**
@@ -218,74 +203,69 @@ export function applyTrim(plan, { cwd, now, settings = settingsPath(), claudeJso
  * @param {{settings?:string, claudeJson?:string}} [o]
  */
 export function undoTrim({ settings = settingsPath(), claudeJson = claudeJsonPath() } = {}) {
-  const ledger = loadLedger();
-  const last = ledger.pop();
-  if (!last) return null;
-  if (last.skills.length) {
-    const cfg = readSettings(settings);
-    backup(settings);
-    for (const s of last.skills) {
-      if (cfg.skillOverrides?.[s.name] !== 'user-invocable-only') continue;
-      if (s.prev === undefined) delete cfg.skillOverrides[s.name];
-      else cfg.skillOverrides[s.name] = s.prev;
+  return withStateLock(() => {
+    recoverTransaction(ledgerPath());
+    const ledger = loadLedger();
+    const last = ledger.pop();
+    if (!last) return null;
+    const updates = [];
+    if (last.skills.length && existsSync(settings)) {
+      updates.push(
+        editJson(settings, (cfg) => {
+          for (const s of last.skills) {
+            if (cfg.skillOverrides?.[s.name] !== 'user-invocable-only') continue;
+            if (s.prev === undefined) delete cfg.skillOverrides[s.name];
+            else cfg.skillOverrides[s.name] = s.prev;
+          }
+        }),
+      );
     }
-    writeJson(settings, cfg);
-  }
-  if (last.mcp.length) {
-    const cj = readSettings(claudeJson);
-    backup(claudeJson);
-    const p = cj.projects?.[last.cwd];
-    if (p?.disabledMcpServers) p.disabledMcpServers = p.disabledMcpServers.filter((/** @type {string} */ n) => !last.mcp.includes(n));
-    writeJson(claudeJson, cj);
-  }
-  writeJson(ledgerPath(), ledger);
-  return last;
+    if (last.mcp.length && existsSync(claudeJson)) {
+      updates.push(
+        editJson(claudeJson, (cj) => {
+          const p = cj.projects?.[last.cwd];
+          if (p?.disabledMcpServers) p.disabledMcpServers = p.disabledMcpServers.filter((/** @type {string} */ n) => !last.mcp.includes(n));
+        }),
+      );
+    }
+    for (const change of updates) backup(change.path);
+    commitTransaction(ledgerPath(), ledger, updates);
+    return last;
+  });
 }
 
 /**
- * Keep the last --apply in place. A running Claude Code session can rewrite ~/.claude.json (or settings) and drop
- * every change at once: then put them back. When only some are gone, you turned those back on yourself (/mcp,
- * /skills): leave them and forget them, so limitcast never fights your choice. Checked per file.
+ * Release ownership of settings that changed after apply. Never infer that a user's choice was a host rewrite.
  * @param {{settings?:string, claudeJson?:string}} [o]
  * @returns {{reapplied:string[], released:string[]}}
  */
 export function reapplyTrim({ settings = settingsPath(), claudeJson = claudeJsonPath() } = {}) {
-  const ledger = loadLedger();
-  const last = ledger.at(-1);
-  const out = { reapplied: /** @type {string[]} */ ([]), released: /** @type {string[]} */ ([]) };
-  if (!last) return out;
-  if (last.skills.length && existsSync(settings)) {
-    const cfg = readSettings(settings);
-    const gone = last.skills.filter((s) => cfg.skillOverrides?.[s.name] !== 'user-invocable-only');
-    if (gone.length === last.skills.length) {
-      cfg.skillOverrides ??= {};
-      for (const s of gone) cfg.skillOverrides[s.name] = 'user-invocable-only';
-      backup(settings);
-      writeJson(settings, cfg);
-      out.reapplied.push(...gone.map((s) => s.name));
-    } else if (gone.length) {
-      last.skills = last.skills.filter((s) => !gone.includes(s));
-      out.released.push(...gone.map((s) => s.name));
+  return withStateLock(() => {
+    recoverTransaction(ledgerPath());
+    const ledger = loadLedger();
+    const last = ledger.at(-1);
+    const out = { reapplied: /** @type {string[]} */ ([]), released: /** @type {string[]} */ ([]) };
+    if (!last) return out;
+    if (last.skills.length) {
+      const cfg = existsSync(settings) ? readSettings(settings) : {};
+      const gone = last.skills.filter((s) => cfg.skillOverrides?.[s.name] !== 'user-invocable-only');
+      if (gone.length) {
+        last.skills = last.skills.filter((s) => !gone.includes(s));
+        out.released.push(...gone.map((s) => s.name));
+      }
     }
-  }
-  if (last.mcp.length && existsSync(claudeJson)) {
-    const cj = readSettings(claudeJson);
-    const list = cj.projects?.[last.cwd]?.disabledMcpServers ?? [];
-    const gone = last.mcp.filter((n) => !list.includes(n));
-    if (gone.length === last.mcp.length) {
-      cj.projects ??= {};
-      cj.projects[last.cwd] ??= {};
-      cj.projects[last.cwd].disabledMcpServers = [...list, ...gone];
-      backup(claudeJson);
-      writeJson(claudeJson, cj);
-      out.reapplied.push(...gone);
-    } else if (gone.length) {
-      last.mcp = last.mcp.filter((n) => !gone.includes(n));
-      out.released.push(...gone);
+    if (last.mcp.length) {
+      const cj = existsSync(claudeJson) ? readSettings(claudeJson) : {};
+      const list = cj.projects?.[last.cwd]?.disabledMcpServers ?? [];
+      const gone = last.mcp.filter((n) => !list.includes(n));
+      if (gone.length) {
+        last.mcp = last.mcp.filter((n) => !gone.includes(n));
+        out.released.push(...gone);
+      }
     }
-  }
-  if (out.released.length) writeJson(ledgerPath(), ledger);
-  return out;
+    if (out.released.length) commitTransaction(ledgerPath(), ledger, []);
+    return out;
+  });
 }
 
 /**

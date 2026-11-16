@@ -888,7 +888,9 @@ if (cmd === '_optimize-hook') {
       console.log(
         (changed.length
           ? `✓ Turned off ${changed.length} Codex MCP servers (enabled = false in ${codexConfigPath()}): ${changed.map((s) => s.name).join(', ')}\nTakes effect in your next Codex session. Undo: limitcast trim --codex --undo`
-          : 'Nothing to turn off: every server that is on was used or is on your keep-list.') + keptNote(r.kept),
+          : r.unknown.length
+            ? 'Nothing to turn off: usage history is missing or incomplete, so unverified servers stay on.'
+            : 'Nothing to turn off: every server that is on was used or is on your keep-list.') + keptNote(r.kept),
       );
     } else
       console.log(
@@ -1001,12 +1003,10 @@ if (cmd === '_optimize-hook') {
         : null;
     if (hook) {
       const lines = d?.alert ? [driftMessage(d, host)] : [];
-      // Claude Code may have rewritten the files `trim --apply` changed: put the cuts back for the next session.
-      const re = host === 'claude' ? reapplyTrim() : { reapplied: [] };
-      if (re.reapplied.length)
-        lines.push(
-          `limitcast: Claude Code had undone ${re.reapplied.length} of your trim cuts; they're back from your next session. (limitcast trim --undo to drop them)`,
-        );
+      // A host rewrite cannot be distinguished from a user edit: preserve the current settings.
+      const re = host === 'claude' ? reapplyTrim() : { reapplied: [], released: [] };
+      if (re.released.length)
+        lines.push(`limitcast: ${re.released.length} trim settings changed; your current choices were preserved. Run limitcast trim to review.`);
       // Once a week, what limitcast did: shown to the user at session start, never to the model.
       if (weeklyDue(now)) {
         const since = now - 7 * 86400_000;

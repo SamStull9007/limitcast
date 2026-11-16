@@ -4,7 +4,8 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { codexServers, setEnabled } from './codex.mjs';
 import { windowMs } from './forecast.mjs';
-import { KEEP_MS, stateDir, updateConfig } from './store.mjs';
+import { KEEP_MS, stateDir, updateConfig, withStateLock } from './store.mjs';
+import { commitTransaction, editText, readLedger, recoverTransaction } from './transaction.mjs';
 import { grokRoot } from './usage.mjs';
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */
@@ -137,41 +138,49 @@ export function grokTrimReport({ servers, used, usedMonth = null, startup, days,
  * @param {string[]} names
  */
 export function applyGrokTrim(names, { now = Date.now(), path = grokConfigPath() } = {}) {
-  if (!names.length || !existsSync(path)) return [];
-  const toml = readFileSync(path, 'utf8');
-  const before = new Map(codexServers(toml).map((s) => [s.name, s.enabled]));
-  copyFileSync(path, `${path}.limitcast-backup-${new Date(now).toISOString().replace(/[:.]/g, '-')}`);
-  writeText(path, setEnabled(toml, Object.fromEntries(names.map((n) => [n, false]))));
-  const servers = names.map((name) => ({ name, prev: before.get(name) ?? null }));
-  mkdirSync(stateDir(), { recursive: true });
-  writeFileSync(trimLedger(), JSON.stringify([...loadTrimLedger(), { at: now, servers }], null, 2));
-  return servers;
+  return withStateLock(() => {
+    recoverTransaction(trimLedger());
+    const ledger = loadTrimLedger();
+    if (!names.length || !existsSync(path)) return [];
+    let toml;
+    const update = editText(path, (text) => {
+      toml = text;
+      return setEnabled(text, Object.fromEntries(names.map((n) => [n, false])));
+    });
+    const before = new Map(codexServers(toml).map((s) => [s.name, s.enabled]));
+    copyFileSync(path, `${path}.limitcast-backup-${new Date(now).toISOString().replace(/[:.]/g, '-')}`);
+    const servers = names.map((name) => ({ name, prev: before.get(name) ?? null }));
+    commitTransaction(trimLedger(), [...ledger, { at: now, servers }], [update]);
+    return servers;
+  });
 }
 
 /** Reverse the last --apply. Servers the user turned back on stay on. */
 export function undoGrokTrim({ path = grokConfigPath() } = {}) {
-  const ledger = loadTrimLedger();
-  const last = ledger.pop();
-  if (!last || !existsSync(path)) return null;
-  const toml = readFileSync(path, 'utf8');
-  copyFileSync(path, `${path}.limitcast-backup-${new Date().toISOString().replace(/[:.]/g, '-')}`);
-  const off = new Set(
-    codexServers(toml)
-      .filter((s) => s.enabled === false)
-      .map((s) => s.name),
-  );
-  writeText(path, setEnabled(toml, Object.fromEntries(last.servers.filter((s) => off.has(s.name)).map((s) => [s.name, s.prev]))));
-  writeFileSync(trimLedger(), JSON.stringify(ledger, null, 2));
-  return last;
+  return withStateLock(() => {
+    recoverTransaction(trimLedger());
+    const ledger = loadTrimLedger();
+    const last = ledger.pop();
+    if (!last || !existsSync(path)) return null;
+    const update = editText(path, (toml) => {
+      const off = new Set(
+        codexServers(toml)
+          .filter((s) => s.enabled === false)
+          .map((s) => s.name),
+      );
+      return setEnabled(toml, Object.fromEntries(last.servers.filter((s) => off.has(s.name)).map((s) => [s.name, s.prev])));
+    });
+    copyFileSync(path, `${path}.limitcast-backup-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+    commitTransaction(trimLedger(), ledger, [update]);
+    return last;
+  });
 }
 
 /** @returns {{at:number, servers:{name:string, prev:boolean|null}[]}[]} */
 function loadTrimLedger() {
-  try {
-    return JSON.parse(readFileSync(trimLedger(), 'utf8'));
-  } catch {
-    return [];
-  }
+  const entries = readLedger(trimLedger());
+  if (entries.some((e) => !Array.isArray(e.servers))) throw new Error('invalid Grok trim ledger');
+  return entries;
 }
 
 /**
@@ -553,7 +562,7 @@ export function installGrok({ guard, alerts = false, self, home = grokHome() }) 
     if (wantAlerts) {
       // Grok accepts Claude's tool names in a matcher (Read is read_file) and its MCP calls as mcp__server__tool.
       (hooks.PreToolUse ??= []).push({
-        matcher: 'Read|Grep|mcp__.*',
+        matcher: 'Read|Grep',
         hooks: [{ type: 'command', command: `${self} tool-limit --src grok`, timeout: 10 }],
       });
       hooks.PostToolUse = [

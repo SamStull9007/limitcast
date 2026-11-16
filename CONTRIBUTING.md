@@ -4,13 +4,14 @@ Start with [Q&A](https://github.com/SamStull9007/limitcast/discussions/categorie
 
 ## Run locally
 
-Requires Node.js 20+ on macOS or Linux. There are no runtime dependencies to install.
+Requires Node.js 22+ on macOS or Linux. There are no runtime dependencies to install.
 
 ```sh
 git clone https://github.com/SamStull9007/limitcast.git
 cd limitcast
 node bin/limitcast.mjs --version
 npm test
+node scripts/package-smoke.mjs
 npx --yes @biomejs/biome@2.6.3 ci .
 ```
 

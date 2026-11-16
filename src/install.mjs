@@ -120,12 +120,7 @@ export function install({
       isToolCheck,
     );
     changes.push('added the large tool-output notice');
-    upsertHook(
-      cfg,
-      'PreToolUse',
-      { matcher: 'Bash|Read|Grep|WebFetch|mcp__.*', hooks: [{ type: 'command', command: `${self} tool-limit`, timeout: 10 }] },
-      isToolLimit,
-    );
+    upsertHook(cfg, 'PreToolUse', { matcher: 'Read|Grep', hooks: [{ type: 'command', command: `${self} tool-limit`, timeout: 10 }] }, isToolLimit);
     changes.push('added the fat-tool limit check');
   }
   if (optimize) {
@@ -149,20 +144,14 @@ export function install({
   if (alerts && existsSync(join(codexPath, '..'))) {
     const codex = readSettings(codexPath);
     backup(codexPath);
-    // Codex has no Read or Grep tool; its fat results come from shell commands and MCP tools. The check learns each
-    // tool's usual result size as it goes, and only MCP calls (which take a limit) are held.
+    // Codex has no native Read/Grep controls. Keep result notices and remove the legacy generic MCP pre-call hold.
     upsertHook(
       codex,
       'PostToolUse',
       { matcher: 'Bash|mcp__.*', hooks: [{ type: 'command', command: `${self} tool-check --src codex`, timeout: 10 }] },
       isToolCheck,
     );
-    upsertHook(
-      codex,
-      'PreToolUse',
-      { matcher: 'mcp__.*', hooks: [{ type: 'command', command: `${self} tool-limit --src codex`, timeout: 10 }] },
-      isToolLimit,
-    );
+    if (codex.hooks?.PreToolUse) codex.hooks.PreToolUse = codex.hooks.PreToolUse.filter((h) => !isToolLimit(h));
     upsertHook(
       codex,
       'SessionStart',

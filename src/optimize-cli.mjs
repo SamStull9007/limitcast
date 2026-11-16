@@ -21,6 +21,13 @@ export function runOptimizationHook(hook, host) {
   });
   if (job) startModelWorker(repo, job);
   const context = [result.context, result.map ? repositoryMap(repo) : ''].filter(Boolean).join('\n\n');
+  if (context)
+    changeOptimization(repo, (state) => {
+      const m = (state.measurements ??= { injections: 0, contextChars: 0, estimatedContextTokens: 0 });
+      m.injections++;
+      m.contextChars += context.length;
+      m.estimatedContextTokens += Math.ceil(context.length / 4);
+    });
   if (host === 'copilot') return context ? { additionalContext: context } : result.notice ? { additionalContext: result.notice } : {};
   return {
     ...(result.notice ? { systemMessage: result.notice } : {}),
@@ -125,6 +132,12 @@ export function runOptimize(args, cwd = process.cwd()) {
       HOSTS.map((h) => [h, { completedSessions: state.hosts[h]?.completed ?? 0, proposed: capabilityProposals(state, h, configuredServers(h)) }]),
     ),
     receipts: state.receipts,
+    measurements: {
+      injectedContext: state.measurements ?? { injections: 0, contextChars: 0, estimatedContextTokens: 0 },
+      modelCalls: state.model?.receipts ?? [],
+      taskSuccess: 'unmeasured; completed sessions are not proof of task success',
+      netSavings: 'unproven; injected context and model calls add overhead',
+    },
     applied: Object.fromEntries(Object.entries(state.applied ?? {}).map(([h, a]) => [h, a.names])),
   };
 }

@@ -80,7 +80,7 @@ test('ensureDefaultKeep seeds once when several commands start together', async 
   assert.deepEqual(config(state).trimKeep, ['ego-browser']);
 });
 
-test('a lock left by a dead process is broken after two seconds', () => {
+test('a legacy empty orphan lock can be replaced atomically', () => {
   const state = fresh();
   process.env.LIMITCAST_STATE = state;
   const lock = join(state, 'config.json.lock');
@@ -107,10 +107,10 @@ test('the lock is released when the change throws, and the file is left alone', 
   assert.equal(config(state).plan, 'pro');
 });
 
-test('a config.json that is not an object is replaced, not crashed on', () => {
+test('a config.json that is not an object is preserved and refused', () => {
   const state = fresh();
   process.env.LIMITCAST_STATE = state;
   writeFileSync(join(state, 'config.json'), 'null');
-  updateConfig((cfg) => ({ ...cfg, plan: 'pro' }));
-  assert.equal(config(state).plan, 'pro');
+  assert.throws(() => updateConfig((cfg) => ({ ...cfg, plan: 'pro' })), /must be an object/);
+  assert.equal(readFileSync(join(state, 'config.json'), 'utf8'), 'null');
 });
