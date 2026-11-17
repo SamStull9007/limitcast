@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.2 — 2026-11-17
+
+- Metadata: the npm `author` field now names the public project contact and links the maintainer page, https://limitcast.dev/sam-stull/. No code changes.
+
 ## 0.20.1 — 2026-11-17
 
 - Fix: Claude trim parses activity independently of JSON whitespace and refuses cuts when usage evidence is missing or incomplete, including cached histories.
