@@ -108,7 +108,7 @@ import {
 import { forTerminal } from '../src/term.mjs';
 import { firstFlag, resultTokens, toolKey, toolNotice } from '../src/toolcheck.mjs';
 import { loadLiveStats, loadToolStats, recordToolSize, saveToolStats, toolLimitDecision, toolStats } from '../src/toollimit.mjs';
-import { baseline, contributors, measuredSavings, shareSummary, startupReport, trimReport } from '../src/trim.mjs';
+import { activityKnown, baseline, contributors, measuredSavings, shareSummary, startupReport, trimReport, UNKNOWN_ACTIVITY } from '../src/trim.mjs';
 import { claudeRoot, grokRoot, readUsage } from '../src/usage.mjs';
 import { dailyDue, foldEvents, loadValue, saveValue, scanSessions, valuePeriod, valueSection, valueTotals } from '../src/value.mjs';
 import { attribute, jobsReport, whyReport, whySessions } from '../src/where.mjs';
@@ -1309,6 +1309,7 @@ async function refreshValue(preread) {
  */
 function applyMessage(latest, used, usedMonth) {
   if (!latest) return '`limitcast trim --apply` needs one Claude Code session first.';
+  if (!activityKnown(used) || !activityKnown(usedMonth ?? used)) return UNKNOWN_ACTIVITY;
   const s = measuredSavings(latest.pieces, used, getKeep(), usedMonth);
   const cwd = transcriptCwd(latest.file) ?? process.cwd();
   const plan = planTrim({

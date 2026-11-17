@@ -130,7 +130,7 @@ export function record(samples) {
   const dir = stateDir();
   mkdirSync(dir, { recursive: true });
   const lastPath = join(dir, 'last.json');
-  /** @type {Record<string, {pct:number, reset:number}>} */
+  /** @type {Record<string, Sample>} */
   let last = {};
   try {
     last = JSON.parse(readFileSync(lastPath, 'utf8'));
@@ -142,11 +142,11 @@ export function record(samples) {
     const prev = last[key(s)];
     return !prev || prev.pct !== s.pct || prev.reset !== s.reset;
   });
+  for (const s of samples) if (!Number.isFinite(last[key(s)]?.t) || s.t >= last[key(s)].t) last[key(s)] = s;
+  writeAtomic(lastPath, JSON.stringify(last));
   if (!fresh.length) return;
   const file = join(dir, 'samples.jsonl');
   appendFileSync(file, `${fresh.map((s) => JSON.stringify(s)).join('\n')}\n`);
-  for (const s of fresh) last[key(s)] = { pct: s.pct, reset: s.reset };
-  writeAtomic(lastPath, JSON.stringify(last));
   if (statSync(file).size > PRUNE_BYTES)
     writeAtomic(
       file,
@@ -162,10 +162,9 @@ export function record(samples) {
  */
 export function load(since) {
   const file = join(stateDir(), 'samples.jsonl');
-  if (!existsSync(file)) return [];
   /** @type {Sample[]} */
   const out = [];
-  for (const line of readFileSync(file, 'utf8').split('\n')) {
+  for (const line of (existsSync(file) ? readFileSync(file, 'utf8') : '').split('\n')) {
     if (!line) continue;
     try {
       const s = JSON.parse(line);
@@ -173,6 +172,26 @@ export function load(since) {
     } catch {
       /* skip a torn line from a concurrent write */
     }
+  }
+  // The latest observation can be unchanged; keep one heartbeat per series rather than appending duplicates.
+  try {
+    const latest = JSON.parse(readFileSync(join(stateDir(), 'last.json'), 'utf8'));
+    for (const s of Object.values(latest)) {
+      if (
+        !s ||
+        !Number.isFinite(s.t) ||
+        s.t < since ||
+        !Number.isFinite(s.pct) ||
+        !Number.isFinite(s.reset) ||
+        s.reset <= 0 ||
+        typeof s.src !== 'string' ||
+        typeof s.win !== 'string'
+      )
+        continue;
+      if (!out.some((p) => p.src === s.src && p.win === s.win && p.sid === s.sid && p.t >= s.t)) out.push(s);
+    }
+  } catch {
+    /* legacy or unavailable heartbeat: retain the recorded observations */
   }
   return out;
 }

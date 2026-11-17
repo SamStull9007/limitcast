@@ -370,7 +370,8 @@ test('CLI hook isolation, per-repository settings, bounded transcript catalog an
   assert.equal(readOptimization(b).config.learn, false);
   const transcript = join(a.root, 'session.jsonl');
   writeFileSync(transcript, `${JSON.stringify({ attachment: { type: 'deferred_tools_delta', addedNames: ['NotebookEdit', 'Read'] } })}\npartial`);
-  assert.deepEqual(transcriptTools(transcript), ['NotebookEdit', 'Read']);
+  assert.deepEqual([...transcriptTools(transcript)], ['NotebookEdit', 'Read']);
+  assert.equal(transcriptTools(transcript).complete, false);
   assert.deepEqual(runOptimizationHook(hook('SessionStart', { cwd: a.root }), 'codex'), {});
   assert.deepEqual(runOptimizationHook({ is_subagent: true }, 'codex'), {});
   const bad = execFileSync(process.execPath, [bin, '_optimize-hook', '--src', 'codex'], {

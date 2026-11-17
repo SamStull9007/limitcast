@@ -1,7 +1,16 @@
 import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import { applyCapabilities, capabilityStatus, configuredServers, restoreCapabilities } from './capabilities.mjs';
 import { reserveModelJob, startModelWorker } from './model-optimize.mjs';
-import { capabilityProposals, changeOptimization, HOSTS, normalizeEvent, processEvent, readOptimization, repository } from './optimize.mjs';
+import {
+  CATALOG_LIMIT,
+  capabilityProposals,
+  changeOptimization,
+  HOSTS,
+  normalizeEvent,
+  processEvent,
+  readOptimization,
+  repository,
+} from './optimize.mjs';
 import { installOptimizerHost } from './optimizer-hosts.mjs';
 import { repositoryMap } from './repomap.mjs';
 
@@ -10,9 +19,14 @@ export function runOptimizationHook(hook, host) {
   if (hook.is_subagent || hook.subagent_id || hook.isSidechain) return {};
   const repo = repository(hook.cwd ?? hook.workdir ?? process.cwd());
   if (host === 'claude' && ['Stop', 'SessionEnd'].includes(hook.hook_event_name) && typeof hook.transcript_path === 'string') {
-    hook = { ...hook, tools: transcriptTools(hook.transcript_path) };
+    const tools = transcriptTools(hook.transcript_path);
+    hook = { ...hook, tools, tools_complete: tools.complete };
   }
   const event = normalizeEvent(hook, host);
+  if (['codex', 'grok'].includes(host) && ['SessionStart', 'UserPromptSubmit', 'Stop', 'SessionEnd'].includes(event.event))
+    event.servers = configuredServers(host)
+      .filter((s) => s.enabled !== false)
+      .map((s) => s.name);
   let job;
   const result = changeOptimization(repo, (state) => {
     const result = processEvent(state, event);
@@ -41,16 +55,22 @@ export function transcriptTools(path) {
     const buffer = Buffer.alloc(256_000);
     const bytes = readSync(fd, buffer, 0, buffer.length, 0);
     const names = [];
+    let complete = statSync(path).size <= buffer.length;
     for (const line of buffer.toString('utf8', 0, bytes).split('\n')) {
+      if (!line.trim()) continue;
       try {
         const row = JSON.parse(line);
         if (row.attachment?.type === 'deferred_tools_delta') names.push(...(row.attachment.addedNames ?? []));
         if (row.type === 'system' && row.subtype === 'init') names.push(...(row.tools ?? []));
       } catch {
+        complete = false;
         /* a partial line is not evidence */
       }
     }
-    return [...new Set(names)].filter((n) => typeof n === 'string' && /^[\w:.-]{1,100}$/.test(n)).slice(0, 200);
+    const unique = [...new Set(names)].filter((n) => typeof n === 'string' && /^[\w:.-]{1,100}$/.test(n));
+    const tools = unique.slice(0, CATALOG_LIMIT);
+    tools.complete = complete && unique.length <= CATALOG_LIMIT;
+    return tools;
   } finally {
     closeSync(fd);
   }
@@ -129,12 +149,27 @@ export function runOptimize(args, cwd = process.cwd()) {
     config: state.config,
     facts: state.facts.length,
     hosts: Object.fromEntries(
-      HOSTS.map((h) => [h, { completedSessions: state.hosts[h]?.completed ?? 0, proposed: capabilityProposals(state, h, configuredServers(h)) }]),
+      HOSTS.map((h) => [
+        h,
+        {
+          completedSessions: state.hosts[h]?.completed ?? 0,
+          proposed: capabilityProposals(state, h, configuredServers(h)),
+          catalogComplete: state.hosts[h]?.catalogComplete ?? null,
+          learningEvidence: state.hosts[h]?.learningEvidence ?? null,
+        },
+      ]),
     ),
     receipts: state.receipts,
     measurements: {
       injectedContext: state.measurements ?? { injections: 0, contextChars: 0, estimatedContextTokens: 0 },
       modelCalls: state.model?.receipts ?? [],
+      learning: {
+        eligibleChecks: Object.values(state.hosts).reduce((n, h) => n + (h.learningEvidence?.eligible ?? 0), 0),
+        activeFacts: state.facts.filter((f) => f.state === 'active').length,
+        scope: 'Counters start with this version; unsupported and ambiguous command text is never retained.',
+        requirements:
+          'Learning needs allowlisted checks with definite success and three independent sessions; model learning also requires the opt-in model backend. Inspect per-host learningEvidence for excluded or ambiguous calls.',
+      },
       taskSuccess: 'unmeasured; completed sessions are not proof of task success',
       netSavings: 'unproven; injected context and model calls add overhead',
     },

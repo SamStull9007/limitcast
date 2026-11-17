@@ -24,7 +24,7 @@ export function forecast(samples, now) {
 
   const window = sorted.filter((s) => Math.abs(s.reset - last.reset) <= RESET_JITTER_S);
   const recent = window.filter((s) => s.t >= now - RECENT_MS);
-  const short = slopePerHour(recent.length >= 2 ? recent : window);
+  const short = slopePerHour(recent);
   // NEAR: so close to the limit that one heavy turn can finish it, even with no burn rate to go on yet.
   const calm = last.pct >= NEAR_PCT ? 'NEAR' : 'OK';
   const runout = (/** @type {number|null} */ r) => (r === null || r <= 0 ? null : last.t + ((100 - last.pct) / r) * 3600_000);

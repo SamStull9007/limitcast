@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Fix: Claude trim parses activity independently of JSON whitespace and refuses cuts when usage evidence is missing or incomplete, including cached histories.
+- Fix: unchanged usage keeps one fresh observation per series without appending duplicate history; old short-window burn rates and overdue predictions cannot authorize forecast holds.
+- Fix: Codex/Grok MCP proposals require five completed sessions that observed the particular server. Removed and re-added servers start a new evidence window.
+- Fix: Claude trim validates nested settings and undo entries before writing, preventing false successful changes on unsupported schemas.
+- Fix: Claude transcript ingestion shares the 400-tool catalog limit and exposes incomplete bounded reads; incomplete catalogs do not count toward pruning eligibility.
+- Measurement: optimizer status counts eligible, successful, unsupported and ambiguous check observations without retaining excluded command text. Historical counters remain unknown; effectiveness and net savings remain unproven.
+- Validation: add regression fixtures for all audited code paths and exercise the five installed optimizer adapter contracts from the packed package.
+
 ## 0.20.0 — 2026-11-15
 
 - Fix: MCP arguments are never rewritten or denied by the generic result limiter. Large-output notices remain; only native Read/Grep controls are enforced.

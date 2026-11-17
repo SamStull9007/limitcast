@@ -61,20 +61,24 @@ export function claudeUsage(line, seen, session) {
  * @param {import('./trim.mjs').Activity} act
  */
 export function claudeActivity(line, act) {
-  if (line.includes('<command-name>')) {
-    for (const m of line.matchAll(/<command-name>\/?([^<\s]+)<\/command-name>/g)) act.skills.add(m[1]);
-  }
-  if (!line.includes('"name":"Skill"') && !line.includes('"name":"mcp__')) return;
+  if (!line.trim()) return;
   let ev;
   try {
     ev = JSON.parse(line);
   } catch {
+    act.complete = false;
     return;
   }
   const content = ev?.message?.content;
+  if (typeof content === 'string') for (const m of content.matchAll(/<command-name>\/?([^<\s]+)<\/command-name>/g)) act.skills.add(m[1]);
   if (!Array.isArray(content)) return;
+  if (ev.type === 'assistant') act.observed = true;
   for (const c of content) {
-    if (c?.type !== 'tool_use' || typeof c.name !== 'string') continue;
+    if (c?.type !== 'tool_use') continue;
+    if (typeof c.name !== 'string') {
+      act.complete = false;
+      continue;
+    }
     if (c.name === 'Skill' && c.input?.skill) act.skills.add(String(c.input.skill));
     else if (c.name.startsWith('mcp__')) act.mcp.add(c.name.split('__')[1] ?? '');
   }
@@ -226,6 +230,10 @@ function summaryKind(dir) {
  * @returns {Promise<Usage[]>}
  */
 export async function readUsage(since, roots = {}, activity) {
+  if (activity) {
+    activity.observed = false;
+    activity.complete = true;
+  }
   /** @type {Usage[]} */
   const out = [];
   // Parsed transcripts are cached by size and mtime: only new or changed ones are read again.
@@ -251,17 +259,19 @@ export async function readUsage(since, roots = {}, activity) {
       const seen = new Set();
       const session = basename(f, '.jsonl');
       /** @type {import('./trim.mjs').Activity} */
-      const act = { skills: new Set(), mcp: new Set() };
+      const act = { skills: new Set(), mcp: new Set(), observed: false, complete: true };
       const u = [];
       for await (const line of lines(f)) {
         claudeActivity(line, act);
         const x = claudeUsage(line, seen, session);
         if (x) u.push(x);
       }
-      return { u, a: { skills: [...act.skills], mcp: [...act.mcp] } };
+      return { u, a: { skills: [...act.skills], mcp: [...act.mcp], observed: act.observed, complete: act.complete } };
     });
     for (const u of e.u) if (u.t >= since) out.push(u);
     if (activity && e.a) {
+      activity.observed ||= e.a.observed === true;
+      activity.complete &&= e.a.complete === true;
       for (const s of e.a.skills) activity.skills.add(s);
       for (const m of e.a.mcp) activity.mcp.add(m);
     }
@@ -296,7 +306,7 @@ export async function readUsage(since, roots = {}, activity) {
 }
 
 const CACHE_KEEP_MS = 35 * 86400_000;
-const USAGE_CACHE_VERSION = 4; // 4: Codex subagent rollouts are sidechain usage of their parent thread; 3: Grok records carry costUsd; 2: records carry cacheWrite1h. An older cache is read again
+const USAGE_CACHE_VERSION = 5; // 5: Claude activity completeness; older entries must be read again before pruning.
 const usageCacheFile = () => join(stateDir(), 'usage-cache.json');
 
 /** @returns {Record<string, {s:number, m:number, u:Usage[], a?:{skills:string[], mcp:string[]}}>} */

@@ -6,7 +6,11 @@ import { memoryDir } from './memory.mjs';
 import { fmt } from './report.mjs';
 
 /** @typedef {import('./usage.mjs').Usage} Usage */
-/** @typedef {{skills:Set<string>, mcp:Set<string>}} Activity  skills and MCP servers used in the period */
+/** @typedef {{skills:Set<string>, mcp:Set<string>, observed?:boolean, complete?:boolean}} Activity  skills and MCP servers used in the period */
+
+export const activityKnown = (/** @type {Activity} */ activity) => activity.observed !== false && activity.complete !== false;
+export const UNKNOWN_ACTIVITY =
+  'Usage history is missing or incomplete; no configuration changes are authorized. Unverified servers and skills stay on.';
 
 const DESC_CAP = 1536; // Claude Code's default skillListingMaxDescChars
 
@@ -129,9 +133,11 @@ const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '_');
  * @param {Activity} used
  */
 export function savings(c, used) {
-  const unusedSkills = c.skills.filter((s) => !s.hidden && !skillUsed(s.name, used.skills)).sort((a, b) => b.tokens - a.tokens);
+  const unusedSkills = activityKnown(used)
+    ? c.skills.filter((s) => !s.hidden && !skillUsed(s.name, used.skills)).sort((a, b) => b.tokens - a.tokens)
+    : [];
   const usedMcp = new Set([...used.mcp].map(norm));
-  const unusedMcp = c.mcp.filter((s) => !usedMcp.has(norm(s)));
+  const unusedMcp = activityKnown(used) ? c.mcp.filter((s) => !usedMcp.has(norm(s))) : [];
   return { unusedSkills, skillTokens: unusedSkills.reduce((a, s) => a + s.tokens, 0), unusedMcp };
 }
 
@@ -143,6 +149,7 @@ export function savings(c, used) {
  * @param {boolean} [share] totals only, including when no startup transcript is available
  */
 export function trimReport(base, c, used, days, share = false) {
+  if (share && !activityKnown(used)) return `${UNKNOWN_ACTIVITY}\nTotals unavailable. https://limitcast.dev`;
   const s = savings(c, used);
   const fileTokens = c.files.reduce((a, f) => a + f.tokens, 0);
   const visible = c.skills.filter((k) => !k.hidden);
@@ -156,6 +163,7 @@ export function trimReport(base, c, used, days, share = false) {
       'Totals only; no configuration names or paths. https://limitcast.dev',
     ].join('\n');
   const lines = ['# limitcast trim', ''];
+  if (!activityKnown(used)) lines.push(UNKNOWN_ACTIVITY, '');
   if (base) {
     lines.push(
       `Your recorded Claude Code sessions start at **${fmt(base.median)} tokens** before your first message (median of ${base.sessions} interactive sessions, max ${fmt(base.max)}).`,
@@ -172,7 +180,7 @@ export function trimReport(base, c, used, days, share = false) {
       `- **Hide ${s.unusedSkills.length} skills you haven't used in ${days} days** (~${fmt(s.skillTokens)} tokens): ${names.join(', ')}${s.unusedSkills.length > 12 ? ', ...' : ''}.`,
       '  In `~/.claude/settings.json`, set each to `"user-invocable-only"` under `skillOverrides`: `/name` still works, the model just stops seeing it.',
     );
-  } else if (visible.length) lines.push(`- Every visible skill was used in the last ${days} days.`);
+  } else if (visible.length && activityKnown(used)) lines.push(`- Every visible skill was used in the last ${days} days.`);
   if (s.unusedMcp.length) {
     lines.push(
       `- **Disable ${s.unusedMcp.length} MCP servers you haven't used in ${days} days**: ${s.unusedMcp.join(', ')}.`,
@@ -210,6 +218,7 @@ const tok = (/** @type {number} */ chars) => Math.round(chars / 4);
  * @param {Activity|null} [usedMonth] servers used in 30 days. When set, only servers missing here are removable.
  */
 export function measuredSavings(pieces, used, keep = [], usedMonth = null) {
+  const verified = activityKnown(used) && activityKnown(usedMonth ?? used);
   const usedMcp = new Set([...used.mcp].map(norm));
   const month = usedMonth ? new Set([...usedMonth.mcp].map(norm)) : null;
   // Instructions and tool names spell a server differently ("claude.ai Postman" / "claude_ai_Postman"): merge by normalized name.
@@ -227,10 +236,10 @@ export function measuredSavings(pieces, used, keep = [], usedMonth = null) {
   const skills = pieces.filter((p) => p.group === 'Skill listing' && !skillUsed(p.name, used.skills)).sort((a, b) => b.chars - a.chars);
   const kept = [...mcp.values(), ...skills].filter((x) => keep.some((k) => norm(k) === norm(x.name))).map((x) => x.name);
   const isKept = (/** @type {{name:string}} */ x) => kept.includes(x.name);
-  const unusedMcp = [...mcp.values()].filter((m) => !isKept(m)).sort((a, b) => b.chars - a.chars);
+  const unusedMcp = verified ? [...mcp.values()].filter((m) => !isKept(m)).sort((a, b) => b.chars - a.chars) : [];
   const standingMcp = month ? unusedMcp.filter((m) => month.has(norm(m.name))) : [];
-  const staleMcp = month ? unusedMcp.filter((m) => !month.has(norm(m.name))) : unusedMcp;
-  const unusedSkills = skills.filter((s) => !isKept(s));
+  const staleMcp = verified ? (month ? unusedMcp.filter((m) => !month.has(norm(m.name))) : unusedMcp) : [];
+  const unusedSkills = verified ? skills.filter((s) => !isKept(s)) : [];
   const chars = staleMcp.reduce((a, m) => a + m.chars, 0) + unusedSkills.reduce((a, s) => a + s.chars, 0);
   return { unusedMcp, standingMcp, staleMcp, unusedSkills, tokens: tok(chars), kept };
 }
@@ -248,6 +257,7 @@ export function startupReport(base, b, used, days, keep = [], usedMonth = null) 
   const s = measuredSavings(b.pieces, used, keep, usedMonth);
   const median = base?.median ?? 0;
   const lines = ['# limitcast trim', ''];
+  if (!activityKnown(used) || !activityKnown(usedMonth ?? used)) lines.push(UNKNOWN_ACTIVITY, '');
   if (base) {
     lines.push(
       `Your recorded Claude Code sessions start at **${fmt(median)} tokens** before your first message (median of ${base.sessions} interactive sessions).`,
@@ -294,7 +304,8 @@ export function startupReport(base, b, used, days, keep = [], usedMonth = null) 
     );
   }
   if (s.kept.length) lines.push(`- **Would keep ${s.kept.length} on your keep-list** (\`trim --apply\` never touches them): ${s.kept.join(', ')}.`);
-  else if (!s.unusedMcp.length && !s.unusedSkills.length) lines.push('- Nothing unused. Everything that loads was used in the period.');
+  else if (!s.unusedMcp.length && !s.unusedSkills.length && activityKnown(used) && activityKnown(usedMonth ?? used))
+    lines.push('- Nothing unused. Everything that loads was used in the period.');
 
   /** @type {Map<string, number>} */
   const groups = new Map();
@@ -334,6 +345,7 @@ export function startupReport(base, b, used, days, keep = [], usedMonth = null) 
  * @param {Activity|null} [usedMonth] servers used in 30 days
  */
 export function shareSummary(base, b, used, days, keep = [], usedMonth = null) {
+  if (!activityKnown(used) || !activityKnown(usedMonth ?? used)) return `${UNKNOWN_ACTIVITY}\nTotals unavailable. https://limitcast.dev`;
   const s = measuredSavings(b.pieces, used, keep, usedMonth);
   /** @type {Map<string, number>} */
   const groups = new Map();

@@ -14,6 +14,7 @@ Implementation contract reviewed by Codex, 2026-11-08. Owner: Limitcast maintain
 | Rule | Command | When | Verdict |
 | --- | --- | --- | --- |
 | Existing and new behavior passes; baseline was 234 tests, with one machine-dependent launcher fixture repaired in this change | `node --test` | Task end and CI | Block |
+| Production-only coverage holds the measured repair baseline (95.12% lines, 82.03% branches, 91.53% functions on Node 24/macOS; integer floors 95/82/91) | `node --test --experimental-test-coverage --test-coverage-include='src/**' --test-coverage-include='bin/**' --test-coverage-lines=95 --test-coverage-branches=82 --test-coverage-functions=91` | Task end on Node 24/macOS; replaces the plain test invocation only in that existing CI matrix cell | Block |
 | Repository lint and formatting pass without new suppressions | `npx --yes @biomejs/biome@2.6.3 ci .` | Task end and CI | Block |
 | Public content and privacy checks pass, including newly staged files | `node --test test/public-content.test.mjs` | Before commit | Block |
 | Optimizer concurrency, safety and lifecycle regressions pass | `node --test test/optimize.test.mjs` | Task end | Block |
@@ -31,3 +32,5 @@ The rollout baseline was zero ERROR-level findings across 44 production files (1
 Loop replay decisions are checked with `scripts/optimizer-eval.yaml`. They do not establish real-model task success, subscription savings, or comparative superiority. Package smoke checks run in an isolated home; live host hooks need separate approval and verification before being called active.
 
 No exceptions or lowered thresholds are authorized.
+
+Coverage scope and floors were added under Sam's 2026-11-16 audit-repair authorization. Other Node/OS matrix cells retain the complete test suite and packed-artifact checks. Review this contract with its CI change; the aggregate intentionally excludes test code, generated fixtures and packed copies. A failing floor requires better tests or implementation review, not automatic threshold reduction.

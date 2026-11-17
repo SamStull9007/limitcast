@@ -60,7 +60,7 @@ export function guardDecision(tool, forecasts, now, minutes) {
  */
 function blockingForecast(tool, forecasts, now, minutes) {
   const src = spawnSource(tool);
-  return forecasts.find((f) => f.src === src && f.verdict === 'AT_RISK' && f.wall !== null && f.wall - now <= minutes * 60_000);
+  return forecasts.find((f) => f.src === src && f.verdict === 'AT_RISK' && f.wall !== null && f.wall >= now && f.wall - now <= minutes * 60_000);
 }
 
 /**

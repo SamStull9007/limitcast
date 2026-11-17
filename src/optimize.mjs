@@ -15,7 +15,7 @@ const CAPABILITIES = {
 };
 const validTool = (name) => typeof name === 'string' && /^[\w:.-]{1,100}$/.test(name) && !Object.hasOwn(Object.prototype, name);
 /** The tool catalog a session can declare, per host. Claude sessions with many connectors declare a few hundred tools. */
-const CATALOG_LIMIT = 400;
+export const CATALOG_LIMIT = 400;
 export const normServer = (name) =>
   String(name)
     .toLowerCase()
@@ -193,12 +193,20 @@ export function normalizeEvent(hook, host) {
   const edit = /^(?:Edit|Write|MultiEdit|apply_patch|replace_file_content|write_to_file)$/i.test(name) || /\btools\.apply_patch\s*\(/.test(rawCode);
   const succeeded = Boolean(command) && !failed && (status === 0 || /(?:^|\n)(?:# fail 0|.*\b\d+ passed\b|OK)\s*$/m.test(text));
   const id = hook.tool_use_id ?? hook.toolUseId ?? hook.call_id;
+  const tools = Array.isArray(hook.tools) ? [...new Set(hook.tools.map((t) => (typeof t === 'string' ? t : t?.name)).filter(validTool))] : [];
   return {
     host,
     sid: digest(`${host}:${sid}`).slice(0, 24),
     event,
     name,
     command,
+    checkEvidence: command
+      ? 'eligible'
+      : nested.length > 1
+        ? 'ambiguous'
+        : typeof input?.command === 'string' || typeof input?.cmd === 'string' || nestedCommand
+          ? 'unsupported'
+          : undefined,
     failed,
     succeeded,
     edit,
@@ -210,12 +218,8 @@ export function normalizeEvent(hook, host) {
     capabilities: Object.entries(CAPABILITIES)
       .filter(([, re]) => re.test(`${name} ${JSON.stringify(input).slice(0, 32000)}`))
       .map(([key]) => key),
-    tools: Array.isArray(hook.tools)
-      ? hook.tools
-          .map((t) => (typeof t === 'string' ? t : t?.name))
-          .filter(validTool)
-          .slice(0, CATALOG_LIMIT)
-      : [],
+    tools: tools.slice(0, CATALOG_LIMIT),
+    toolsComplete: Array.isArray(hook.tools) ? hook.tools_complete !== false && tools.length <= CATALOG_LIMIT : undefined,
   };
 }
 
@@ -290,12 +294,31 @@ export function processEvent(state, e, now = Date.now()) {
     state.receipts = [...state.receipts, { kind, host: e.host, session: e.sid, t: now }].slice(-200);
   };
   host.used = [...new Set([...host.used, ...e.capabilities])];
-  if (validTool(e.name) && host.usedTools.length < 200) host.usedTools = [...new Set([...host.usedTools, e.name])];
-  // Servers are tracked on their own: a used server must stay protected after the 200-name tool list fills up.
+  if (validTool(e.name) && host.usedTools.length < CATALOG_LIMIT) host.usedTools = [...new Set([...host.usedTools, e.name])];
+  // Servers are tracked on their own: a used server must stay protected after the tool-name list fills up.
   const server = serverOf(e.host, e.name);
   if (server && (host.usedServers ??= []).length < 200) host.usedServers = [...new Set([...host.usedServers, normServer(server)])];
+  // Record use before catalog discovery, even when the bounded tool-name history is full.
+  if (e.host === 'claude' && validTool(e.name) && Object.keys(host.catalog).length < CATALOG_LIMIT)
+    host.catalog[e.name] ??= { used: true, sessions: [] };
   for (const tool of e.tools) {
     if (Object.keys(host.catalog).length < CATALOG_LIMIT) host.catalog[tool] ??= { used: host.usedTools.includes(tool), sessions: [] };
+  }
+  if (e.toolsComplete !== undefined) host.catalogComplete = e.toolsComplete;
+  if (Array.isArray(e.servers)) {
+    const available = [...new Set(e.servers.filter(validTool).map(normServer).filter(validTool))].slice(0, CATALOG_LIMIT);
+    host.serverSessions ??= {};
+    if (['SessionStart', 'UserPromptSubmit'].includes(e.event)) {
+      for (const name of Object.keys(host.serverSessions)) if (!available.includes(name)) delete host.serverSessions[name];
+      session.servers ??= available;
+    }
+    if (['Stop', 'SessionEnd'].includes(e.event) && !host.finished.includes(e.sid)) {
+      for (const name of session.servers ?? []) {
+        if (!available.includes(name)) continue;
+        if (!Object.hasOwn(host.serverSessions, name) && Object.keys(host.serverSessions).length >= CATALOG_LIMIT) continue;
+        host.serverSessions[name] = [...new Set([...(host.serverSessions[name] ?? []), e.sid])].slice(-5);
+      }
+    }
   }
   if (Object.hasOwn(host.catalog, e.name)) host.catalog[e.name].used = true;
   if (e.event === 'SessionStart' || (e.host === 'grok' && /^PostToolUse(?:Failure)?$/.test(e.event) && !session.injected)) {
@@ -320,12 +343,18 @@ export function processEvent(state, e, now = Date.now()) {
     if (!host.finished.includes(e.sid)) {
       host.finished = [...host.finished, e.sid].slice(-1000);
       host.completed++;
-      for (const name of e.tools) {
+      for (const name of e.toolsComplete === false ? [] : e.tools) {
         const tool = host.catalog[name];
         if (tool) tool.sessions = [...new Set([...tool.sessions, e.sid])].slice(-5);
       }
     }
   } else if (/^PostToolUse(?:Failure)?$/.test(e.event)) {
+    if (e.checkEvidence) {
+      const evidence = (host.learningEvidence ??= { eligible: 0, passed: 0, failed: 0, unsupported: 0, ambiguous: 0 });
+      evidence[e.checkEvidence]++;
+      if (e.command && e.succeeded) evidence.passed++;
+      if (e.command && e.failed) evidence.failed++;
+    }
     const turn = session.turn;
     turn.calls++;
     turn.trace = [
@@ -432,7 +461,15 @@ export function capabilityProposals(state, host, servers = []) {
         .map(normServer),
     ]);
     const kept = new Set(keep.map(normServer));
-    return servers.filter((s) => s.enabled !== false && !used.has(normServer(s.name)) && !kept.has(normServer(s.name))).map((s) => s.name);
+    return servers
+      .filter(
+        (s) =>
+          s.enabled !== false &&
+          !used.has(normServer(s.name)) &&
+          !kept.has(normServer(s.name)) &&
+          (h.serverSessions?.[normServer(s.name)]?.length ?? 0) >= 5,
+      )
+      .map((s) => s.name);
   };
   if (host === 'codex') return [...Object.keys(CAPABILITIES).filter((c) => !h.used.includes(c) && !keep.includes(c)), ...idleServers()];
   if (host === 'grok') return idleServers();

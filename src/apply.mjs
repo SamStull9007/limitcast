@@ -106,6 +106,8 @@ export function installedPlugins(dir = configDir()) {
  *   localSkills: folder names of personal and project skills; keep: the `trim keep` list, never hidden or disabled
  */
 export function planTrim({ skills, mcp, cwd, settings, claudeJson, plugins, projectMcpJson, localSkills, keep = [] }) {
+  validateTrimSettings(settings);
+  validateTrimSettings(claudeJson);
   // "x:y" is a plugin skill (namespaced by its plugin) unless x is one of your own skill folders with nested skills.
   // Plugins can load from places installed_plugins.json doesn't list, so the namespace alone decides.
   const isPluginSkill = (/** @type {string} */ n) => n.includes(':') && !localSkills.has(n.split(':')[0]);
@@ -144,10 +146,33 @@ function backup(path) {
   if (existsSync(path)) copyFileSync(path, `${path}.limitcast-backup-${new Date().toISOString().replace(/[:.]/g, '-')}`);
 }
 
+function validateTrimSettings(cfg) {
+  const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (!object(cfg)) throw new Error('invalid settings object; original configuration preserved');
+  for (const key of ['skillOverrides', 'projects'])
+    if (Object.hasOwn(cfg, key) && !object(cfg[key])) throw new Error(`invalid ${key}; original configuration preserved`);
+  for (const project of Object.values(cfg.projects ?? {})) {
+    if (!object(project)) throw new Error('invalid project settings; original configuration preserved');
+    const list = project.disabledMcpServers;
+    if (list !== undefined && (!Array.isArray(list) || list.some((name) => typeof name !== 'string')))
+      throw new Error('invalid disabledMcpServers; original configuration preserved');
+  }
+  return cfg;
+}
+
 /** @returns {{at:number, cwd:string, skills:{name:string, prev?:string}[], mcp:string[]}[]} */
 export function loadLedger() {
   const entries = readLedger(ledgerPath());
-  if (entries.some((e) => typeof e.cwd !== 'string' || !Array.isArray(e.skills) || !Array.isArray(e.mcp)))
+  if (
+    entries.some(
+      (e) =>
+        typeof e.cwd !== 'string' ||
+        !Array.isArray(e.skills) ||
+        !Array.isArray(e.mcp) ||
+        e.skills.some((s) => !s || typeof s.name !== 'string' || (s.prev !== undefined && typeof s.prev !== 'string')) ||
+        e.mcp.some((name) => typeof name !== 'string'),
+    )
+  )
     throw new Error('invalid Claude trim ledger');
   return entries;
 }
@@ -166,6 +191,7 @@ export function applyTrim(plan, { cwd, now, settings = settingsPath(), claudeJso
     if (plan.hide.length) {
       updates.push(
         editJson(settings, (cfg) => {
+          validateTrimSettings(cfg);
           cfg.skillOverrides ??= {};
           for (const name of plan.hide) {
             if (cfg.skillOverrides[name] !== undefined && cfg.skillOverrides[name] !== 'on') continue;
@@ -178,6 +204,7 @@ export function applyTrim(plan, { cwd, now, settings = settingsPath(), claudeJso
     if (plan.disable.length) {
       updates.push(
         editJson(claudeJson, (cj) => {
+          validateTrimSettings(cj);
           cj.projects ??= {};
           cj.projects[cwd] ??= {};
           const list = (cj.projects[cwd].disabledMcpServers ??= []);
@@ -212,6 +239,7 @@ export function undoTrim({ settings = settingsPath(), claudeJson = claudeJsonPat
     if (last.skills.length && existsSync(settings)) {
       updates.push(
         editJson(settings, (cfg) => {
+          validateTrimSettings(cfg);
           for (const s of last.skills) {
             if (cfg.skillOverrides?.[s.name] !== 'user-invocable-only') continue;
             if (s.prev === undefined) delete cfg.skillOverrides[s.name];
@@ -223,6 +251,7 @@ export function undoTrim({ settings = settingsPath(), claudeJson = claudeJsonPat
     if (last.mcp.length && existsSync(claudeJson)) {
       updates.push(
         editJson(claudeJson, (cj) => {
+          validateTrimSettings(cj);
           const p = cj.projects?.[last.cwd];
           if (p?.disabledMcpServers) p.disabledMcpServers = p.disabledMcpServers.filter((/** @type {string} */ n) => !last.mcp.includes(n));
         }),
@@ -247,7 +276,7 @@ export function reapplyTrim({ settings = settingsPath(), claudeJson = claudeJson
     const out = { reapplied: /** @type {string[]} */ ([]), released: /** @type {string[]} */ ([]) };
     if (!last) return out;
     if (last.skills.length) {
-      const cfg = existsSync(settings) ? readSettings(settings) : {};
+      const cfg = validateTrimSettings(existsSync(settings) ? readSettings(settings) : {});
       const gone = last.skills.filter((s) => cfg.skillOverrides?.[s.name] !== 'user-invocable-only');
       if (gone.length) {
         last.skills = last.skills.filter((s) => !gone.includes(s));
@@ -255,7 +284,7 @@ export function reapplyTrim({ settings = settingsPath(), claudeJson = claudeJson
       }
     }
     if (last.mcp.length) {
-      const cj = existsSync(claudeJson) ? readSettings(claudeJson) : {};
+      const cj = validateTrimSettings(existsSync(claudeJson) ? readSettings(claudeJson) : {});
       const list = cj.projects?.[last.cwd]?.disabledMcpServers ?? [];
       const gone = last.mcp.filter((n) => !list.includes(n));
       if (gone.length) {

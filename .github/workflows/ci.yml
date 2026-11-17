@@ -24,7 +24,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node }}
-      - run: node --test
+      - if: matrix.os != 'macos-latest' || matrix.node != 24
+        run: node --test
+      - if: matrix.os == 'macos-latest' && matrix.node == 24
+        run: node --test --experimental-test-coverage --test-coverage-include='src/**' --test-coverage-include='bin/**' --test-coverage-lines=95 --test-coverage-branches=82 --test-coverage-functions=91
       - run: node scripts/package-smoke.mjs
   security:
     runs-on: ubuntu-latest

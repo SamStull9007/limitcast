@@ -194,7 +194,7 @@ const hostState = (host, extra = {}) => ({
 });
 
 test('Grok proposes MCP servers no session in the repository called, and a keep-list entry protects one', () => {
-  const state = hostState('grok', { usedTools: ['basic-memory__search_notes', 'Read'] });
+  const state = hostState('grok', { usedTools: ['basic-memory__search_notes', 'Read'], serverSessions: { demo51_mcp: ['a', 'b', 'c', 'd', 'e'] } });
   const servers = [{ name: 'basic-memory' }, { name: 'demo51-mcp' }, { name: 'firecrawl', enabled: false }];
   assert.deepEqual(capabilityProposals(state, 'grok', servers), ['demo51-mcp']);
   state.config.keep.push('demo51-mcp');
@@ -204,7 +204,11 @@ test('Grok proposes MCP servers no session in the repository called, and a keep-
 });
 
 test('Codex proposes unused MCP servers beside its built-in packages, matching hyphens to underscores', () => {
-  const state = hostState('codex', { used: ['image_media', 'collaboration'], usedTools: ['mcp__tool_router__call_tool'] });
+  const state = hostState('codex', {
+    used: ['image_media', 'collaboration'],
+    usedTools: ['mcp__tool_router__call_tool'],
+    serverSessions: { deja: ['a', 'b', 'c', 'd', 'e'] },
+  });
   const servers = [{ name: 'tool-router' }, { name: 'deja' }];
   assert.deepEqual(capabilityProposals(state, 'codex', servers), ['goals', 'deja']);
 });
@@ -223,7 +227,7 @@ test('hook events record which MCP server each host called, on their own list th
   const codex = hostState('codex');
   processEvent(codex, normalizeEvent(call('codex', 'mcp__deja__deja', 2), 'codex'));
   assert.deepEqual(codex.hosts.codex.usedServers, ['deja']);
-  const full = hostState('grok', { usedTools: Array.from({ length: 200 }, (_, i) => `x__t${i}`) });
+  const full = hostState('grok', { usedTools: Array.from({ length: 400 }, (_, i) => `x__t${i}`) });
   processEvent(full, normalizeEvent(call('grok', 'late-server__tool', 3), 'grok'));
   assert.ok(full.hosts.grok.usedServers.includes('late_server'), 'a server called after the tool list filled up still counts as used');
 });
@@ -272,7 +276,9 @@ test('applying Grok MCP servers is journaled, validated, undoable, and rolled ba
   process.env.GROK_HOME = tmp('lc-parity-grok-home-');
   writeFileSync(join(process.env.GROK_HOME, 'config.toml'), '[mcp_servers.demo51-mcp]\ncommand = "x"\n\n[mcp_servers.basic-memory]\ncommand = "y"\n');
   const r = gitRepo();
-  changeOptimization(r, (s) => Object.assign(s, hostState('grok', { usedTools: ['basic-memory__search_notes'] })));
+  changeOptimization(r, (s) =>
+    Object.assign(s, hostState('grok', { usedTools: ['basic-memory__search_notes'], serverSessions: { demo51_mcp: ['a', 'b', 'c', 'd', 'e'] } })),
+  );
   assert.throws(() => applyCapabilities(r, 'grok', ['basic-memory'], { validate() {} }), /protected, used, or lacks evidence/);
   const seen = [];
   const out = applyCapabilities(r, 'grok', ['demo51-mcp'], { validate: (_repo, names = []) => seen.push(names.slice()) });
@@ -287,7 +293,9 @@ test('applying Grok MCP servers is journaled, validated, undoable, and rolled ba
   assert.ok(readOptimization(r).config.keep.includes('demo51-mcp'), 'a restored server is protected from later proposals');
 
   const ignored = gitRepo();
-  changeOptimization(ignored, (s) => Object.assign(s, hostState('grok', { usedTools: [] })));
+  changeOptimization(ignored, (s) =>
+    Object.assign(s, hostState('grok', { usedTools: [], serverSessions: { demo51_mcp: ['a', 'b', 'c', 'd', 'e'] } })),
+  );
   assert.throws(
     () =>
       applyCapabilities(ignored, 'grok', ['demo51-mcp'], {
@@ -334,7 +342,9 @@ test('Codex applies MCP servers and built-in packages together, and the host che
   process.env.CODEX_HOME = codexHome;
   writeFileSync(join(codexHome, 'config.toml'), '[mcp_servers.deja]\ncommand = "x"\n');
   const r = gitRepo();
-  changeOptimization(r, (s) => Object.assign(s, hostState('codex', { used: ['image_media', 'collaboration'] })));
+  changeOptimization(r, (s) =>
+    Object.assign(s, hostState('codex', { used: ['image_media', 'collaboration'], serverSessions: { deja: ['a', 'b', 'c', 'd', 'e'] } })),
+  );
   const out = applyCapabilities(r, 'codex', ['goals', 'deja'], { validate() {} });
   const text = readFileSync(out.path, 'utf8');
   assert.match(text, /\[features\]\ngoals = false/);
