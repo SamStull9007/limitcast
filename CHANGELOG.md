@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.20.1 — 2026-11-17
 
 - Fix: Claude trim parses activity independently of JSON whitespace and refuses cuts when usage evidence is missing or incomplete, including cached histories.
 - Fix: unchanged usage keeps one fresh observation per series without appending duplicate history; old short-window burn rates and overdue predictions cannot authorize forecast holds.
