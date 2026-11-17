@@ -35,6 +35,6 @@
     "type": "git",
     "url": "git+https://github.com/SamStull9007/limitcast.git"
   },
-  "author": "Sam Stull",
+  "author": "Sam Stull <support@limitcast.dev> (https://limitcast.dev/sam-stull/)",
   "license": "MIT"
 }
