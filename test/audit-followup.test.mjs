@@ -32,7 +32,15 @@ test('Claude activity distinguishes observed, missing and incomplete histories a
   await readUsage(0, roots, absent);
   assert.equal(absent.observed, false);
   assert.match(trimReport(null, { files: [], skills: [], mcp: [] }, absent, 14, true), /missing or incomplete/);
-  const row = { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'mcp__synthetic__query', input: {} }] } };
+  const row = {
+    type: 'assistant',
+    message: {
+      content: [
+        { type: 'tool_use', name: 'mcp__synthetic__query', input: {} },
+        { type: 'text', text: '<command-name>/used-skill</command-name>' },
+      ],
+    },
+  };
   writeFileSync(file, `${JSON.stringify(row).replaceAll(':', ': ')}\n`);
   for (let i = 0; i < 2; i++) {
     const activity = used();
@@ -40,6 +48,7 @@ test('Claude activity distinguishes observed, missing and incomplete histories a
     assert.equal(activity.complete, true);
     assert.equal(activity.observed, true);
     assert.deepEqual([...activity.mcp], ['synthetic']);
+    assert.deepEqual([...activity.skills], ['used-skill']);
   }
   writeFileSync(file, `${JSON.stringify(row)}\n{"type":"assistant",`);
   for (let i = 0; i < 2; i++) {

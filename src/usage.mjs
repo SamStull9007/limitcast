@@ -70,7 +70,13 @@ export function claudeActivity(line, act) {
     return;
   }
   const content = ev?.message?.content;
-  if (typeof content === 'string') for (const m of content.matchAll(/<command-name>\/?([^<\s]+)<\/command-name>/g)) act.skills.add(m[1]);
+  const texts =
+    typeof content === 'string'
+      ? [content]
+      : Array.isArray(content)
+        ? content.filter((c) => c?.type === 'text' && typeof c.text === 'string').map((c) => c.text)
+        : [];
+  for (const text of texts) for (const m of text.matchAll(/<command-name>\/?([^<\s]+)<\/command-name>/g)) act.skills.add(m[1]);
   if (!Array.isArray(content)) return;
   if (ev.type === 'assistant') act.observed = true;
   for (const c of content) {
@@ -243,7 +249,7 @@ export async function readUsage(since, roots = {}, activity) {
   const next = {};
   /**
    * @param {string} file
-   * @param {(file:string)=>Promise<{u:Usage[], a?:{skills:string[], mcp:string[]}}>} parse
+   * @param {(file:string)=>Promise<{u:Usage[], a?:{skills:string[], mcp:string[], observed:boolean, complete:boolean}}>} parse
    */
   const cached = async (file, parse) => {
     const st = statSync(file);
@@ -306,10 +312,10 @@ export async function readUsage(since, roots = {}, activity) {
 }
 
 const CACHE_KEEP_MS = 35 * 86400_000;
-const USAGE_CACHE_VERSION = 5; // 5: Claude activity completeness; older entries must be read again before pruning.
+const USAGE_CACHE_VERSION = 6; // 6: text-block slash commands; 5: activity completeness. Re-read older entries before pruning.
 const usageCacheFile = () => join(stateDir(), 'usage-cache.json');
 
-/** @returns {Record<string, {s:number, m:number, u:Usage[], a?:{skills:string[], mcp:string[]}}>} */
+/** @returns {Record<string, {s:number, m:number, u:Usage[], a?:{skills:string[], mcp:string[], observed:boolean, complete:boolean}}>} */
 function loadUsageCache() {
   try {
     const d = JSON.parse(readFileSync(usageCacheFile(), 'utf8'));
