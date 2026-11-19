@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fix: the shared PostToolUse notice checks every tool result. A large write, edit, search, or directory listing is reported once per tool per session, and Codex and Grok record its size. An alerts-only install still follows its hook matcher.
+
 ## 0.20.3 — 2026-11-18
 
 - Fix: optimizer hooks lock their own state. They no longer take the settings lock or read `config.json`, so a trim or a broken settings file cannot stall or skip them. An optimizer update that does not change the state is not rewritten.

@@ -106,7 +106,7 @@ import {
   windowStart,
 } from '../src/subagents.mjs';
 import { forTerminal } from '../src/term.mjs';
-import { firstFlag, matchesToolNotice, resultTokens, toolKey, toolNotice } from '../src/toolcheck.mjs';
+import { firstFlag, resultTokens, toolKey, toolNotice } from '../src/toolcheck.mjs';
 import { loadLiveStats, loadToolStats, recordToolSize, saveToolStats, toolLimitDecision, toolStats } from '../src/toollimit.mjs';
 import { activityKnown, baseline, contributors, measuredSavings, shareSummary, startupReport, trimReport, UNKNOWN_ACTIVITY } from '../src/trim.mjs';
 import { claudeRoot, grokRoot, readUsage } from '../src/usage.mjs';
@@ -225,15 +225,15 @@ const days = () => {
 };
 
 /**
- * The large-result notice for one PostToolUse payload. `matched` limits it to the installed matcher, because the
- * optimizer hook runs for every tool. Returns the user-facing line, or null. The caller catches a failure.
+ * The large-result notice for one PostToolUse payload. The optimizer already paid for this process, so every tool
+ * is checked. A standalone `tool-check` hook is still limited by its matcher. Returns the user-facing line, or null.
+ * The caller catches a failure.
  * @param {any} hook
  * @param {'claude'|'codex'|'grok'} host
- * @param {boolean} matched
  */
-function runToolCheck(hook, host, matched) {
+function runToolCheck(hook, host) {
   const name = String(hook?.tool_name ?? hook?.toolName ?? '');
-  if (!name || (matched && !matchesToolNotice(name, host))) return null;
+  if (!name) return null;
   const response = hook?.tool_response ?? hook?.tool_result ?? hook?.toolResult;
   if (host !== 'claude') recordToolSize(host, toolKey(name, host), resultTokens(response));
   const notice = toolNotice(
@@ -272,7 +272,7 @@ if (cmd === '_optimize-hook') {
     if (args.includes('--notice')) {
       try {
         if (noticeHost === 'grok') settleGrokReceipts();
-        notice = runToolCheck(hook, noticeHost, true);
+        notice = runToolCheck(hook, noticeHost);
       } catch {
         /* a hook must never break the session */
       }
@@ -542,7 +542,7 @@ if (cmd === '_optimize-hook') {
       const hook = JSON.parse(readStdin());
       const host = hookHost();
       if (host === 'grok') settleGrokReceipts();
-      const notice = runToolCheck(hook, host, false);
+      const notice = runToolCheck(hook, host);
       if (notice) console.log(JSON.stringify({ systemMessage: notice }));
     }
   } catch {

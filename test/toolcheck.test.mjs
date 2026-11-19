@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { install, readSettings, uninstall } from '../src/install.mjs';
-import { firstFlag, matchesToolNotice, resultTokens, tipFor, toolKey, toolNotice } from '../src/toolcheck.mjs';
+import { firstFlag, resultTokens, tipFor, toolKey, toolNotice } from '../src/toolcheck.mjs';
 import { attribute, whyReport } from '../src/where.mjs';
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
@@ -22,15 +22,17 @@ test('resultTokens estimates from size and works on any result shape', () => {
   assert.equal(resultTokens(null), 1);
 });
 
-test('the shared PostToolUse notice matches the installed matchers, including Grok aliases', () => {
-  for (const name of ['Bash', 'Read', 'Grep', 'WebFetch', 'mcp__server__tool']) assert.equal(matchesToolNotice(name, 'claude'), true);
-  assert.equal(matchesToolNotice('Edit', 'claude'), false);
-  assert.equal(matchesToolNotice('Read', 'codex'), false);
-  assert.equal(matchesToolNotice('Bash', 'codex'), true);
-  assert.equal(matchesToolNotice('mcp__server__tool', 'codex'), true);
-  for (const name of ['read_file', 'grep', 'run_terminal_command', 'web_fetch', 'Bash', 'basic-memory__search_notes'])
-    assert.equal(matchesToolNotice(name, 'grok'), true, name);
-  for (const name of ['write', 'search_replace', 'search_tool', 'web_search', 'list_dir']) assert.equal(matchesToolNotice(name, 'grok'), false, name);
+test('a large write, edit, search or listing names a narrower next step', () => {
+  const big = 'x'.repeat(100_000);
+  assert.equal(toolKey('write', 'grok'), 'Write');
+  assert.equal(toolKey('search_replace', 'grok'), 'Edit');
+  assert.equal(toolKey('web_search', 'grok'), 'WebSearch');
+  assert.match(toolNotice('write', big, null, undefined, 'grok'), /change a smaller part of the file/);
+  assert.match(toolNotice('search_replace', big, null, undefined, 'grok'), /replace a smaller span/);
+  assert.match(toolNotice('web_search', big, null, undefined, 'grok'), /narrow the query/);
+  assert.match(toolNotice('list_dir', big, null, undefined, 'grok'), /list a smaller directory/);
+  assert.match(toolNotice('search_tool', big, null, undefined, 'grok'), /use a tighter query/);
+  assert.match(toolNotice('Edit', big, null), /replace a smaller span/);
 });
 
 test('toolKey and tipFor name MCP tools by server and suggest what to ask for', () => {

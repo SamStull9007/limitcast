@@ -352,24 +352,28 @@ test('optimizer and the large-result notice share one PostToolUse command', () =
   );
 });
 
-test('one PostToolUse process can notice a matched Grok result and skip the others', () => {
+test('one PostToolUse process notices every oversized result and records the others', () => {
   const r = repo();
   const state = mkdtempSync(join(tmpdir(), 'lc-opt-notice-run-'));
   const env = { ...process.env, LIMITCAST_STATE: state, LIMITCAST_ALLOW: '', LIMITCAST_TOOL_TOKENS: '100' };
-  const run = (tool) =>
+  const run = (tool, response = 'x'.repeat(800), src = 'grok') =>
     JSON.parse(
-      execFileSync(process.execPath, [bin, '_optimize-hook', '--src', 'grok', '--notice'], {
+      execFileSync(process.execPath, [bin, '_optimize-hook', '--src', src, '--notice'], {
         cwd: r.root,
         env,
         encoding: 'utf8',
-        input: JSON.stringify(hook('PostToolUse', { cwd: r.root, tool_name: tool, tool_response: 'x'.repeat(800) }, 'notice-session')),
+        input: JSON.stringify(hook('PostToolUse', { cwd: r.root, tool_name: tool, tool_response: response }, 'notice-session')),
       }),
     );
   assert.match(run('read_file').systemMessage, /read_file/);
+  assert.match(run('write').systemMessage, /smaller part of the file/);
+  assert.equal(run('write').systemMessage, undefined);
+  assert.match(run('search_tool', 'x'.repeat(40)).systemMessage ?? '', /^$/);
   const sizes = readFileSync(join(state, 'tool-sizes-grok.jsonl'), 'utf8');
   assert.match(sizes, /"k":"Read"/);
-  assert.equal(run('write').systemMessage, undefined);
-  assert.equal(readFileSync(join(state, 'tool-sizes-grok.jsonl'), 'utf8'), sizes);
+  assert.match(sizes, /"k":"Write"/);
+  assert.match(sizes, /"k":"search_tool"/);
+  assert.match(run('Edit', 'x'.repeat(800), 'claude').systemMessage, /Edit/);
 });
 
 test('optimizer installation is idempotent and uninstall preserves unrelated host hooks', () => {
