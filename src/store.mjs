@@ -56,11 +56,17 @@ function releaseLock(lock, owner) {
   }
 }
 
-/** Serialize settings and trim transactions. Publish a populated owner directory atomically; reclaim only dead owners. */
-export function withStateLock(change) {
+/**
+ * Serialize one state file. Publish a populated owner directory atomically; reclaim only dead owners.
+ * The default lock is settings (`config.json`). A caller that already holds one lock must not take another.
+ * @param {() => any} change
+ * @param {string} [lockName]
+ */
+export function withStateLock(change, lockName = 'config.json.lock') {
+  if (!/^[\w.-]+$/.test(lockName)) throw new Error('invalid state lock name');
   const dir = stateDir();
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const lock = join(dir, 'config.json.lock');
+  const lock = join(dir, lockName);
   const owner = `${process.pid}-${randomUUID()}`;
   const candidate = `${lock}.${owner}`;
   mkdirSync(candidate, { mode: 0o700 });
@@ -90,7 +96,13 @@ export function withStateLock(change) {
       } catch (error) {
         if (error.code !== 'ENOENT') throw error;
       }
-      if (Date.now() - start > LOCK_WAIT_MS) throw new Error('could not lock settings: another limitcast command is changing settings');
+      if (Date.now() - start > LOCK_WAIT_MS) {
+        throw new Error(
+          lockName === 'config.json.lock'
+            ? 'could not lock settings: another limitcast command is changing settings'
+            : `could not lock ${lockName}: another limitcast command is changing it`,
+        );
+      }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2 + Math.floor(Math.random() * 8));
     }
     return change();

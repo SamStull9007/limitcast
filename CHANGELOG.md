@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fix: optimizer hooks lock their own state. They no longer take the settings lock or read `config.json`, so a trim or a broken settings file cannot stall or skip them. An optimizer update that does not change the state is not rewritten.
+
 ## 0.20.2 — 2026-11-17
 
 - Metadata: the npm `author` field now names the public project contact and links the maintainer page, https://limitcast.dev/sam-stull/. No code changes.

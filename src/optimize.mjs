@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { stateDir, updateConfig, writeAtomic } from './store.mjs';
+import { stateDir, withStateLock, writeAtomic } from './store.mjs';
 
 export const digest = (text) => createHash('sha256').update(text).digest('hex');
 export const HOSTS = ['claude', 'codex', 'grok', 'copilot', 'pi'];
@@ -55,15 +55,17 @@ export function readOptimization(repo) {
   return state;
 }
 
-// Reuse the settings lock; callbacks only read/write bounded local JSON and never run a command or model.
+// Optimizer state has its own lock. A tool hook must not take the settings lock or read config.json:
+// that would queue every tool behind trim, and a corrupt settings file would skip the optimizer.
+// Do not call updateConfig while this lock is held.
 export function changeOptimization(repo, change) {
   let result;
-  updateConfig((cfg) => {
+  withStateLock(() => {
     const state = readOptimization(repo);
+    const before = JSON.stringify(state);
     result = change(state);
-    saveOptimization(repo, state);
-    return cfg;
-  });
+    if (JSON.stringify(state) !== before) saveOptimization(repo, state);
+  }, 'optimize.json.lock');
   return result;
 }
 

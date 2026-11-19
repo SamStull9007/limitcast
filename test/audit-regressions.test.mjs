@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -221,6 +221,40 @@ test('Codex usage supports flat, spaced namespace and completion records; absent
   writeFileSync(path, '{torn');
   assert.deepEqual(codexTrimReport({ servers, used: await codexUsedServers(0, dir), startup: null, days: 30, pro: true }).unused, []);
   assert.deepEqual(codexTrimReport({ servers, used: await codexUsedServers(0, join(dir, 'absent')), startup: null, days: 30, pro: true }).unused, []);
+});
+
+test('optimizer updates ignore a broken settings file and do not rewrite an unchanged state', () => {
+  const dir = fresh();
+  execFileSync('git', ['init', '-q', dir]);
+  const repo = repository(dir);
+  const state = process.env.LIMITCAST_STATE;
+  const settings = join(state, 'config.json');
+  writeFileSync(settings, '{');
+  changeOptimization(repo, (s) => {
+    s.config.learn = true;
+  });
+  const file = join(state, 'optimize', `${repo.id}.json`);
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).config.learn, true);
+  assert.equal(readFileSync(settings, 'utf8'), '{');
+  assert.equal(existsSync(join(state, 'config.json.lock')), false);
+  assert.equal(existsSync(join(state, 'optimize.json.lock')), false);
+  const old = new Date(Date.now() - 60_000);
+  utimesSync(file, old, old);
+  const mtime = statSync(file).mtimeMs;
+  assert.equal(
+    changeOptimization(repo, () => 'same'),
+    'same',
+  );
+  assert.equal(statSync(file).mtimeMs, mtime);
+  assert.throws(
+    () =>
+      changeOptimization(repo, () => {
+        throw new Error('boom');
+      }),
+    /boom/,
+  );
+  assert.equal(existsSync(join(state, 'optimize.json.lock')), false);
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).config.learn, true);
 });
 
 test('optimizer measurements expose injected overhead without inventing task success or net savings', () => {
