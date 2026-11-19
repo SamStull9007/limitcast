@@ -124,9 +124,10 @@ export function install({
     changes.push('added the fat-tool limit check');
   }
   if (optimize) {
-    addOptimizerHooks(cfg, self, 'claude');
+    addOptimizerHooks(cfg, self, 'claude', { notice: alerts || hostHasAlerts(cfg) });
     changes.push('added opt-in repository optimizer hooks (learning and map injection remain off until enabled per repository)');
   }
+  foldToolNotice(cfg);
   writeSettings(path, cfg);
   if (guard && existsSync(join(codexPath, '..'))) {
     const codex = readSettings(codexPath);
@@ -158,29 +159,35 @@ export function install({
       { matcher: '', hooks: [{ type: 'command', command: `${self} drift --hook --src codex`, timeout: 15 }] },
       isAlert,
     );
+    foldToolNotice(codex);
     writeSettings(codexPath, codex);
     changes.push('added the Codex starting-context alert, large tool-output notice and fat-tool limit check (approve the new hooks in Codex)');
   }
-  if (grokPresent(grokDir)) changes.push(...installGrok({ guard, alerts, self, home: grokDir }));
+  const grokAlertFile = join(grokDir, 'hooks', 'limitcast.json');
+  const grokOptimizerFile = join(grokDir, 'hooks', 'limitcast-optimize.json');
+  const grokHadAlerts = existsSync(grokAlertFile) && /\b(?:tool-check|tool-limit|drift --hook)\b/.test(readFileSync(grokAlertFile, 'utf8'));
+  const grokHadOptimizer = existsSync(grokOptimizerFile) && /\b_optimize-hook\b/.test(readFileSync(grokOptimizerFile, 'utf8'));
+  const grokShareNotice = grokPresent(grokDir) && (alerts || grokHadAlerts) && (optimize || grokHadOptimizer);
+  if (grokPresent(grokDir)) changes.push(...installGrok({ guard, alerts, self, home: grokDir, shareNotice: grokShareNotice }));
   if (optimize && existsSync(join(codexPath, '..'))) {
     const codex = readSettings(codexPath);
     backup(codexPath);
-    addOptimizerHooks(codex, self, 'codex');
+    addOptimizerHooks(codex, self, 'codex', { notice: alerts || hostHasAlerts(codex) });
+    foldToolNotice(codex);
     writeSettings(codexPath, codex);
     changes.push('added Codex optimizer hooks; review and trust the new hooks in Codex, then restart');
   }
   if (optimize && grokPresent(grokDir)) {
-    const optimizerPath = join(grokDir, 'hooks', 'limitcast-optimize.json');
-    const grok = readSettings(optimizerPath);
-    backup(optimizerPath);
-    addOptimizerHooks(grok, self, 'grok');
-    writeSettings(optimizerPath, grok);
+    const grok = readSettings(grokOptimizerFile);
+    backup(grokOptimizerFile);
+    addOptimizerHooks(grok, self, 'grok', { notice: grokShareNotice });
+    writeSettings(grokOptimizerFile, grok);
     changes.push('added Grok optimizer hooks');
-  }
+  } else if (grokShareNotice) ensureGrokNotice(grokOptimizerFile);
   return changes;
 }
 
-function addOptimizerHooks(cfg, self, host) {
+function addOptimizerHooks(cfg, self, host, { notice = false } = {}) {
   const events = ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'SessionEnd'];
   // Codex reports failed calls through PostToolUse; its native hook schema has no failure event.
   for (const event of events.filter((e) => host !== 'codex' || e !== 'PostToolUseFailure'))
@@ -189,7 +196,13 @@ function addOptimizerHooks(cfg, self, host) {
       event,
       {
         matcher: '',
-        hooks: [{ type: 'command', command: `${self} _optimize-hook --src ${host}`, timeout: host === 'codex' && event === 'SessionEnd' ? 3 : 10 }],
+        hooks: [
+          {
+            type: 'command',
+            command: `${self} _optimize-hook --src ${host}${notice && event === 'PostToolUse' ? ' --notice' : ''}`,
+            timeout: host === 'codex' && event === 'SessionEnd' ? 3 : 10,
+          },
+        ],
       },
       isOptimizer,
     );
@@ -323,6 +336,52 @@ const isToolCheck = runs(/\btool-check\b/);
 const isToolLimit = runs(/\btool-limit\b/);
 const isCodexNotify = runs(/\bcodex-notify\b/);
 const isOptimizer = runs(/\b_optimize-hook\b/);
+
+/** Alerts are the drift hook, the fat-tool check, or the standalone large-result notice. */
+function hostHasAlerts(cfg) {
+  return (
+    (cfg.hooks?.PostToolUse ?? []).some(isToolCheck) ||
+    (cfg.hooks?.SessionStart ?? []).some(isAlert) ||
+    (cfg.hooks?.PreToolUse ?? []).some(isToolLimit)
+  );
+}
+
+/**
+ * When both features are installed, PostToolUse is the optimizer command with `--notice`.
+ * The separate tool-check process is removed. Other optimizer events stay as they are.
+ * @param {any} cfg
+ */
+function foldToolNotice(cfg) {
+  const posts = cfg.hooks?.PostToolUse;
+  if (!posts?.some(isOptimizer) || !hostHasAlerts(cfg)) return;
+  for (const entry of posts) {
+    if (!isOptimizer(entry)) continue;
+    for (const hook of entry.hooks ?? []) {
+      if (typeof hook.command === 'string' && /\b_optimize-hook\b/.test(hook.command) && !hook.command.includes(' --notice'))
+        hook.command += ' --notice';
+    }
+  }
+  const kept = posts.filter((entry) => !isToolCheck(entry));
+  if (kept.length) cfg.hooks.PostToolUse = kept;
+  else delete cfg.hooks.PostToolUse;
+}
+
+/** Alerts installed after the optimizer: add `--notice` without rewriting the other optimizer events. @param {string} path */
+function ensureGrokNotice(path) {
+  if (!existsSync(path)) return;
+  const cfg = readSettings(path);
+  let changed = false;
+  for (const entry of cfg.hooks?.PostToolUse ?? []) {
+    if (!isOptimizer(entry)) continue;
+    for (const hook of entry.hooks ?? []) {
+      if (typeof hook.command === 'string' && /\b_optimize-hook\b/.test(hook.command) && !hook.command.includes(' --notice')) {
+        hook.command += ' --notice';
+        changed = true;
+      }
+    }
+  }
+  if (changed) writeSettings(path, cfg);
+}
 
 /** @param {string} path */
 export function readSettings(path) {

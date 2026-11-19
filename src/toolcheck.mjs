@@ -52,6 +52,23 @@ export function toolKey(name, host = 'claude') {
 }
 
 /**
+ * True when the installed PostToolUse matcher would have started the large-result notice for this tool.
+ * The optimizer hook matches every tool, so it has to apply this itself. Grok's matcher treats `read_file` as Read
+ * and `server__tool` as an MCP call; built-in names do not contain `__`.
+ * @param {string} name
+ * @param {'claude'|'codex'|'grok'} [host]
+ */
+export function matchesToolNotice(name, host = 'claude') {
+  if (typeof name !== 'string' || !name) return false;
+  if (host === 'grok') {
+    const native = Object.hasOwn(NATIVE, name) ? NATIVE[name] : name;
+    return /^(?:Bash|Read|Grep|WebFetch)$/.test(native) || name.includes('__');
+  }
+  if (host === 'codex') return name === 'Bash' || name.startsWith('mcp__');
+  return /^(?:Bash|Read|Grep|WebFetch)$/.test(name) || name.startsWith('mcp__');
+}
+
+/**
  * What to ask for next time, or null when there is nothing to suggest (a Skill loads whole).
  * @param {string} key a toolKey
  */

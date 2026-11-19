@@ -315,6 +315,63 @@ test('dirty maps cannot contaminate the cache used after restoring a clean tree'
   assert.equal(repositoryMap(r), clean);
 });
 
+test('optimizer and the large-result notice share one PostToolUse command', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lc-opt-notice-install-'));
+  const path = join(dir, 'claude/settings.json');
+  const codexPath = join(dir, 'codex/hooks.json');
+  const grokDir = join(dir, 'grok');
+  mkdirSync(join(dir, 'claude'), { recursive: true });
+  mkdirSync(join(dir, 'codex'), { recursive: true });
+  mkdirSync(grokDir, { recursive: true });
+  writeFileSync(join(grokDir, 'config.toml'), 'model = "grok"\n');
+  const self = '/bin/limitcast';
+  const opts = { guard: false, alerts: true, optimize: true, path, codexPath, grokDir, self };
+  install(opts);
+  install(opts);
+  const command = (hooks, event) => hooks[event].flatMap((entry) => entry.hooks).map((hook) => hook.command);
+  const claude = readSettings(path).hooks;
+  assert.deepEqual(command(claude, 'PostToolUse'), [`${self} _optimize-hook --src claude --notice`]);
+  assert.equal(
+    command(claude, 'SessionStart').some((line) => line.includes('--notice')),
+    false,
+  );
+  const codex = readSettings(codexPath).hooks;
+  assert.deepEqual(command(codex, 'PostToolUse'), [`${self} _optimize-hook --src codex --notice`]);
+  assert.equal(
+    command(codex, 'SessionStart').some((line) => line.includes('--notice')),
+    false,
+  );
+  const grokAlerts = readSettings(join(grokDir, 'hooks', 'limitcast.json')).hooks;
+  assert.equal(grokAlerts.PostToolUse, undefined);
+  assert.ok(grokAlerts.SessionStart);
+  const grokOpt = readSettings(join(grokDir, 'hooks', 'limitcast-optimize.json')).hooks;
+  assert.deepEqual(command(grokOpt, 'PostToolUse'), [`${self} _optimize-hook --src grok --notice`]);
+  assert.equal(
+    command(grokOpt, 'Stop').some((line) => line.includes('--notice')),
+    false,
+  );
+});
+
+test('one PostToolUse process can notice a matched Grok result and skip the others', () => {
+  const r = repo();
+  const state = mkdtempSync(join(tmpdir(), 'lc-opt-notice-run-'));
+  const env = { ...process.env, LIMITCAST_STATE: state, LIMITCAST_ALLOW: '', LIMITCAST_TOOL_TOKENS: '100' };
+  const run = (tool) =>
+    JSON.parse(
+      execFileSync(process.execPath, [bin, '_optimize-hook', '--src', 'grok', '--notice'], {
+        cwd: r.root,
+        env,
+        encoding: 'utf8',
+        input: JSON.stringify(hook('PostToolUse', { cwd: r.root, tool_name: tool, tool_response: 'x'.repeat(800) }, 'notice-session')),
+      }),
+    );
+  assert.match(run('read_file').systemMessage, /read_file/);
+  const sizes = readFileSync(join(state, 'tool-sizes-grok.jsonl'), 'utf8');
+  assert.match(sizes, /"k":"Read"/);
+  assert.equal(run('write').systemMessage, undefined);
+  assert.equal(readFileSync(join(state, 'tool-sizes-grok.jsonl'), 'utf8'), sizes);
+});
+
 test('optimizer installation is idempotent and uninstall preserves unrelated host hooks', () => {
   const dir = mkdtempSync(join(tmpdir(), 'lc-opt-install-'));
   const path = join(dir, 'claude/settings.json');

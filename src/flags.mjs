@@ -18,6 +18,7 @@ export const KNOWN_FLAGS = [
   '--jobs',
   '--json',
   '--no-open',
+  '--notice',
   '--out',
   '--optimize',
   '--refresh',

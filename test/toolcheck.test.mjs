@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { install, readSettings, uninstall } from '../src/install.mjs';
-import { firstFlag, resultTokens, tipFor, toolKey, toolNotice } from '../src/toolcheck.mjs';
+import { firstFlag, matchesToolNotice, resultTokens, tipFor, toolKey, toolNotice } from '../src/toolcheck.mjs';
 import { attribute, whyReport } from '../src/where.mjs';
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
@@ -20,6 +20,17 @@ test('resultTokens estimates from size and works on any result shape', () => {
   );
   assert.equal(resultTokens(undefined), 0);
   assert.equal(resultTokens(null), 1);
+});
+
+test('the shared PostToolUse notice matches the installed matchers, including Grok aliases', () => {
+  for (const name of ['Bash', 'Read', 'Grep', 'WebFetch', 'mcp__server__tool']) assert.equal(matchesToolNotice(name, 'claude'), true);
+  assert.equal(matchesToolNotice('Edit', 'claude'), false);
+  assert.equal(matchesToolNotice('Read', 'codex'), false);
+  assert.equal(matchesToolNotice('Bash', 'codex'), true);
+  assert.equal(matchesToolNotice('mcp__server__tool', 'codex'), true);
+  for (const name of ['read_file', 'grep', 'run_terminal_command', 'web_fetch', 'Bash', 'basic-memory__search_notes'])
+    assert.equal(matchesToolNotice(name, 'grok'), true, name);
+  for (const name of ['write', 'search_replace', 'search_tool', 'web_search', 'list_dir']) assert.equal(matchesToolNotice(name, 'grok'), false, name);
 });
 
 test('toolKey and tipFor name MCP tools by server and suggest what to ask for', () => {

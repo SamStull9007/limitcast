@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Fix: optimizer hooks lock their own state. They no longer take the settings lock or read `config.json`, so a trim or a broken settings file cannot stall or skip them. An optimizer update that does not change the state is not rewritten.
+- Fix: when the repository optimizer and the large-result notice are both installed, one PostToolUse process does both. Tools outside that notice matcher still record only the optimizer event.
 
 ## 0.20.2 — 2026-11-17
 

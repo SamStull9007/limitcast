@@ -523,10 +523,10 @@ export function grokHistory(since, now, { root = grokRoot(), budget = getGrokBud
 
 /**
  * Wire Grok's status line and, with `guard`, a PreToolUse hook on `spawn_subagent`.
- * @param {{guard:boolean, self:string, home?:string}} opts
+ * @param {{guard:boolean, alerts?:boolean, self:string, home?:string, shareNotice?:boolean}} opts
  * @returns {string[]}
  */
-export function installGrok({ guard, alerts = false, self, home = grokHome() }) {
+export function installGrok({ guard, alerts = false, self, home = grokHome(), shareNotice = false }) {
   if (!grokPresent(home)) return [];
   const changes = [];
   const cfgPath = join(home, 'config.toml');
@@ -550,7 +550,7 @@ export function installGrok({ guard, alerts = false, self, home = grokHome() }) 
   const prev = existsSync(path) ? readFileSync(path, 'utf8') : '';
   const mine = prev.includes(MARK) ? prev : '';
   const wantGuard = guard || /\bsubagent-receipt\b/.test(mine);
-  const wantAlerts = alerts || /\btool-check\b/.test(mine);
+  const wantAlerts = alerts || /\b(?:tool-check|tool-limit|drift --hook)\b/.test(mine);
   if (wantGuard || wantAlerts) {
     /** @type {Record<string, any[]>} */
     const hooks = {};
@@ -565,15 +565,24 @@ export function installGrok({ guard, alerts = false, self, home = grokHome() }) 
         matcher: 'Read|Grep',
         hooks: [{ type: 'command', command: `${self} tool-limit --src grok`, timeout: 10 }],
       });
-      hooks.PostToolUse = [
-        { matcher: 'Bash|Read|Grep|WebFetch|mcp__.*', hooks: [{ type: 'command', command: `${self} tool-check --src grok`, timeout: 10 }] },
-      ];
+      // The optimizer PostToolUse hook matches every tool. When it is installed, it carries the notice too,
+      // so Grok does not start a second process for Bash, Read, Grep, WebFetch and MCP.
+      if (!shareNotice) {
+        hooks.PostToolUse = [
+          { matcher: 'Bash|Read|Grep|WebFetch|mcp__.*', hooks: [{ type: 'command', command: `${self} tool-check --src grok`, timeout: 10 }] },
+        ];
+      }
       hooks.SessionStart = [{ hooks: [{ type: 'command', command: `${self} drift --hook --src grok`, timeout: 15 }] }];
     }
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify({ hooks }, null, 2)}\n`);
     if (guard) changes.push('added the Grok subagent guard (matcher spawn_subagent) and its subagent-stop hook');
-    if (alerts) changes.push('added the Grok starting-context alert, large tool-output notice and fat-tool limit check');
+    if (alerts)
+      changes.push(
+        shareNotice
+          ? 'added the Grok starting-context alert and fat-tool limit check; the large tool-output notice runs in the optimizer hook'
+          : 'added the Grok starting-context alert, large tool-output notice and fat-tool limit check',
+      );
   }
   return changes;
 }

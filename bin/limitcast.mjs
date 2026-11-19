@@ -106,7 +106,7 @@ import {
   windowStart,
 } from '../src/subagents.mjs';
 import { forTerminal } from '../src/term.mjs';
-import { firstFlag, resultTokens, toolKey, toolNotice } from '../src/toolcheck.mjs';
+import { firstFlag, matchesToolNotice, resultTokens, toolKey, toolNotice } from '../src/toolcheck.mjs';
 import { loadLiveStats, loadToolStats, recordToolSize, saveToolStats, toolLimitDecision, toolStats } from '../src/toollimit.mjs';
 import { activityKnown, baseline, contributors, measuredSavings, shareSummary, startupReport, trimReport, UNKNOWN_ACTIVITY } from '../src/trim.mjs';
 import { claudeRoot, grokRoot, readUsage } from '../src/usage.mjs';
@@ -224,12 +224,63 @@ const days = () => {
   return Math.max(1, n);
 };
 
+/**
+ * The large-result notice for one PostToolUse payload. `matched` limits it to the installed matcher, because the
+ * optimizer hook runs for every tool. Returns the user-facing line, or null. The caller catches a failure.
+ * @param {any} hook
+ * @param {'claude'|'codex'|'grok'} host
+ * @param {boolean} matched
+ */
+function runToolCheck(hook, host, matched) {
+  const name = String(hook?.tool_name ?? hook?.toolName ?? '');
+  if (!name || (matched && !matchesToolNotice(name, host))) return null;
+  const response = hook?.tool_response ?? hook?.tool_result ?? hook?.toolResult;
+  if (host !== 'claude') recordToolSize(host, toolKey(name, host), resultTokens(response));
+  const notice = toolNotice(
+    name,
+    response,
+    host === 'claude' ? loadValue().calib : null,
+    Number(process.env.LIMITCAST_TOOL_TOKENS) || undefined,
+    host,
+  );
+  return notice && firstFlag(String(hook.session_id ?? hook.sessionId ?? ''), toolKey(name, host)) ? notice : null;
+}
+
 if (cmd === '_optimize-hook') {
+  /** @type {any} */
+  let hook = null;
   try {
-    if (process.env.LIMITCAST_ALLOW !== '1') console.log(JSON.stringify(runOptimizationHook(JSON.parse(readStdin()), flag('--src') ?? 'claude')));
+    hook = JSON.parse(readStdin());
   } catch {
     // Hook payloads and settings can contain secrets; never echo a failed parse or its input.
     console.error('limitcast optimizer skipped: invalid hook, repository or state; run optimize status to inspect');
+  }
+  if (hook && process.env.LIMITCAST_ALLOW !== '1') {
+    // `--src pi` and `--src copilot` must reach the optimizer unchanged. The notice only exists for claude, codex and grok.
+    const host = flag('--src') ?? 'claude';
+    const noticeHost = host === 'codex' || host === 'grok' ? host : 'claude';
+    /** @type {Record<string, any>} */
+    let out = {};
+    let failed = false;
+    try {
+      out = runOptimizationHook(hook, host) ?? {};
+    } catch {
+      failed = true;
+      console.error('limitcast optimizer skipped: invalid hook, repository or state; run optimize status to inspect');
+    }
+    let notice = null;
+    if (args.includes('--notice')) {
+      try {
+        if (noticeHost === 'grok') settleGrokReceipts();
+        notice = runToolCheck(hook, noticeHost, true);
+      } catch {
+        /* a hook must never break the session */
+      }
+    }
+    if (!failed || notice) {
+      if (notice) out.systemMessage = [out.systemMessage, notice].filter(Boolean).join('\n\n');
+      console.log(JSON.stringify(out));
+    }
   }
 } else if (cmd === 'optimize') {
   try {
@@ -491,14 +542,8 @@ if (cmd === '_optimize-hook') {
       const hook = JSON.parse(readStdin());
       const host = hookHost();
       if (host === 'grok') settleGrokReceipts();
-      const name = String(hook?.tool_name ?? hook?.toolName ?? '');
-      const response = hook?.tool_response ?? hook?.tool_result ?? hook?.toolResult;
-      // Codex and Grok have no 5-hour calibration, and no transcript report to learn tool sizes from: learn them here.
-      if (name && host !== 'claude') recordToolSize(host, toolKey(name, host), resultTokens(response));
-      const notice = name
-        ? toolNotice(name, response, host === 'claude' ? loadValue().calib : null, Number(process.env.LIMITCAST_TOOL_TOKENS) || undefined, host)
-        : null;
-      if (notice && firstFlag(String(hook.session_id ?? hook.sessionId), toolKey(name, host))) console.log(JSON.stringify({ systemMessage: notice }));
+      const notice = runToolCheck(hook, host, false);
+      if (notice) console.log(JSON.stringify({ systemMessage: notice }));
     }
   } catch {
     /* a hook must never break the session */
