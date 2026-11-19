@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.20.4 — 2026-11-18
 
 - Fix: the shared PostToolUse notice checks every tool result. A large write, edit, search, or directory listing is reported once per tool per session, and Codex and Grok record its size. An alerts-only install still follows its hook matcher.
 
