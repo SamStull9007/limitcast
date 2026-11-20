@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.20.5 — 2026-11-19
 
 - Fix: install, reinstall, notice folding and uninstall preserve unrelated commands in shared hook groups. Dedicated Grok hook files containing foreign commands are refused.
 - Fix: installation stages host settings and the launcher before committing, with atomic writes and the existing recovery journal; invalid later-host settings leave earlier hosts unchanged.
