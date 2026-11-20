@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Fix: install, reinstall, notice folding and uninstall preserve unrelated commands in shared hook groups. Dedicated Grok hook files containing foreign commands are refused.
+- Fix: installation stages host settings and the launcher before committing, with atomic writes and the existing recovery journal; invalid later-host settings leave earlier hosts unchanged.
+- Fix: deferred Grok receipts serialize queue changes and settlement, retain native identity aliases and ignore repeated completions.
+- Fix: doctor requires Node 22+, matching the package requirement.
+- Release: npm publication requires a clean checkout and successful complete push CI for the exact release commit. Coverage floors are unchanged.
+- Validation: add configuration ownership, rollback, concurrent receipt and publication regressions, plus a real-task optimizer measurement protocol. Net savings remains unproven.
+
 ## 0.20.4 — 2026-11-18
 
 - Fix: the shared PostToolUse notice checks every tool result. A large write, edit, search, or directory listing is reported once per tool per session, and Codex and Grok record its size. An alerts-only install still follows its hook matcher.

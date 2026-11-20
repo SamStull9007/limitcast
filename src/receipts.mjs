@@ -1,10 +1,10 @@
 // @ts-check
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { costOf } from './prices.mjs';
-import { stateDir, writeAtomic } from './store.mjs';
-import { logSubagent } from './subagents.mjs';
+import { stateDir, withStateLock, writeAtomic } from './store.mjs';
+import { loadSubagents, logSubagent } from './subagents.mjs';
 import { codexUsage, grokRoot, grokUsage } from './usage.mjs';
 
 // What a finished Codex or Grok subagent used, for the SubagentStop receipt. Claude's receipt is priced from its own
@@ -119,20 +119,22 @@ function loadPending() {
  * @param {any} hook the SubagentStop payload
  */
 export function deferReceipt(now, type, hook) {
-  const keep = (({ subagentId, sessionId, transcriptPath, session_id }) => ({ subagentId, sessionId: sessionId ?? session_id, transcriptPath }))(
-    hook ?? {},
-  );
-  mkdirSync(stateDir(), { recursive: true });
-  writeAtomic(
-    pendingFile(),
-    JSON.stringify([
-      ...loadPending()
-        .filter((p) => now - p.t < PENDING_MAX_MS)
-        .slice(-49),
-      { t: now, type, hook: keep },
-    ]),
-  );
+  const keep = {
+    subagentId: hook?.subagentId ?? hook?.subagent_id ?? hook?.agent_id,
+    sessionId: hook?.sessionId ?? hook?.session_id,
+    transcriptPath: hook?.transcriptPath ?? hook?.transcript_path,
+  };
+  return withStateLock(() => {
+    if (alreadyLogged(loadSubagents(now - PENDING_MAX_MS), keep)) return;
+    const pending = loadPending().filter((p) => now - p.t < PENDING_MAX_MS);
+    if (pending.some((p) => receiptKey(p.hook) === receiptKey(keep))) return;
+    writeAtomic(pendingFile(), JSON.stringify([...pending.slice(-49), { t: now, type, hook: keep }]));
+  }, 'pending-receipts.lock');
 }
+
+const receiptKey = (hook) => JSON.stringify([hook?.sessionId, hook?.subagentId ?? hook?.transcriptPath]);
+const alreadyLogged = (entries, hook) =>
+  typeof hook?.subagentId === 'string' && entries.some((e) => e.src === 'grok' && e.id === hook.subagentId && e.sid === hook.sessionId);
 
 /**
  * Log the parked receipts whose ledgers exist now; drop the ones that never appeared. Cheap when nothing is parked.
@@ -142,12 +144,19 @@ export function deferReceipt(now, type, hook) {
  */
 export function settleReceipts(now, root = grokRoot()) {
   if (!existsSync(pendingFile())) return 0;
+  return withStateLock(() => settlePending(now, root), 'pending-receipts.lock');
+}
+
+function settlePending(now, root) {
+  const pending = loadPending();
+  const logged = loadSubagents(now - PENDING_MAX_MS);
   const left = [];
   let settled = 0;
-  for (const p of loadPending()) {
+  for (const p of pending) {
+    if (alreadyLogged(logged, p.hook)) continue;
     const usage = grokSubagentUsage(p.hook, root);
     if (usage?.calls) {
-      logSubagent({
+      const entry = {
         t: p.t,
         src: 'grok',
         id: p.hook?.subagentId,
@@ -157,11 +166,13 @@ export function settleReceipts(now, root = grokRoot()) {
         fresh: usage.fresh,
         read: usage.read,
         ...(usage.usd === null ? {} : { usd: usage.usd }),
-      });
+      };
+      logSubagent(entry);
+      logged.push(entry);
       settled++;
     } else if (now - p.t < PENDING_MAX_MS) left.push(p);
   }
-  if (settled || left.length !== loadPending().length) writeAtomic(pendingFile(), JSON.stringify(left));
+  if (left.length !== pending.length) writeAtomic(pendingFile(), JSON.stringify(left));
   return settled;
 }
 

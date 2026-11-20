@@ -29,6 +29,34 @@ function repo() {
   git(root, 'init', '-q');
   return repository(root);
 }
+
+test('optimizer controls retire facts, cancel pending model work, protect names and reject unsafe requests', () => {
+  const r = repo();
+  changeOptimization(r, (s) => {
+    s.facts = [{ id: 'fixture-fact', kind: 'check', to: 'node --test', state: 'active', sessions: ['a', 'b', 'c'] }];
+    s.model = { job: { id: 'pending' }, attempts: [], receipts: [] };
+  });
+  assert.deepEqual(runOptimize(['forget', 'fixture-fact'], r.root), { retired: 'fixture-fact' });
+  assert.equal(readOptimization(r).facts[0].state, 'retired');
+  assert.throws(() => runOptimize(['forget', 'missing'], r.root), /choose a fact id/);
+  assert.deepEqual(runOptimize(['model', 'off'], r.root), { model: false });
+  assert.equal(readOptimization(r).model.job, undefined);
+  assert.equal(runOptimize(['model'], r.root).enabled, false);
+  assert.equal(runOptimize(['learn'], r.root).facts[0].state, 'retired');
+  assert.deepEqual(runOptimize(['keep', 'collaboration,goals,collaboration'], r.root), { keep: ['collaboration', 'goals'] });
+  assert.throws(() => runOptimize(['keep', 'unsafe;command'], r.root), /supply tool/);
+  assert.throws(() => runOptimize(['keep'], r.root), /supply tool/);
+  assert.throws(() => runOptimize(['capabilities', '--apply'], r.root), /name the proposed/);
+  assert.throws(() => runOptimize(['capabilities', '--apply', 'Read'], r.root), /protected, used, or lacks evidence/);
+  assert.deepEqual(runOptimize(['capabilities', '--undo'], r.root), { restored: false });
+  assert.deepEqual(runOptimize(['capabilities'], r.root).keep, ['collaboration', 'goals']);
+  assert.throws(() => runOptimize(['unexpected'], r.root), /optimize: use status/);
+  const replay = join(r.root, 'replay.json');
+  writeFileSync(replay, '[]');
+  assert.equal(runOptimize(['replay', replay], r.root).events, 0);
+  assert.throws(() => runOptimize(['replay'], r.root), /under 2 MB/);
+  assert.deepEqual(readOptimization(r).config.keep, ['collaboration', 'goals']);
+});
 const fresh = () => ({ version: 1, hosts: {}, facts: [], receipts: [], config: { learn: true, map: false, keep: [] } });
 let serial = 0;
 const hook = (event, extra = {}, sid = 's') => ({ hook_event_name: event, session_id: sid, tool_use_id: `call-${serial++}`, ...extra });

@@ -19,6 +19,12 @@ For the automatic local security check, install Semgrep with `uv tool install --
 
 Keep changes focused on one problem. Explain the behavior before and after, include a small regression test for nontrivial logic, and name any host or operating system you could not test. Update the usage guide when a command changes. Preserve existing hooks, configuration backups, keep-lists, and undo behavior.
 
+## Release preflight
+
+Commit the intended version and plugin pins, push that exact commit, and wait for all eight CI jobs to succeed. Keep the working tree clean. `npm publish` runs `scripts/release-check.mjs` through `prepublishOnly`; it requires authenticated GitHub CLI access and refuses missing, pending, failed or incomplete push CI for HEAD. Run `node scripts/release-check.mjs` to check without publishing. Do not bypass lifecycle scripts or lower coverage floors to publish.
+
+Synthetic optimizer replay checks decision regressions, not savings. Use the [real-task measurement protocol](docs/optimizer-measurement.md) before making effectiveness claims.
+
 ## Protect private data
 
 Never attach raw transcripts, credentials, account IDs, private project paths, configuration files, or customer information. Reproduce bugs with small synthetic fixtures. Review any terminal output before posting it, including output from a sharing command.

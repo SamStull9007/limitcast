@@ -1,5 +1,37 @@
-import { lstatSync, readFileSync, unlinkSync } from 'node:fs';
-import { writeAtomic } from './store.mjs';
+import { copyFileSync, lstatSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { withStateLock, writeAtomic } from './store.mjs';
+
+/** Stage every file before committing; adapters share the same journal and never write during planning. */
+export function editFiles(ledger, change) {
+  return withStateLock(() => {
+    recoverTransaction(ledger);
+    const files = new Map();
+    const read = (path) => {
+      if (!files.has(path)) {
+        const before = readText(path);
+        files.set(path, { path, before, after: before });
+      }
+      return files.get(path).after;
+    };
+    const write = (path, after) => {
+      read(path);
+      files.get(path).after = after;
+    };
+    const result = change({ read, write, remove: (path) => write(path, null) });
+    const updates = [...files.values()];
+    const changed = updates.filter((c) => c.before !== c.after);
+    if (changed.length) {
+      const suffix = new Date().toISOString().replace(/[:.]/g, '-');
+      for (const c of changed) {
+        mkdirSync(dirname(c.path), { recursive: true });
+        if (c.before !== null) copyFileSync(c.path, `${c.path}.limitcast-backup-${suffix}`);
+      }
+      commitTransaction(ledger, [], updates);
+    }
+    return result;
+  });
+}
 
 export function readText(path) {
   try {

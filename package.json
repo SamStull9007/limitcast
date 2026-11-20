@@ -18,7 +18,8 @@
     "linux"
   ],
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "prepublishOnly": "node scripts/release-check.mjs"
   },
   "keywords": [
     "claude-code",

@@ -1,11 +1,11 @@
 // @ts-check
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { codexServers, setEnabled } from './codex.mjs';
 import { windowMs } from './forecast.mjs';
 import { KEEP_MS, stateDir, updateConfig, withStateLock } from './store.mjs';
-import { commitTransaction, editText, readLedger, recoverTransaction } from './transaction.mjs';
+import { commitTransaction, editFiles, editText, readLedger, recoverTransaction } from './transaction.mjs';
 import { grokRoot } from './usage.mjs';
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */
@@ -526,20 +526,21 @@ export function grokHistory(since, now, { root = grokRoot(), budget = getGrokBud
  * @param {{guard:boolean, alerts?:boolean, self:string, home?:string, shareNotice?:boolean}} opts
  * @returns {string[]}
  */
-export function installGrok({ guard, alerts = false, self, home = grokHome(), shareNotice = false }) {
+export function installGrok(options, files) {
+  if (!files) return editFiles(join(stateDir(), 'install-state.json'), (files) => installGrok(options, files));
+  const { guard, alerts = false, self, home = grokHome(), shareNotice = false } = options;
   if (!grokPresent(home)) return [];
   const changes = [];
   const cfgPath = join(home, 'config.toml');
   if (existsSync(cfgPath)) {
-    backup(cfgPath);
-    const prev = readFileSync(cfgPath, 'utf8');
+    const prev = files.read(cfgPath);
     const next = wrapGrokStatusLine(prev, self);
     if (next !== prev) {
-      mkdirSync(stateDir(), { recursive: true });
       const snap = statusLineTable(prev);
       // Remember the user's table once; never snapshot a wrap we already own (launcher path includes "limitcast").
-      if (!isLimitcastStatus(snap ?? '') && (snap || !existsSync(statusLedger()))) writeFileSync(statusLedger(), JSON.stringify({ previous: snap }));
-      writeText(cfgPath, next);
+      if (!isLimitcastStatus(snap ?? '') && (snap || files.read(statusLedger()) === null))
+        files.write(statusLedger(), JSON.stringify({ previous: snap }));
+      files.write(cfgPath, next);
       changes.push(
         isLimitcastStatus(statusLineCommand(prev)) ? 'Grok status line already installed (command path refreshed)' : 'wrapped the Grok status line',
       );
@@ -547,7 +548,8 @@ export function installGrok({ guard, alerts = false, self, home = grokHome(), sh
   }
   const path = join(home, 'hooks', 'limitcast.json');
   // One file holds both parts, so installing one never drops the other that an earlier install added.
-  const prev = existsSync(path) ? readFileSync(path, 'utf8') : '';
+  const prev = files.read(path) ?? '';
+  const previous = grokHookSettings(prev);
   const mine = prev.includes(MARK) ? prev : '';
   const wantGuard = guard || /\bsubagent-receipt\b/.test(mine);
   const wantAlerts = alerts || /\b(?:tool-check|tool-limit|drift --hook)\b/.test(mine);
@@ -574,8 +576,7 @@ export function installGrok({ guard, alerts = false, self, home = grokHome(), sh
       }
       hooks.SessionStart = [{ hooks: [{ type: 'command', command: `${self} drift --hook --src grok`, timeout: 15 }] }];
     }
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify({ hooks }, null, 2)}\n`);
+    files.write(path, `${JSON.stringify({ ...previous, hooks }, null, 2)}\n`);
     if (guard) changes.push('added the Grok subagent guard (matcher spawn_subagent) and its subagent-stop hook');
     if (alerts)
       changes.push(
@@ -591,32 +592,53 @@ export function installGrok({ guard, alerts = false, self, home = grokHome(), sh
  * Remove the Grok hook file and restore the previous [ui.status_line] table.
  * @param {{home?:string}} [opts]
  */
-export function uninstallGrok({ home = grokHome() } = {}) {
+export function uninstallGrok(options = {}, files) {
+  if (!files) return editFiles(join(stateDir(), 'install-state.json'), (files) => uninstallGrok(options, files));
+  const { home = grokHome() } = options;
   const changes = [];
   const hook = join(home, 'hooks', 'limitcast.json');
   if (existsSync(hook)) {
-    const text = readFileSync(hook, 'utf8');
+    const text = files.read(hook);
     if (text.includes(MARK)) {
-      unlinkSync(hook);
+      const cfg = grokHookSettings(text);
+      if (Object.keys(cfg).some((key) => key !== 'hooks')) files.write(hook, `${JSON.stringify({ ...cfg, hooks: {} }, null, 2)}\n`);
+      else files.remove(hook);
       changes.push('removed the Grok subagent guard');
     }
   }
   const cfgPath = join(home, 'config.toml');
   if (existsSync(cfgPath)) {
-    const toml = readFileSync(cfgPath, 'utf8');
+    const toml = files.read(cfgPath);
     if (isLimitcastStatus(statusLineCommand(toml))) {
-      backup(cfgPath);
-      let previous = null;
-      try {
-        previous = JSON.parse(readFileSync(statusLedger(), 'utf8')).previous;
-      } catch {
-        /* missing ledger: drop the table */
-      }
-      writeText(cfgPath, restoreStatusLine(toml, previous));
+      const previous = JSON.parse(files.read(statusLedger()) ?? '{"previous":null}').previous;
+      if (previous !== null && typeof previous !== 'string') throw new Error('invalid Grok status-line recovery record');
+      files.write(cfgPath, restoreStatusLine(toml, previous));
       changes.push(previous ? 'restored the Grok status line' : 'removed the Grok status line');
     }
   }
   return changes;
+}
+
+/** This dedicated file is replaced as a unit; refuse foreign commands instead of deleting them. */
+function grokHookSettings(text) {
+  const cfg = JSON.parse(text || '{}');
+  if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg) || (cfg.hooks && (typeof cfg.hooks !== 'object' || Array.isArray(cfg.hooks))))
+    throw new Error('invalid Grok hook settings');
+  for (const entries of Object.values(cfg.hooks ?? {})) {
+    if (!Array.isArray(entries) || entries.some((e) => !e || !Array.isArray(e.hooks))) throw new Error('invalid Grok hook groups');
+    for (const entry of entries)
+      if (
+        entry.hooks.some(
+          (h) =>
+            !h ||
+            typeof h.command !== 'string' ||
+            !h.command.includes(MARK) ||
+            !/\b(?:guard|subagent-receipt|tool-check|tool-limit|drift --hook)\b/.test(h.command),
+        )
+      )
+        throw new Error('preserve Grok hook file with commands not owned by Limitcast');
+  }
+  return cfg;
 }
 
 /**
