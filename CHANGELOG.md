@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.20.6 — 2026-11-21
+
+- Fix: transcripts are split into lines on newline only. A record holding U+2028 or U+2029 (common in scraped web text) was torn into unparseable pieces, so `trim` reported the usage history as incomplete and suggested nothing, and token, startup and Codex readers dropped the record. The usage and where caches are re-read once.
+- Fix: `trim` suggests hiding only skills that `skillOverrides` can hide: personal and project skills, commands and account-synced skills. Plugin and bundled skills are no longer listed or counted in the removable estimate.
+
 ## 0.20.5 — 2026-11-19
 
 - Fix: install, reinstall, notice folding and uninstall preserve unrelated commands in shared hook groups. Dedicated Grok hook files containing foreign commands are refused.
