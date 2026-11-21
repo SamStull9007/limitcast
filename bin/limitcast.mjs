@@ -12,9 +12,10 @@ import {
   editKeep,
   ensureDefaultKeep,
   getKeep,
+  hideableSkillNames,
   installedPlugins,
   isKept,
-  localSkillFolders,
+  markHideable,
   planTrim,
   projectMcpServers,
   reapplyTrim,
@@ -1006,6 +1007,8 @@ if (cmd === '_optimize-hook') {
     // Prefer the measured starting context of the latest interactive session; older Claude Code logs fall back to estimates.
     const latest = await latestInteractiveTranscript(claudeRoot());
     if (latest) recordOverhead(snapshot(latest));
+    // Plugin and bundled skills ignore skillOverrides: never suggest hiding them.
+    if (latest) markHideable(latest.pieces, hideableSkillNames(transcriptCwd(latest.file) ?? process.cwd()));
     // The share view omits private names; the local view includes actionable detail.
     if (args.includes('--apply') || args.includes('--undo')) {
       console.log(args.includes('--undo') ? undoMessage(undoTrim()) : applyMessage(latest, used, usedMonth));
@@ -1365,7 +1368,7 @@ function applyMessage(latest, used, usedMonth) {
     claudeJson: readSettings(claudeJsonPath()),
     plugins: installedPlugins(),
     projectMcpJson: projectMcpServers(cwd),
-    localSkills: localSkillFolders(cwd),
+    localSkills: hideableSkillNames(cwd),
     keep: getKeep(),
   });
   const e = applyTrim(plan, { cwd, now });

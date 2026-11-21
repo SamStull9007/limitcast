@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { readSettings, settingsPath } from './install.mjs';
 import { stateDir, updateConfig, withStateLock } from './store.mjs';
 import { commitTransaction, editJson, readLedger, recoverTransaction } from './transaction.mjs';
+import { skillListing } from './trim.mjs';
 
 // `trim --apply`: hide unused skills and turn off unused MCP servers through Claude Code's own settings.
 // Skills: `skillOverrides` in ~/.claude/settings.json ("user-invocable-only": the model stops seeing it, /name still works).
@@ -345,6 +346,42 @@ export function localSkillFolders(cwd, dir = configDir()) {
     }
   }
   return out;
+}
+
+/**
+ * Names `skillOverrides` can hide: personal and project skills (folder and frontmatter name), commands, and
+ * account-synced skills. Plugin and bundled skills ignore skillOverrides, so they are not on this list.
+ * A listed skill matches on its whole name or its first ":" part.
+ * @param {string} cwd
+ */
+export function hideableSkillNames(cwd, dir = configDir()) {
+  const out = localSkillFolders(cwd, dir);
+  for (const base of [dir, join(cwd, '.claude')]) {
+    for (const name of [...out]) {
+      try {
+        out.add(skillListing(readFileSync(join(base, 'skills', name, 'SKILL.md'), 'utf8'), name).name);
+      } catch {
+        /* not a skill folder here */
+      }
+    }
+    if (existsSync(join(base, 'skills', 'synced'))) out.add('anthropic-skills');
+    try {
+      for (const d of readdirSync(join(base, 'commands'), { withFileTypes: true })) out.add(d.name.replace(/\.md$/, ''));
+    } catch {
+      /* no commands */
+    }
+  }
+  return out;
+}
+
+/**
+ * Tag each listed skill with whether `skillOverrides` can hide it, so trim never suggests one it can't.
+ * @param {import('./startup.mjs').Piece[]} pieces
+ * @param {Set<string>} names from hideableSkillNames
+ */
+export function markHideable(pieces, names) {
+  for (const p of pieces) if (p.group === 'Skill listing') p.hideable = names.has(p.name) || names.has(p.name.split(':')[0]);
+  return pieces;
 }
 
 /** Server names in the project's .mcp.json. @param {string} cwd */

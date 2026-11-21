@@ -233,7 +233,9 @@ export function measuredSavings(pieces, used, keep = [], usedMonth = null) {
       mcp.set(k, m);
     }
   }
-  const skills = pieces.filter((p) => p.group === 'Skill listing' && !skillUsed(p.name, used.skills)).sort((a, b) => b.chars - a.chars);
+  const skills = pieces
+    .filter((p) => p.group === 'Skill listing' && p.hideable !== false && !skillUsed(p.name, used.skills))
+    .sort((a, b) => b.chars - a.chars);
   const kept = [...mcp.values(), ...skills].filter((x) => keep.some((k) => norm(k) === norm(x.name))).map((x) => x.name);
   const isKept = (/** @type {{name:string}} */ x) => kept.includes(x.name);
   const unusedMcp = verified ? [...mcp.values()].filter((m) => !isKept(m)).sort((a, b) => b.chars - a.chars) : [];

@@ -5,7 +5,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { applyTrim, installedPlugins, planTrim, reapplyTrim, stillLoading, transcriptCwd, undoTrim } from '../src/apply.mjs';
+import {
+  applyTrim,
+  hideableSkillNames,
+  installedPlugins,
+  markHideable,
+  planTrim,
+  reapplyTrim,
+  stillLoading,
+  transcriptCwd,
+  undoTrim,
+} from '../src/apply.mjs';
+import { measuredSavings, startupReport } from '../src/trim.mjs';
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
 
@@ -35,6 +46,42 @@ test('drift releases changed cuts without overriding any current user choice', (
     process.env.LIMITCAST_STATE = prev;
   }
 });
+test('trim suggests hiding only skills skillOverrides can hide, never plugin or bundled ones', () => {
+  const home = tmp('lc-hideable-');
+  const cwd = tmp('lc-hideable-proj-');
+  const skill = (base, dir, name) => {
+    mkdirSync(join(base, 'skills', dir), { recursive: true });
+    writeFileSync(join(base, 'skills', dir, 'SKILL.md'), `---\nname: ${name}\ndescription: d\n---\n`);
+  };
+  skill(home, 'mine', 'mine');
+  skill(home, 'folder', 'renamed');
+  skill(join(cwd, '.claude'), 'proj', 'proj');
+  mkdirSync(join(home, 'skills', 'synced'), { recursive: true });
+  mkdirSync(join(home, 'commands'));
+  writeFileSync(join(home, 'commands', 'brief.md'), 'x');
+  const names = hideableSkillNames(cwd, home);
+  const listed = [
+    'mine',
+    'renamed',
+    'proj',
+    'brief',
+    'mine:references:ai',
+    'anthropic-skills:x',
+    'dataviz',
+    'firecrawl:read-docs',
+    'slack:block-kit',
+  ];
+  const pieces = markHideable(
+    listed.map((name) => ({ group: 'Skill listing', name, chars: 40 })),
+    names,
+  );
+  const used = { skills: new Set(), mcp: new Set(), observed: true, complete: true };
+  const s = measuredSavings(pieces, used);
+  assert.deepEqual(s.unusedSkills.map((p) => p.name).sort(), ['anthropic-skills:x', 'brief', 'mine', 'mine:references:ai', 'proj', 'renamed']);
+  assert.equal(s.tokens, 60); // 6 hideable × 40 chars; plugin and bundled skills add nothing
+  assert.doesNotMatch(startupReport(null, { pieces, at: 0 }, used, 7), /firecrawl|slack:block-kit|dataviz/);
+});
+
 const plugins = { names: new Set(['slack']), servers: ['plugin:greptile:greptile'] };
 
 test('plan: standalone skills are hidden, plugin skills listed; MCP names must be exact', () => {

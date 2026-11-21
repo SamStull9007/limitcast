@@ -5,7 +5,8 @@ import { jsonlLines } from './usage.mjs';
 
 /**
  * One piece of the context Claude Code loads before your first message, measured from the transcript.
- * @typedef {{group:string, name:string, chars:number}} Piece
+ * @typedef {{group:string, name:string, chars:number, hideable?:boolean}} Piece
+ *   hideable: false for a listed skill skillOverrides can't hide (plugin, bundled); trim never suggests those
  */
 
 /**
