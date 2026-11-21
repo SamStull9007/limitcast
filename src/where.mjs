@@ -1,13 +1,12 @@
 // @ts-check
-import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { fmt } from './report.mjs';
 import { attachmentPieces, pieceDiff } from './startup.mjs';
 import { stateDir, writeAtomic } from './store.mjs';
 import { BIG_RESULT, tipFor, toolKey } from './toolcheck.mjs';
-import { jsonlFiles } from './usage.mjs';
+import { jsonlFiles, jsonlLines } from './usage.mjs';
 
 // `limitcast report --why`: where the new tokens went, which is what moves the limit (cached reads barely count).
 // A model call's new tokens are input + cache writes + output. The input of call i is what entered the context since
@@ -52,7 +51,7 @@ export async function readCalls(file) {
   /** @type {import('./startup.mjs').Piece[]} */
   const startup = [];
   let startupOpen = true;
-  for await (const line of createInterface({ input: createReadStream(file), crlfDelay: Infinity })) {
+  for await (const line of jsonlLines(file)) {
     if (startupOpen && line.includes('"type":"attachment"')) {
       try {
         const ev = JSON.parse(line);
@@ -454,7 +453,7 @@ export function jobsReport(r, { since, now }) {
   return lines.join('\n');
 }
 
-const CACHE_VERSION = 3; // 2: the first call carries the session's first words; 3: model per call, subagent type
+const CACHE_VERSION = 4; // 4: U+2028 inside a record no longer tears it; 2: the first call carries the session's first words; 3: model per call, subagent type
 const CACHE_KEEP_MS = 35 * 86400_000;
 const cacheFile = () => join(stateDir(), 'where-cache.json');
 

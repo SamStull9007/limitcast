@@ -1,7 +1,7 @@
 // @ts-check
-import { createReadStream, readdirSync, statSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
+import { jsonlLines } from './usage.mjs';
 
 /**
  * One piece of the context Claude Code loads before your first message, measured from the transcript.
@@ -20,8 +20,7 @@ export async function startupBreakdown(file) {
   const pieces = [];
   let at = 0;
   let entry = '';
-  const rl = createInterface({ input: createReadStream(file), crlfDelay: Infinity });
-  for await (const line of rl) {
+  for await (const line of jsonlLines(file)) {
     if (line.includes('"type":"assistant"')) {
       try {
         const ev = JSON.parse(line);
@@ -41,7 +40,6 @@ export async function startupBreakdown(file) {
     }
     pieces.push(...attachmentPieces(a));
   }
-  rl.close();
   return { pieces, at, entry };
 }
 

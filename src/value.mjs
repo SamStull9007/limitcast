@@ -1,12 +1,11 @@
 // @ts-check
-import { createReadStream, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { limitChangeMessage, windowPct } from './calibrate.mjs';
 import { blockOutcomes, limitHits } from './results.mjs';
 import { startupBreakdown } from './startup.mjs';
 import { stateDir } from './store.mjs';
-import { claudeUsage } from './usage.mjs';
+import { claudeUsage, jsonlLines } from './usage.mjs';
 
 // The value record: what limitcast did for you since you installed it, kept beyond the 8 days of raw readings.
 // `results` shows it; a daily background rollup (started by the status line) keeps it current.
@@ -115,8 +114,7 @@ export async function sessionValue(path, baselineChars) {
   const chars = b.pieces.reduce((a, p) => a + p.chars, 0);
   const seen = new Set();
   const calls = [];
-  const rl = createInterface({ input: createReadStream(path), crlfDelay: Infinity });
-  for await (const line of rl) {
+  for await (const line of jsonlLines(path)) {
     const u = claudeUsage(line, seen, '');
     if (u && !u.sidechain) calls.push(u.t);
   }

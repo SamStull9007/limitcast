@@ -1,9 +1,8 @@
 // @ts-check
-import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { stateDir } from './store.mjs';
-import { claudeRoot, codexRoot, grokRoot } from './usage.mjs';
+import { claudeRoot, codexRoot, grokRoot, jsonlLines } from './usage.mjs';
 
 /**
  * limitcast reads Claude Code's, Codex's and Grok's own log formats, which can change in any release.
@@ -110,14 +109,10 @@ export function newest(dir, keep) {
  * @param {(ev:any)=>boolean} test
  */
 async function findLine(file, needle, test) {
-  const rl = createInterface({ input: createReadStream(file), crlfDelay: Infinity });
-  for await (const line of rl) {
+  for await (const line of jsonlLines(file)) {
     if (!line.includes(needle)) continue;
     try {
-      if (test(JSON.parse(line))) {
-        rl.close();
-        return true;
-      }
+      if (test(JSON.parse(line))) return true;
     } catch {
       /* torn line */
     }

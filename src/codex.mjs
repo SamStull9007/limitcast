@@ -1,11 +1,10 @@
 // @ts-check
-import { copyFileSync, createReadStream, existsSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { stateDir, withStateLock } from './store.mjs';
 import { commitTransaction, editText, readLedger, recoverTransaction } from './transaction.mjs';
-import { jsonlFiles } from './usage.mjs';
+import { jsonlFiles, jsonlLines } from './usage.mjs';
 
 // `limitcast trim --codex`: what Codex loads before you type (AGENTS.md, MCP servers) and which servers you never use.
 // --apply turns unused servers off with `enabled = false` in ~/.codex/config.toml; --undo puts back exactly what it changed.
@@ -75,8 +74,7 @@ export async function codexUsedServers(since, root = join(codexHome(), 'sessions
   used.observed = false;
   used.complete = true;
   for (const f of jsonlFiles(root, since, (n) => n.startsWith('rollout-'))) {
-    const rl = createInterface({ input: createReadStream(f), crlfDelay: Infinity });
-    for await (const line of rl) {
+    for await (const line of jsonlLines(f)) {
       if (!line.trim()) continue;
       try {
         const row = JSON.parse(line);
@@ -117,8 +115,7 @@ async function rolloutHead(file) {
   /** @type {number|undefined} */
   let at;
   let n = 0;
-  const rl = createInterface({ input: createReadStream(file), crlfDelay: Infinity });
-  for await (const line of rl) {
+  for await (const line of jsonlLines(file)) {
     if (++n > 400) break;
     try {
       const ev = JSON.parse(line);
@@ -138,7 +135,6 @@ async function rolloutHead(file) {
       /* skip */
     }
   }
-  rl.close();
   return { subagent, agentsMd, base, ...(first ? { first } : {}), ...(at ? { at } : {}) };
 }
 

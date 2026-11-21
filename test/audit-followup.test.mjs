@@ -11,7 +11,7 @@ import { capabilityProposals, normalizeEvent, processEvent, readOptimization, re
 import { runOptimizationHook, runOptimize, transcriptTools } from '../src/optimize-cli.mjs';
 import { load, record } from '../src/store.mjs';
 import { trimReport } from '../src/trim.mjs';
-import { readUsage } from '../src/usage.mjs';
+import { jsonlLines, readUsage } from '../src/usage.mjs';
 
 const fresh = () => {
   const root = mkdtempSync(join(tmpdir(), 'lc-followup-'));
@@ -57,6 +57,36 @@ test('Claude activity distinguishes observed, missing and incomplete histories a
     assert.equal(activity.complete, false);
     assert.deepEqual([...activity.mcp], ['synthetic']);
   }
+});
+
+test('a record holding U+2028 or U+2029 stays one line, so activity stays complete', async () => {
+  const root = fresh();
+  const claude = join(root, 'claude');
+  mkdirSync(claude);
+  const file = join(claude, 's.jsonl');
+  const row = {
+    type: 'assistant',
+    message: {
+      content: [
+        { type: 'text', text: 'scraped page text' },
+        { type: 'tool_use', name: 'mcp__synthetic__query', input: {} },
+      ],
+    },
+  };
+  writeFileSync(file, `${JSON.stringify(row)}\n`);
+  assert.ok(readFileSync(file, 'utf8').includes(' '), 'JSON.stringify leaves U+2028 unescaped');
+  const activity = { skills: new Set(), mcp: new Set() };
+  await readUsage(0, { claude, codex: join(root, 'codex'), grok: join(root, 'grok') }, activity);
+  assert.equal(activity.complete, true);
+  assert.deepEqual([...activity.mcp], ['synthetic']);
+
+  // CRLF, a multibyte line longer than one read chunk, no trailing newline, and an early exit
+  const long = `${'å'.repeat(70_000)} x`;
+  writeFileSync(file, `a\r\n${long}\nlast`);
+  const got = [];
+  for await (const l of jsonlLines(file)) got.push(l);
+  assert.deepEqual(got, ['a', long, 'last']);
+  for await (const l of jsonlLines(file)) if (l === 'a') break;
 });
 
 test('Claude CLI never applies cuts from spaced used records or incomplete evidence, including cache hits', () => {

@@ -1,9 +1,9 @@
 // @ts-check
-import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { windowName } from './forecast.mjs';
+import { jsonlLines } from './usage.mjs';
 
 /** @typedef {import('./forecast.mjs').Sample} Sample */
 
@@ -72,8 +72,7 @@ export async function readCodex(since, root = join(process.env.CODEX_HOME ?? joi
   /** @type {Sample[]} */
   const out = [];
   for (const file of rolloutFiles(root, since)) {
-    const rl = createInterface({ input: createReadStream(file), crlfDelay: Infinity });
-    for await (const line of rl) for (const s of codexSamples(line)) if (s.t >= since) out.push(s);
+    for await (const line of jsonlLines(file)) for (const s of codexSamples(line)) if (s.t >= since) out.push(s);
   }
   return out;
 }

@@ -2,7 +2,6 @@
 import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { stateDir, writeAtomic } from './store.mjs';
 
 /**
@@ -267,7 +266,7 @@ export async function readUsage(since, roots = {}, activity) {
       /** @type {import('./trim.mjs').Activity} */
       const act = { skills: new Set(), mcp: new Set(), observed: false, complete: true };
       const u = [];
-      for await (const line of lines(f)) {
+      for await (const line of jsonlLines(f)) {
         claudeActivity(line, act);
         const x = claudeUsage(line, seen, session);
         if (x) u.push(x);
@@ -288,7 +287,7 @@ export async function readUsage(since, roots = {}, activity) {
       // rollout-2026-10-23T18-39-41-<session uuid>.jsonl → the uuid
       const session = basename(f, '.jsonl').replace(/^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-/, '');
       const u = [];
-      for await (const line of lines(f)) {
+      for await (const line of jsonlLines(f)) {
         const x = codexUsage(line, st, session);
         if (x) u.push(x);
       }
@@ -312,7 +311,7 @@ export async function readUsage(since, roots = {}, activity) {
 }
 
 const CACHE_KEEP_MS = 35 * 86400_000;
-const USAGE_CACHE_VERSION = 6; // 6: text-block slash commands; 5: activity completeness. Re-read older entries before pruning.
+const USAGE_CACHE_VERSION = 7; // 7: U+2028 inside a record no longer marks it torn; 6: text-block slash commands; 5: activity completeness. Re-read older entries before pruning.
 const usageCacheFile = () => join(stateDir(), 'usage-cache.json');
 
 /** @returns {Record<string, {s:number, m:number, u:Usage[], a?:{skills:string[], mcp:string[], observed:boolean, complete:boolean}}>} */
@@ -344,9 +343,35 @@ function safeDecode(s) {
   }
 }
 
-/** @param {string} file */
-function lines(file) {
-  return createInterface({ input: createReadStream(file), crlfDelay: Infinity });
+/**
+ * The lines of a .jsonl file. Splits on \n only: readline also breaks at U+2028 and U+2029, which JSON leaves
+ * unescaped inside strings, so a valid record holding scraped text came back as torn, unparseable pieces.
+ * @param {string} file
+ * @returns {AsyncGenerator<string>}
+ */
+export async function* jsonlLines(file) {
+  const stream = createReadStream(file, { encoding: 'utf8' });
+  /** @type {string[]} */
+  let parts = [];
+  const line = () => {
+    const l = parts.join('');
+    parts = [];
+    return l.endsWith('\r') ? l.slice(0, -1) : l;
+  };
+  try {
+    for await (const chunk of stream) {
+      let start = 0;
+      for (let i = chunk.indexOf('\n'); i !== -1; i = chunk.indexOf('\n', start)) {
+        parts.push(chunk.slice(start, i));
+        start = i + 1;
+        yield line();
+      }
+      if (start < chunk.length) parts.push(chunk.slice(start));
+    }
+    if (parts.length) yield line();
+  } finally {
+    stream.destroy();
+  }
 }
 
 /**
