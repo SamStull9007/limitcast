@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.7 — 2026-11-21
+
+- Fix: install, reinstall and `doctor --fix` keep a wrapper you put around a limitcast hook command (for example a host adapter running `sh -c '<limitcast command>'`). Only the limitcast invocation inside it is updated, and `--notice` is added inside the wrapper instead of after it. A wrapper around a launcher path that has since moved is replaced by the current command.
+
 ## 0.20.6 — 2026-11-21
 
 - Fix: transcripts are split into lines on newline only. A record holding U+2028 or U+2029 (common in scraped web text) was torn into unparseable pieces, so `trim` reported the usage history as incomplete and suggested nothing, and token, startup and Codex readers dropped the record. The usage and where caches are re-read once.
