@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { doctor, install, uninstall } from '../src/install.mjs';
+import { doctor, install, keepWrapper, uninstall } from '../src/install.mjs';
 import { editFiles } from '../src/transaction.mjs';
 
 function fixture() {
@@ -180,4 +180,41 @@ test('CLI doctor repair and uninstall preserve unrelated hooks in an isolated ho
   assert.match(removed.stdout, /restored your original status line/);
   assert.equal(read(opts.path).statusLine.command, 'echo original');
   assert.deepEqual(read(opts.path).hooks.PreToolUse, [foreign]);
+});
+
+test('reinstall keeps a user wrapper around our hook command and swaps only our invocation', () => {
+  const opts = fixture();
+  const wrap = (inner) => `python3 adapter.py only-here /bin/sh -c '${inner}'`;
+  const hooks = {
+    SessionStart: [{ matcher: '', hooks: [command(wrap('limitcast _optimize-hook --src claude'))] }],
+    PostToolUse: [{ matcher: '', hooks: [command(wrap('limitcast _optimize-hook --src claude'))] }],
+    PreToolUse: [{ matcher: 'Task|Agent', hooks: [command(wrap('limitcast guard'))] }],
+  };
+  writeFileSync(opts.path, JSON.stringify({ hooks }));
+  install({ ...opts, guard: true, alerts: true, optimize: true });
+  install({ ...opts, guard: true, alerts: true, optimize: true });
+  const all = Object.values(read(opts.path).hooks)
+    .flat()
+    .flatMap((e) => e.hooks.map((h) => h.command));
+  assert.ok(all.includes(wrap('limitcast _optimize-hook --src claude')));
+  assert.ok(all.includes(wrap('limitcast _optimize-hook --src claude --notice')));
+  assert.ok(all.includes(wrap('limitcast guard')));
+  assert.ok(!all.includes('limitcast guard'));
+  assert.ok(all.every((c) => !c.endsWith("' --notice")));
+  // A moved launcher cannot be found inside the wrapper, so ours replaces it rather than keeping a stale path.
+  install({ ...opts, guard: true, self: '/new/limitcast' });
+  const guards = read(opts.path)
+    .hooks.PreToolUse.flatMap((e) => e.hooks.map((h) => h.command))
+    .filter((c) => /\bguard\b/.test(c));
+  assert.deepEqual(guards, ['/new/limitcast guard']);
+});
+
+test('keepWrapper ignores unwrapped commands and partial-token matches', () => {
+  assert.equal(keepWrapper(['limitcast guard'], 'limitcast guard'), 'limitcast guard');
+  assert.equal(keepWrapper(['/opt/limitcast guard'], 'limitcast guard'), 'limitcast guard');
+  assert.equal(keepWrapper(['x limitcast guardian'], 'limitcast guard'), 'limitcast guard');
+  assert.equal(
+    keepWrapper(["a sh -c 'limitcast _optimize-hook --src claude --notice'"], 'limitcast _optimize-hook --src claude'),
+    "a sh -c 'limitcast _optimize-hook --src claude'",
+  );
 });

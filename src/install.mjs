@@ -245,6 +245,8 @@ function upsertHook(cfg, event, entry, mine) {
   const i = list.findIndex(mine);
   if (i >= 0) {
     const previous = list[i];
+    const olds = previous.hooks.filter((hook) => mine({ hooks: [hook] })).map((hook) => hook.command);
+    entry = { ...entry, hooks: entry.hooks.map((hook) => ({ ...hook, command: keepWrapper(olds, hook.command) })) };
     if (previous.hooks.every((hook) => mine({ hooks: [hook] }))) list[i] = { ...previous, ...entry };
     else {
       // Keep sibling commands and their matcher in place; give our command its required matcher separately.
@@ -256,6 +258,27 @@ function upsertHook(cfg, event, entry, mine) {
       }
     }
   } else list.push(entry);
+}
+
+/**
+ * A user's wrapper around our hook command (`adapter … sh -c '<our command>'`) survives reinstall and `doctor --fix`:
+ * only our invocation inside it is replaced. A changed launcher path cannot be found inside, so that falls back to ours.
+ * @param {unknown[]} olds previous commands of ours in this group
+ * @param {string} command
+ */
+export function keepWrapper(olds, command) {
+  const base = command.replace(/ --notice$/, '');
+  for (const old of olds) {
+    if (typeof old !== 'string') continue;
+    const at = old.indexOf(base);
+    if (at < 0) continue;
+    let end = at + base.length;
+    if (old.startsWith(' --notice', end)) end += ' --notice'.length;
+    if (at === 0 && end === old.length) return command;
+    if (!/^(?:$|['"\s;|&)])/.test(old.slice(end)) || !/(?:^|['"\s(])$/.test(old.slice(0, at))) continue;
+    return old.slice(0, at) + command + old.slice(end);
+  }
+  return command;
 }
 
 /**
@@ -355,6 +378,9 @@ const isToolLimit = runs(/\btool-limit\b/);
 const isCodexNotify = runs(/\bcodex-notify\b/);
 const isOptimizer = runs(/\b_optimize-hook\b/);
 
+/** Append `--notice` to our optimizer invocation, inside a user's wrapper when there is one. @param {string} command */
+const addNotice = (command) => command.replace(/(\b_optimize-hook --src [^\s'"]+)/, '$1 --notice');
+
 /** Alerts are the drift hook, the fat-tool check, or the standalone large-result notice. */
 function hostHasAlerts(cfg) {
   return (
@@ -376,7 +402,7 @@ function foldToolNotice(cfg) {
     if (!isOptimizer(entry)) continue;
     for (const hook of entry.hooks ?? []) {
       if (typeof hook.command === 'string' && /\b_optimize-hook\b/.test(hook.command) && !hook.command.includes(' --notice'))
-        hook.command += ' --notice';
+        hook.command = addNotice(hook.command);
     }
   }
   removeHooks(cfg, 'PostToolUse', isToolCheck);
@@ -392,7 +418,7 @@ function ensureGrokNotice(path, files) {
     if (!isOptimizer(entry)) continue;
     for (const hook of entry.hooks ?? []) {
       if (typeof hook.command === 'string' && /\b_optimize-hook\b/.test(hook.command) && !hook.command.includes(' --notice')) {
-        hook.command += ' --notice';
+        hook.command = addNotice(hook.command);
         changed = true;
       }
     }
