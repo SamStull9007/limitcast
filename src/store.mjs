@@ -52,7 +52,7 @@ function releaseLock(lock, owner) {
     // A contender can replace the now-empty directory with its populated lock. Never remove that lock recursively.
     rmdirSync(lock);
   } catch (error) {
-    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error;
+    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code) && !(process.platform === 'win32' && error.code === 'EPERM')) throw error;
   }
 }
 
@@ -97,7 +97,7 @@ export function withStateLock(change, lockName = 'config.json.lock') {
           }
         }
       } catch (error) {
-        if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error;
+        if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code) && !(process.platform === 'win32' && error.code === 'EPERM')) throw error;
       }
       if (Date.now() - start > LOCK_WAIT_MS) {
         throw new Error(

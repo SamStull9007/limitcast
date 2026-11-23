@@ -451,7 +451,7 @@ test('install --guard --alerts installs all requested features without a key', (
     cfg.statusLine.command,
     `${shellQuote(shellPathname(shellPath()))} ${shellQuote(shellPathname(join(env.LIMITCAST_STATE, 'limitcast-hook.sh')))} statusline`,
   );
-  assert.match(JSON.stringify(cfg.hooks?.PreToolUse), /limitcast-hook\.sh guard/);
+  assert.equal(cfg.hooks.PreToolUse[0].hooks[0].command, cfg.statusLine.command.replace(/ statusline$/, ' guard'));
   assert.ok(cfg.hooks?.SessionStart?.length);
   assert.doesNotMatch(out, /Try Pro|checkout/);
 });

@@ -62,6 +62,7 @@ test('Windows shell selection uses the configured Git Bash and normalizes launch
   const platform = Object.getOwnPropertyDescriptor(process, 'platform');
   const oldBash = process.env.CLAUDE_CODE_GIT_BASH_PATH;
   const oldState = process.env.LIMITCAST_STATE;
+  const oldPath = process.env.PATH;
   const bash = shellPath();
   try {
     Object.defineProperty(process, 'platform', { value: 'win32' });
@@ -70,9 +71,15 @@ test('Windows shell selection uses the configured Git Bash and normalizes launch
     assert.equal(shellPath(), bash);
     assert.equal(shellPathname('C:\\Users\\Name Space\\file'), 'C:/Users/Name Space/file');
     assert.ok(selfCommand().startsWith(`${shellQuote(shellPathname(bash))} `));
-    assert.deepEqual(hostCommand('codex', ['a & b']), [bash, ['-c', 'exec "$@"', '--', 'codex', 'a & b']]);
+    const stub = join(process.env.LIMITCAST_STATE, 'git');
+    writeFileSync(stub, '#!/bin/sh\necho fixture\n', { mode: 0o755 });
+    process.env.PATH = process.env.LIMITCAST_STATE;
+    assert.deepEqual(hostCommand('git', ['a & b']), [bash, ['-c', 'exec "$@"', '--', shellPathname(stub), 'a & b']]);
+    assert.equal(execFileSync(...hostCommand('git', []), { encoding: 'utf8' }).trim(), 'fixture');
+    assert.deepEqual(hostCommand('limitcast-missing-fixture', []), [bash, ['-c', 'exec "$@"', '--', 'limitcast-missing-fixture']]);
   } finally {
     Object.defineProperty(process, 'platform', platform);
+    process.env.PATH = oldPath;
     if (oldBash === undefined) delete process.env.CLAUDE_CODE_GIT_BASH_PATH;
     else process.env.CLAUDE_CODE_GIT_BASH_PATH = oldBash;
     if (oldState === undefined) delete process.env.LIMITCAST_STATE;

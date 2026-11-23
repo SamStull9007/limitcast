@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, isAbsolute, join } from 'node:path';
 
 export function shellPath() {
   if (process.platform !== 'win32') return '/bin/sh';
@@ -27,5 +27,16 @@ export const shellQuote = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace
 
 /** Bash runs npm shims on Windows without interpolating their arguments into shell code. */
 export function hostCommand(command, args) {
-  return process.platform === 'win32' ? [shellPath(), ['-c', 'exec "$@"', '--', shellPathname(command), ...args]] : [command, args];
+  if (process.platform !== 'win32') return [command, args];
+  // Git Bash prepends its own Git to PATH; resolve the caller's executable before entering that shell.
+  if (!isAbsolute(command)) {
+    const extensions = ['', ...(process.env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM').toLowerCase().split(';')];
+    command =
+      (process.env.PATH ?? '')
+        .split(delimiter)
+        .flatMap((dir) => extensions.map((ext) => join(dir, command + ext)))
+        .find(existsSync) ?? command;
+  }
+  if (/\.(?:exe|com)$/i.test(command)) return [command, args];
+  return [shellPath(), ['-c', 'exec "$@"', '--', shellPathname(command), ...args]];
 }

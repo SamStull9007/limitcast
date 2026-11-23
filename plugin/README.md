@@ -16,7 +16,7 @@ Slash commands for [limitcast](https://limitcast.dev), which forecasts when your
 - `/limitcast:memory-audit`: checks this project's auto-memory for what Claude Code never loads (`MEMORY.md` past 200 lines or 25 KB), broken links, unlinked, stale and contradictory notes. It proposes fixes and changes nothing until you agree.
 - `/limitcast:memory-split`: splits an oversized memory file into a short hub plus topic files, after showing you the boundary and checking nothing that cites it breaks.
 
-The commands run `npx limitcast` locally; nothing leaves your machine. Limit readings come from the status line, so also run `npx limitcast install` once in a terminal and restart Claude Code. Requires Node 22+ on macOS or Linux.
+The commands run `npx limitcast` locally; nothing leaves your machine. Limit readings come from the status line, so also run `npx limitcast install` once in a terminal and restart Claude Code. Requires Node 22+ on macOS, Linux or Windows; native Windows hooks also require Git for Windows.
 
 ## What it changes on your machine
 

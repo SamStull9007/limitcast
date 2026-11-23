@@ -109,7 +109,7 @@ export function applyCapabilities(repo, host, names, { validate = host === 'grok
     throw new Error('choose proposed Claude tools, or Codex or Grok capabilities and MCP servers');
   const file = configPath(repo, host);
   safePath(repo, file);
-  if (host !== 'claude' && [homedir(), realpathSync(homedir())].includes(repo.root))
+  if (host !== 'claude' && relative(realpathSync.native(homedir()), realpathSync.native(repo.root)) === '')
     // In the home directory the "project" file is the user's own config, which already holds every server it could turn off.
     throw new Error(
       `this repository is your home directory, so ${CONFIG[host]} is your own ${host === 'codex' ? 'Codex' : 'Grok'} config; use \`limitcast trim --${host} --apply\` to turn servers off everywhere`,
