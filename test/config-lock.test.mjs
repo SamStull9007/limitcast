@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFile
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { updateConfig } from '../src/store.mjs';
 
 const src = (f) => JSON.stringify(new URL(`../src/${f}`, import.meta.url).href);
@@ -59,7 +60,7 @@ test('simultaneous commands changing different settings: every change survives',
 
 test('`limitcast trim keep` run from several terminals at once keeps every name', async () => {
   const state = fresh();
-  const bin = JSON.stringify(new URL('../bin/limitcast.mjs', import.meta.url).pathname);
+  const bin = JSON.stringify(fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url)));
   const names = [];
   const jobs = [];
   for (let i = 0; i < 8; i++) {

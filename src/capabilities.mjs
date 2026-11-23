@@ -5,6 +5,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import { codexConfigPath, codexServers } from './codex.mjs';
 import { grokServers } from './grok.mjs';
 import { capabilityProposals, changeOptimization, digest, readOptimization, saveOptimization } from './optimize.mjs';
+import { hostCommand } from './platform.mjs';
 import { writeAtomic } from './store.mjs';
 
 const KEYS = { collaboration: ['multi_agent'], goals: ['goals'], image_media: ['view_image'] };
@@ -73,7 +74,7 @@ export function patchCodexCapabilities(text, names) {
 
 export function validateCodex(repo, disabled = []) {
   // `features list` ignores -C on Codex 0.167; its actual cwd decides which project config is loaded.
-  const output = execFileSync('codex', ['features', 'list'], { cwd: repo.root, encoding: 'utf8', timeout: 5000, maxBuffer: 100_000 });
+  const output = execFileSync(...hostCommand('codex', ['features', 'list']), { cwd: repo.root, encoding: 'utf8', timeout: 5000, maxBuffer: 100_000 });
   for (const key of Object.values(KEYS).flat()) {
     // Codex 0.169 lists multi_agent as "deprecated" yet still honors it; a "removed" key has no control to switch.
     if (!new RegExp(`^${key}\\s+(?:stable|experimental|under development|deprecated)\\s+(?:true|false)$`, 'm').test(output))
@@ -94,7 +95,7 @@ export function validateGrok(repo, disabled = []) {
 /** `<host> mcp list --json` reports the settings the host actually loads, so an untrusted project that ignores the file shows up here. */
 function checkServersOff(command, repo, names, label) {
   const list = JSON.parse(
-    execFileSync(command, ['mcp', 'list', '--json'], { cwd: repo.root, encoding: 'utf8', timeout: 10_000, maxBuffer: 1_000_000 }),
+    execFileSync(...hostCommand(command, ['mcp', 'list', '--json']), { cwd: repo.root, encoding: 'utf8', timeout: 10_000, maxBuffer: 1_000_000 }),
   );
   if (!Array.isArray(list)) throw new Error(`${label} returned an unexpected MCP server list`);
   for (const name of names) {

@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { install, readSettings, uninstall } from '../src/install.mjs';
 import { firstFlag, resultTokens, tipFor, toolKey, toolNotice } from '../src/toolcheck.mjs';
 import { attribute, whyReport } from '../src/where.mjs';
@@ -108,7 +109,7 @@ test('CLI: the tool-check hook prints the notice without a license, once per too
   // XDG_CONFIG_HOME too: starting a trial also writes a marker there, which must not land in the real ~/.config.
   const env = { ...process.env, LIMITCAST_STATE: state, XDG_CONFIG_HOME: tmp('lc-tool-cli-xdg-') };
   delete env.LIMITCAST_LICENSE;
-  const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
+  const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
   const hook = (tool, size, sid = 's1') =>
     JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: tool, tool_input: {}, tool_response: { stdout: 'x'.repeat(size) }, session_id: sid });
   const run = (input) => spawnSync('node', [bin, 'tool-check'], { env, input });

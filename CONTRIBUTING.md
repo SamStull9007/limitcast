@@ -4,7 +4,7 @@ Start with [Q&A](https://github.com/SamStull9007/limitcast/discussions/categorie
 
 ## Run locally
 
-Requires Node.js 22+ on macOS or Linux. There are no runtime dependencies to install.
+Requires Node.js 22+ on macOS, Linux or Windows. Windows hook tests require Git for Windows. There are no npm runtime dependencies to install.
 
 ```sh
 git clone https://github.com/SamStull9007/limitcast.git
@@ -35,7 +35,7 @@ For a suspected credential or private-data exposure, email support@limitcast.dev
 
 - Reproduce a setup problem using synthetic logs and add a fixture.
 - Improve an unclear installation or error message.
-- Verify a documented workflow on a supported Node/macOS/Linux combination.
+- Verify a documented workflow on a supported Node/macOS/Linux/Windows combination.
 - Improve screen-reader descriptions or a confusing documentation example.
 
 Check existing issues and discussions first. For a larger change, discuss the intended behavior before implementing it. Contributions are reviewed for correctness, privacy, compatibility, and scope.

@@ -18,7 +18,7 @@ Implementation contract reviewed by Codex, 2026-11-08. Owner: Limitcast maintain
 | Repository lint and formatting pass without new suppressions | `npx --yes @biomejs/biome@2.6.3 ci .` | Task end and CI | Block |
 | Public content and privacy checks pass, including newly staged files | `node --test test/public-content.test.mjs` | Before commit | Block |
 | Optimizer concurrency, safety and lifecycle regressions pass | `node --test test/optimize.test.mjs` | Task end | Block |
-| Packed CLI works without the source checkout or operator configuration | `node scripts/package-smoke.mjs` | Task end and CI on Node 22/24/26, macOS/Linux | Block |
+| Packed CLI works without the source checkout or operator configuration | `node scripts/package-smoke.mjs` | Task end and CI on Node 22/24/26, macOS/Linux/Windows | Block |
 | Zero ERROR-level findings from Semgrep's focused `p/ci` ruleset in production Python, JavaScript and TypeScript under `src/`, `bin/` and `scripts/` | `pre-commit run semgrep-security --all-files` | Automatically on matching staged files before a local commit; all-files at rollout | Block on findings, scanner failure or unavailable rules |
 
 ## Local Semgrep commit check

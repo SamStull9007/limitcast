@@ -84,6 +84,7 @@ import { onboardingReport } from '../src/onboarding.mjs';
 import { runOptimizationHook, runOptimize } from '../src/optimize-cli.mjs';
 import { driftMessage, hostSnapshot, loadOverhead, recordOverhead, savedPerSession, savedSummary, snapshot } from '../src/overhead.mjs';
 import { advise, getPlan, loadPeaks, PLANS, planPrices, planStats, recordPeaks, setPlan } from '../src/plan.mjs';
+import { hostCommand } from '../src/platform.mjs';
 import { costOf, fmtUsd } from '../src/prices.mjs';
 import { deferReceipt, hostSubagentUsage, settleReceipts, stopHost } from '../src/receipts.mjs';
 import { burnReport } from '../src/report.mjs';
@@ -327,7 +328,8 @@ if (cmd === '_optimize-hook') {
     // Grok runs the same status-line command. Its feed gets its own file, so `doctor`'s Claude checks only see Claude feeds.
     saveFeedShape(feed, grokSessionLine(feed) ? 'last-feed-grok.json' : 'last-feed.json');
     // Readings are kept 8 days; the daily rollup folds what they showed into the long-term value record.
-    if (dailyDue(now)) spawn(process.execPath, [fileURLToPath(import.meta.url), 'rollup'], { detached: true, stdio: 'ignore' }).unref();
+    if (dailyDue(now))
+      spawn(process.execPath, [fileURLToPath(import.meta.url), 'rollup'], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
     const health = healthHint();
     if (health) hints.push(health);
     {
@@ -349,7 +351,11 @@ if (cmd === '_optimize-hook') {
     // Grok's weekly % comes from grok.com (opt-in); refresh it in the background so no status line waits on the network.
     if (grokQuotaDue(now)) {
       touchGrokQuota(now);
-      spawn(process.execPath, [fileURLToPath(import.meta.url), 'grok-usage', '--refresh'], { detached: true, stdio: 'ignore' }).unref();
+      spawn(process.execPath, [fileURLToPath(import.meta.url), 'grok-usage', '--refresh'], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      }).unref();
     }
   } catch {
     /* never break the status line */
@@ -372,7 +378,7 @@ if (cmd === '_optimize-hook') {
     /* never break the status line */
   }
   if (wrapped.length) {
-    const r = spawnSync(wrapped[0], wrapped.slice(1), { input, stdio: ['pipe', 'pipe', 'inherit'] });
+    const r = spawnSync(...hostCommand(wrapped[0], wrapped.slice(1)), { input, stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true });
     // Your status line stays as it was; limitcast adds its own line under it (status scripts often printf without a newline).
     const yours = r.stdout?.toString() ?? '';
     process.stdout.write(yours && !yours.endsWith('\n') ? `${yours}\n` : yours);
@@ -615,7 +621,7 @@ if (cmd === '_optimize-hook') {
     if (args.includes('--hook')) {
       readStdin();
       if (notifyEnabled() && codexNotifyDue(now))
-        spawn(process.execPath, [fileURLToPath(import.meta.url), 'codex-notify'], { detached: true, stdio: 'ignore' }).unref();
+        spawn(process.execPath, [fileURLToPath(import.meta.url), 'codex-notify'], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
     } else if (notifyEnabled()) {
       notifyChanges(
         forecastAll(oneClaudeAccount(await readCodex(now - KEEP_MS)), now).filter((f) => f.src === 'codex'),
@@ -1145,7 +1151,10 @@ if (cmd === '_optimize-hook') {
     writeFileSync(out, htmlPage(md, { title: 'limitcast dashboard', generated: new Date(now).toLocaleString() }));
     console.log(`Wrote ${out}`);
     if (!args.includes('--no-open')) {
-      const opener = spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [out], { detached: true, stdio: 'ignore' });
+      const opener = spawn(
+        ...hostCommand(process.platform === 'win32' ? 'explorer.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open', [out]),
+        { detached: true, stdio: 'ignore', windowsHide: true },
+      );
       opener.on('error', () => {});
       opener.unref();
     }
@@ -1199,7 +1208,9 @@ if (cmd === '_optimize-hook') {
     what === 'test' || what === 'on'
       ? mac
         ? 'Sent a test notification. The first one asks to allow notifications from "limitcast"; if you missed it, turn it on in System Settings → Notifications → limitcast.'
-        : 'Sent a test notification. Nothing showed up? Install notify-send.'
+        : process.platform === 'win32'
+          ? 'Sent a test notification. Nothing showed up? Check Windows notification settings and Do not disturb.'
+          : 'Sent a test notification. Nothing showed up? Install notify-send.'
       : '',
   );
   if (what !== 'test')
@@ -1234,14 +1245,18 @@ if (cmd === '_optimize-hook') {
     const log = join(stateDir(), `after-reset-${now}.log`);
     const out = openSync(log, 'a');
     const rest = args.filter((a) => a !== '--detach');
-    spawn(process.execPath, [fileURLToPath(import.meta.url), 'after-reset', ...rest], { detached: true, stdio: ['ignore', out, out] }).unref();
+    spawn(process.execPath, [fileURLToPath(import.meta.url), 'after-reset', ...rest], {
+      detached: true,
+      stdio: ['ignore', out, out],
+      windowsHide: true,
+    }).unref();
     console.log(`Will run at ${clock(at)} (after the ${src} ${win} reset), in the background. Output: ${log}`);
     process.exit(0);
   }
   if (at > now) console.log(`Waiting for the ${src} ${win} reset at ${clock(at)}…`);
   // Short sleeps against the wall clock, so a laptop that sleeps through the reset still wakes on time.
   while (Date.now() < at) await new Promise((r) => setTimeout(r, Math.min(60_000, at - Date.now())));
-  const r = spawnSync(command[0], command.slice(1), { stdio: 'inherit' });
+  const r = spawnSync(...hostCommand(command[0], command.slice(1)), { stdio: 'inherit' });
   process.exit(r.status ?? 1);
 } else if (cmd === 'rollup') {
   // Started daily in the background by the status line: keeps the value record current and checks the setup.

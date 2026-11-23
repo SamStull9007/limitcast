@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { APPLY_BLOCKED, applyBlocked, ensureDefaultKeep, getKeep, planTrim, setKeep } from '../src/apply.mjs';
 import { codexTrimReport } from '../src/codex.mjs';
 import { grokTrimReport } from '../src/grok.mjs';
@@ -15,7 +16,7 @@ process.env.LIMITCAST_STATE = state;
 process.env.CLAUDE_CONFIG_DIR = tmp('lc-keep-claude-');
 process.env.CODEX_HOME = tmp('lc-keep-codex-');
 process.env.GROK_HOME = tmp('lc-keep-grok-');
-const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
+const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
 
 const base = {
   cwd: '/p',

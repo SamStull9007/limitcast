@@ -115,6 +115,7 @@ test('apply backs up, writes, and undo restores exactly what it changed', () => 
     const claudeJson = join(dir, 'claude.json');
     writeFileSync(settings, JSON.stringify({ theme: 'dark', skillOverrides: { dataviz: 'on', other: 'off' } }));
     writeFileSync(claudeJson, JSON.stringify({ numStartups: 5, projects: { '/p': { disabledMcpServers: ['mine'] } } }), { mode: 0o600 });
+    const permissions = statSync(claudeJson).mode & 0o777;
     const plan = { hide: ['dataviz', 'deploy'], pluginSkills: [], disable: ['claude.ai Figma'], manualMcp: [] };
     const e = applyTrim(plan, { cwd: '/p', now: 1000, settings, claudeJson });
     assert.deepEqual(e.mcp, ['claude.ai Figma']);
@@ -124,7 +125,7 @@ test('apply backs up, writes, and undo restores exactly what it changed', () => 
     const c1 = JSON.parse(readFileSync(claudeJson, 'utf8'));
     assert.deepEqual(c1.projects['/p'].disabledMcpServers, ['mine', 'claude.ai Figma']);
     assert.equal(c1.numStartups, 5);
-    assert.equal(statSync(claudeJson).mode & 0o777, 0o600); // credentials file stays owner-only
+    assert.equal(statSync(claudeJson).mode & 0o777, permissions); // preserve the platform's original permissions
 
     // The user changes something after applying; undo leaves it alone.
     s1.skillOverrides.deploy = 'off';

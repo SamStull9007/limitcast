@@ -10,6 +10,7 @@ import { forecast } from '../src/forecast.mjs';
 import { guardDecision, runGuard, spawnSource } from '../src/guard.mjs';
 import { doctor, install, installedFeatures, launcherTargets, uninstall, wrappedCommand, writeLauncher } from '../src/install.mjs';
 import { checkLicense, issueLicense } from '../src/license.mjs';
+import { shellPath, shellPathname } from '../src/platform.mjs';
 import { burnReport } from '../src/report.mjs';
 import { startupBreakdown } from '../src/startup.mjs';
 import { baseline, contributors, measuredSavings, savings, skillListing, startupReport, trimReport } from '../src/trim.mjs';
@@ -246,7 +247,7 @@ test('doctor reports missing setup and stale data', () => {
 test('CLI: formerly paid commands are free; version and help work', () => {
   const env = { ...process.env, LIMITCAST_STATE: tmp('lc-cli-'), LIMITCAST_LICENSE: '' };
   delete env.LIMITCAST_LICENSE;
-  const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
+  const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
   const r = spawnSync('node', [bin, 'report'], { env });
   assert.equal(r.status, 0);
   assert.doesNotMatch(r.stdout.toString(), /part of limitcast Pro/);
@@ -271,7 +272,7 @@ test('CLI: free trim includes item names; --share keeps them private', () => {
   );
   const env = { ...process.env, CLAUDE_CONFIG_DIR: claudeDir, LIMITCAST_STATE: tmp('lc-free-state-') };
   delete env.LIMITCAST_LICENSE;
-  const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
+  const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
   const r = spawnSync('node', [bin, 'trim'], { env });
   const out = r.stdout.toString();
   assert.equal(r.status, 0, r.stderr.toString());
@@ -460,20 +461,23 @@ test('launcher: runs this copy, falls back to limitcast on PATH, then to your ow
   try {
     const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
     const sh = writeLauncher(process.execPath, bin);
-    assert.deepEqual(launcherTargets(sh), { node: process.execPath, bin });
-    assert.match(execFileSync('/bin/sh', [sh, '--version'], { env }).toString(), /^\d+\.\d+\.\d+/);
+    assert.deepEqual(launcherTargets(sh), { node: shellPathname(process.execPath), bin: shellPathname(bin) });
+    assert.match(execFileSync(shellPath(), [sh, '--version'], { env }).toString(), /^\d+\.\d+\.\d+/);
     // Node moved (an upgrade) and no limitcast on PATH: the status line still runs the wrapped command.
     writeLauncher('/gone/node', '/gone/limitcast.mjs');
     // Isolate the missing-install branch from a real Homebrew install on the test machine.
     const launcher = readFileSync(sh, 'utf8');
     assert.ok(launcher.includes('PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin"'));
     writeFileSync(sh, launcher.replace('PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin"', 'PATH="$PATH"'));
-    const out = execFileSync('/bin/sh', [sh, 'statusline', '--', 'sh', '-c', 'cat >/dev/null; echo mine'], { env, input: '{}' }).toString();
+    const out = execFileSync(shellPath(), [sh, 'statusline', '--', 'sh', '-c', 'cat >/dev/null; echo mine'], { env, input: '{}' }).toString();
     assert.equal(out, 'mine\n');
-    assert.equal(execFileSync('/bin/sh', [sh, 'guard'], { env, stdio: ['ignore', 'pipe', 'pipe'] }).toString(), ''); // allows
+    assert.equal(execFileSync(shellPath(), [sh, 'guard'], { env, stdio: ['ignore', 'pipe', 'pipe'] }).toString(), ''); // allows
     const fallback = join(state, 'limitcast');
     writeFileSync(fallback, '#!/bin/sh\necho fallback\n', { mode: 0o755 });
-    assert.equal(execFileSync('/bin/sh', [sh, '--version'], { env: { ...env, PATH: `${state}:/usr/bin:/bin` } }).toString(), 'fallback\n');
+    assert.equal(
+      execFileSync(shellPath(), [sh, '--version'], { env: { ...env, PATH: `${shellPathname(state)}:/usr/bin:/bin` } }).toString(),
+      'fallback\n',
+    );
   } finally {
     process.env.LIMITCAST_STATE = prev;
   }

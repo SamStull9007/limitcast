@@ -52,9 +52,10 @@ test('writeAtomic replaces the file and leaves no temp file behind', () => {
   const file = join(dir, 'config.json');
   writeFileSync(file, '{"old":true}');
   chmodSync(file, 0o600);
+  const permissions = statSync(file).mode & 0o777;
   writeAtomic(file, '{"new":true}');
   assert.equal(readFileSync(file, 'utf8'), '{"new":true}');
   assert.deepEqual(readdirSync(dir), ['config.json']);
   assert.ok(statSync(file).isFile());
-  assert.equal(statSync(file).mode & 0o777, 0o600, 'atomic replacement must preserve private configuration permissions');
+  assert.equal(statSync(file).mode & 0o777, permissions, 'atomic replacement must preserve private configuration permissions');
 });

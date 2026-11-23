@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { claudeAccounts, forecast, oneClaudeAccount, slopePerHour, windowName } from '../src/forecast.mjs';
 import { guardDecision, runGuard } from '../src/guard.mjs';
 import { claudeSamples, codexSamples, readCodex } from '../src/sources.mjs';
@@ -177,7 +178,7 @@ test('guard blocks subagents only when a Claude window runs out soon', () => {
 test('CLI end to end: statusline records, wraps the command; guard denies without a key', async () => {
   const state = mkdtempSync(join(tmpdir(), 'lc-state-'));
   const env = { ...process.env, LIMITCAST_STATE: state, CODEX_HOME: join(state, 'nocodex'), GROK_HOME: join(state, 'nogrok') };
-  const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
+  const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
   const r = Math.floor(Date.now() / 1000) + 3600;
   const feed = (pct) => JSON.stringify({ rate_limits: { five_hour: { used_percentage: pct, resets_at: r } } });
 

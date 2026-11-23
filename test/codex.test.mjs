@@ -53,12 +53,13 @@ test('apply backs up and undo restores the file exactly, keeping its permissions
   try {
     const path = join(dir, 'config.toml');
     writeFileSync(path, TOML, { mode: 0o600 });
+    const permissions = statSync(path).mode & 0o777;
     const changed = applyCodexTrim(['tool-router', 'node_repl'], { path, now: 1000 });
     assert.deepEqual(changed, [
       { name: 'tool-router', prev: true },
       { name: 'node_repl', prev: null },
     ]);
-    assert.equal(statSync(path).mode & 0o777, 0o600);
+    assert.equal(statSync(path).mode & 0o777, permissions);
     undoCodexTrim({ path });
     assert.equal(readFileSync(path, 'utf8'), TOML);
     assert.equal(undoCodexTrim({ path }), null);

@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { runGuard } from '../src/guard.mjs';
 import { loadBlocks } from '../src/results.mjs';
 import { record } from '../src/store.mjs';
@@ -90,7 +91,7 @@ test('CLI: subagent-model is free, validates, lists and removes', () => {
     GROK_HOME: tmp('lc-model-cli-grok-'),
   };
   delete env.LIMITCAST_LICENSE;
-  const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
+  const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
   const run = (...a) => spawnSync('node', [bin, 'subagent-model', ...a], { env });
   assert.equal(run('Explore', 'haiku').status, 0); // no key required
   assert.equal(spawnSync('node', [bin, 'trial'], { env }).status, 0);

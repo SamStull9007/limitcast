@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { advise, foldPeaks, getPlan, loadPeaks, PLANS, planPrices, planStats, recordPeaks, setPlan } from '../src/plan.mjs';
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
@@ -139,7 +140,7 @@ test('CLI: plan is free; set validates; with readings it recommends the next pla
   // XDG_CONFIG_HOME too: starting a trial also writes a marker there, which must not land in the real ~/.config.
   const env = { ...process.env, LIMITCAST_STATE: state, XDG_CONFIG_HOME: tmp('lc-plan-cli-xdg-'), CLAUDE_CONFIG_DIR: claudeDir };
   delete env.LIMITCAST_LICENSE;
-  const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
+  const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
   const run = (...a) => spawnSync('node', [bin, ...a], { env });
   assert.equal(run('plan').status, 0);
   assert.equal(run('trial').status, 0);

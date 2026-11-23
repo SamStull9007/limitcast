@@ -4,10 +4,11 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { memoryCheck, memoryDir, memoryReport, scanMemory } from '../src/memory.mjs';
 
 const tmp = (p) => realpathSync(mkdtempSync(join(tmpdir(), p)));
-const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
+const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
 
 /** A memory folder: index links a.md and, by [[wiki]] link, b-note.md; a.md links c.md; d.md is linked by nothing. */
 function fixture(index = '# Memory\n- [A](a.md) topic a\n- [[b-note]]\n- [Gone](gone.md)\n') {

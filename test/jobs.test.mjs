@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { attribute, jobsReport, readCalls, whyReport } from '../src/where.mjs';
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
@@ -108,7 +109,7 @@ test('CLI: report --jobs is free and lists each job from the transcripts', () =>
   // XDG_CONFIG_HOME too: starting a trial also writes a marker there, which must not land in the real ~/.config.
   const env = { ...process.env, CLAUDE_CONFIG_DIR: claudeDir, LIMITCAST_STATE: tmp('lc-jobs-cli-state-'), XDG_CONFIG_HOME: tmp('lc-jobs-cli-xdg-') };
   delete env.LIMITCAST_LICENSE;
-  const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
+  const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
   const free = spawnSync('node', [bin, 'report', '--jobs'], { env });
   assert.equal(free.status, 0);
   assert.doesNotMatch(free.stdout.toString(), /part of limitcast Pro/);

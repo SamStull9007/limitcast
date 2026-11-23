@@ -1,6 +1,7 @@
 // @ts-check
 import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { devNull } from 'node:os';
 import { join } from 'node:path';
 import { stateDir } from './store.mjs';
 
@@ -123,7 +124,21 @@ export function send(message) {
     return;
   }
   if (process.platform === 'darwin') run('osascript', ['-e', `display notification ${JSON.stringify(message)} with title "limitcast"`]);
+  else if (process.platform === 'win32') run('powershell.exe', windowsNotificationArgs(message));
   else run('notify-send', ['limitcast', message]);
+}
+
+export function windowsNotificationArgs(message) {
+  const script = [
+    '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null',
+    '[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] > $null',
+    '$xml = New-Object Windows.Data.Xml.Dom.XmlDocument',
+    '$xml.LoadXml(\'<toast><visual><binding template="ToastGeneric"><text>limitcast</text><text id="message" /></binding></visual></toast>\')',
+    `$xml.GetElementsByTagName('text').Item(1).InnerText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(message).toString('base64')}'))`,
+    '$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)',
+    "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Microsoft.Windows.PowerShell').Show($toast)",
+  ].join('; ');
+  return ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')];
 }
 
 const channelsFile = () => join(stateDir(), 'notify.json');
@@ -164,7 +179,7 @@ export function setChannel(kind, value) {
  * @param {string} message
  */
 export function remoteArgs(channels, message) {
-  const base = ['-s', '-m', '10', '-o', '/dev/null'];
+  const base = ['-s', '-m', '10', '-o', devNull];
   const out = [];
   if (channels.ntfy) out.push([...base, '-H', 'Title: limitcast', '--data-raw', message, channels.ntfy]);
   if (channels.webhook)
@@ -174,7 +189,7 @@ export function remoteArgs(channels, message) {
 
 /** @param {string} cmd @param {string[]} args */
 function run(cmd, args) {
-  const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+  const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true });
   child.on('error', () => {}); // no notifier installed: nothing to do
   child.unref();
 }

@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { burnReport } from '../src/report.mjs';
 import { attribute, readCalls, whyReport, whySessions } from '../src/where.mjs';
 
@@ -178,7 +179,7 @@ test('CLI: report --why is free and reads the transcripts', () => {
   // XDG_CONFIG_HOME too: starting a trial also writes a marker there, which must not land in the real ~/.config.
   const env = { ...process.env, CLAUDE_CONFIG_DIR: claudeDir, LIMITCAST_STATE: tmp('lc-why-state-'), XDG_CONFIG_HOME: tmp('lc-why-xdg-') };
   delete env.LIMITCAST_LICENSE;
-  const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
+  const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
   const free = spawnSync('node', [bin, 'report', '--why'], { env });
   assert.equal(free.status, 0);
   assert.doesNotMatch(free.stdout.toString(), /part of limitcast Pro/);

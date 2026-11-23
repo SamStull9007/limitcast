@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { test } from 'node:test';
 import { callOptimizationModel, reserveModelJob, startModelWorker } from '../src/model-optimize.mjs';
 import { changeOptimization, normalizeEvent, processEvent, readOptimization, repository } from '../src/optimize.mjs';
@@ -13,11 +13,11 @@ test('native model subprocess stays isolated, accepts structured output, and ref
     receipt = join(dir, 'receipt.json');
   const originalPath = process.env.PATH;
   const job = { kind: 'learn', evidence: { checks: ['node --test'] } };
-  process.env.PATH = `${dir}:${originalPath}`;
+  process.env.PATH = `${dir}${delimiter}${originalPath}`;
   const install = (events) =>
     writeFileSync(
       executable,
-      `#!${process.execPath}
+      `#!/usr/bin/env node
     const fs=require('node:fs');
     fs.writeFileSync(${JSON.stringify(receipt)},JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),prompt:fs.readFileSync(0,'utf8'),worker:process.env.LIMITCAST_MODEL_WORKER,allow:process.env.LIMITCAST_ALLOW}));
     process.stdout.write(${JSON.stringify(events)});`,
@@ -63,12 +63,12 @@ test('detached native worker persists a bounded result and does not apply a canc
   const executable = join(dir, 'codex');
   writeFileSync(
     executable,
-    `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify({ stuck: false, confidence: 0.9, commands: ['node --test'] }) } }))});`,
+    `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify({ stuck: false, confidence: 0.9, commands: ['node --test'] }) } }))});`,
     { mode: 0o755 },
   );
   const oldPath = process.env.PATH,
     oldState = process.env.LIMITCAST_STATE;
-  process.env.PATH = `${dir}:${oldPath}`;
+  process.env.PATH = `${dir}${delimiter}${oldPath}`;
   process.env.LIMITCAST_STATE = join(dir, 'state');
   try {
     const repo = repository(dir);
@@ -117,9 +117,9 @@ test('detached native worker persists a bounded result and does not apply a canc
 
 test('a hung native model is terminated at the production timeout', { timeout: 65000 }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'lc-model-timeout-'));
-  writeFileSync(join(dir, 'codex'), `#!${process.execPath}\nsetInterval(()=>{},1000);`, { mode: 0o755 });
+  writeFileSync(join(dir, 'codex'), `#!/usr/bin/env node\nsetInterval(()=>{},1000);`, { mode: 0o755 });
   const old = process.env.PATH;
-  process.env.PATH = `${dir}:${old}`;
+  process.env.PATH = `${dir}${delimiter}${old}`;
   try {
     assert.throws(
       () => callOptimizationModel({ kind: 'judge', evidence: { calls: 30 } }),

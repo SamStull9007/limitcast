@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { grokDoctor, grokHome, grokPresent, installGrok, uninstallGrok } from './grok.mjs';
+import { shellQuote as q, shellPath, shellPathname } from './platform.mjs';
 import { stateDir } from './store.mjs';
 import { editFiles, readText } from './transaction.mjs';
 
@@ -13,15 +14,12 @@ const MARK = 'limitcast';
 // Codex reports the tool with a namespace prefix (e.g. "collaborationspawn_agent"); match it anywhere.
 const CODEX_MATCHER = '.*spawn_agent.*';
 
-/** Shell-quote one argument. @param {string} s */
-const q = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
-
 /**
  * The command hooks run: a launcher script in the state dir that runs this copy of limitcast (absolute node +
  * script, so hooks work without PATH) and outlives a Node upgrade, which moves both under nvm and Homebrew.
  */
 export function selfCommand(files) {
-  return `/bin/sh ${q(writeLauncher(undefined, undefined, files))}`;
+  return `${q(shellPathname(shellPath()))} ${q(shellPathname(writeLauncher(undefined, undefined, files)))}`;
 }
 
 export const launcherPath = () => join(stateDir(), 'limitcast-hook.sh');
@@ -36,8 +34,8 @@ export function writeLauncher(node = process.execPath, bin = realpathSync(fileUR
   const text = [
     '#!/bin/sh',
     '# limitcast hook launcher, written by `limitcast install`. Survives Node upgrades.',
-    `NODE=${q(node)}`,
-    `BIN=${q(bin)}`,
+    `NODE=${q(shellPathname(node))}`,
+    `BIN=${q(shellPathname(bin))}`,
     'if [ -x "$NODE" ] && [ -f "$BIN" ]; then exec "$NODE" "$BIN" "$@"; fi',
     'PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin"',
     'if command -v limitcast >/dev/null 2>&1; then exec limitcast "$@"; fi',
@@ -496,8 +494,9 @@ export function doctor({ path = settingsPath(), codexPath = codexHooksPath(), sa
     ok: sl.includes(MARK),
     line: sl.includes(MARK) ? 'Status-line recorder installed' : 'Status-line recorder missing: run `limitcast install`',
   });
-  const launcher = /^\/bin\/sh '?([^' ]+limitcast-hook\.sh)'?/.exec(sl)?.[1];
-  const targets = launcher ? launcherTargets(launcher) : null;
+  const launcher = /(?:^| )'((?:[^']|'\\'')*limitcast-hook\.sh)'|(?:^| )([^' ]*limitcast-hook\.sh)/.exec(sl);
+  const launcherFile = launcher ? (launcher[1] ?? launcher[2]).replace(/'\\''/g, "'") : null;
+  const targets = launcherFile ? launcherTargets(launcherFile) : null;
   if (sl.includes(MARK) && targets) {
     const ok = Boolean(targets.node && existsSync(targets.node) && targets.bin && existsSync(targets.bin));
     out.push({

@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
+import { hostCommand } from './platform.mjs';
 
 // Codex trusts a hook by a hash of its definition (`trusted_hash` in config.toml), which cannot be recomputed from outside:
 // a hook that was edited keeps its key and still fails the hash. So ask Codex itself, the way its own /hooks screen does:
@@ -18,7 +19,7 @@ export function codexHooks({ cwd = homedir(), timeoutMs = 15_000, command = ['co
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(command[0], command.slice(1), { cwd, stdio: ['pipe', 'pipe', 'ignore'] });
+      child = spawn(...hostCommand(command[0], command.slice(1)), { cwd, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
     } catch {
       resolve(null);
       return;

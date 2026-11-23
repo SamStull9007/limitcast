@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { changeOptimization, commandShape, digest, readOptimization, repository } from './optimize.mjs';
+import { hostCommand } from './platform.mjs';
 
 const schema = {
   type: 'object',
@@ -140,7 +141,7 @@ export function callOptimizationModel(job) {
       'gpt-5.6-luna',
       '-',
     ];
-    const output = execFileSync('codex', args, {
+    const output = execFileSync(...hostCommand('codex', args), {
       cwd: dir,
       input: prompt,
       encoding: 'utf8',
@@ -165,6 +166,7 @@ export function startModelWorker(repo, job) {
   try {
     const child = spawn(process.execPath, [fileURLToPath(import.meta.url), repo.root, job.id], {
       detached: true,
+      windowsHide: true,
       stdio: 'ignore',
       env: { ...process.env, LIMITCAST_MODEL_WORKER: '1' },
     });

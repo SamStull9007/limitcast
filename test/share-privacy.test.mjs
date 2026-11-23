@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { trimReport } from '../src/trim.mjs';
 
 test('fallback sharing retains totals without file, skill, or server identities', () => {
@@ -33,7 +34,7 @@ test('CLI sharing covers fallback, provider setup, missing setup, and rejects mu
     GROK_HOME: join(root, 'grok'),
     XDG_CONFIG_HOME: join(root, 'config'),
   };
-  const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
+  const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
   const run = (...args) => spawnSync(process.execPath, [bin, 'trim', ...args], { env, encoding: 'utf8' });
   for (const args of [[], ['--codex'], ['--grok']]) {
     const r = run(...args, '--share');

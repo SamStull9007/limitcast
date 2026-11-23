@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { applyCapabilities, patchMcpServers, restoreCapabilities, validateCodex, validateGrok } from '../src/capabilities.mjs';
@@ -323,9 +323,9 @@ test('Codex 0.169 lists multi_agent as deprecated: that is still a control, whil
   const r = gitRepo();
   const bins = tmp('lc-parity-features-');
   const features = (multiAgent) =>
-    `#!${process.execPath}\nconsole.log(${JSON.stringify(`multi_agent ${multiAgent}\ngoals stable true\nview_image stable true`)});\n`;
+    `#!/usr/bin/env node\nconsole.log(${JSON.stringify(`multi_agent ${multiAgent}\ngoals stable true\nview_image stable true`)});\n`;
   const previous = process.env.PATH;
-  process.env.PATH = `${bins}:${previous}`;
+  process.env.PATH = `${bins}${delimiter}${previous}`;
   try {
     writeFileSync(join(bins, 'codex'), features('deprecated true'), { mode: 0o755 });
     validateCodex(r); // exposes every control: no throw
@@ -357,9 +357,9 @@ test('Codex applies MCP servers and built-in packages together, and the host che
   ]) {
     const bins = tmp('lc-parity-bin-');
     const script = (json) =>
-      `#!${process.execPath}\nif(process.cwd()!==${JSON.stringify(r.root)})process.exit(2);\nconst a=process.argv.slice(2).join(' ');\nif(a==='features list')console.log('multi_agent stable false\\ngoals stable false\\nview_image stable false');\nelse if(a==='mcp list --json')console.log(${JSON.stringify(json)});\nelse process.exit(3);\n`;
+      `#!/usr/bin/env node\nif(process.cwd()!==${JSON.stringify(r.root)})process.exit(2);\nconst a=process.argv.slice(2).join(' ');\nif(a==='features list')console.log('multi_agent stable false\\ngoals stable false\\nview_image stable false');\nelse if(a==='mcp list --json')console.log(${JSON.stringify(json)});\nelse process.exit(3);\n`;
     const previous = process.env.PATH;
-    process.env.PATH = `${bins}:${previous}`;
+    process.env.PATH = `${bins}${delimiter}${previous}`;
     try {
       writeFileSync(join(bins, command), script(listed), { mode: 0o755 });
       validate(r, [name]);

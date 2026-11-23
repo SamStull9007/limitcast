@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { bindingLine } from '../src/hints.mjs';
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
@@ -34,6 +35,6 @@ test('CLI: status prints the binding line when a window is on pace to run out', 
   ].map(([t, pct]) => JSON.stringify({ t, src: 'claude', win: '7d', pct, reset, sid: 's' }));
   writeFileSync(join(state, 'samples.jsonl'), lines.join('\n'));
   const env = { ...process.env, LIMITCAST_STATE: state, GROK_HOME: tmp('lc-binding-grok-'), CODEX_HOME: tmp('lc-binding-codex-') };
-  const out = spawnSync('node', [new URL('../bin/limitcast.mjs', import.meta.url).pathname, 'status'], { env }).stdout.toString();
+  const out = spawnSync('node', [fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url)), 'status'], { env }).stdout.toString();
   assert.match(out, /You'll hit Claude 7d first \(/);
 });

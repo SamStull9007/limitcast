@@ -42,7 +42,7 @@
 
 <a id="free-and-open-source"></a>
 
-**Free and open source.** All features are included. No Limitcast account, license key, or subscription required. Runs locally on **macOS and Linux** with **Node.js 22+**.
+**Free and open source.** All features are included. No Limitcast account, license key, or subscription required. Runs locally on **macOS, Linux and Windows** with **Node.js 22+**. Native Windows hooks require [Git for Windows](https://git-scm.com/downloads/win); WSL is optional.
 
 <a id="install"></a>
 
@@ -56,6 +56,8 @@ limitcast doctor               # Check the integration
 ```
 
 Restart Claude Code after installing. Your existing status line stays in place, with the Limitcast line underneath. Installation backs up your settings; `limitcast uninstall` restores them.
+
+On **Windows**, install Node.js 22+ and Git for Windows first, then run the same commands in PowerShell, Command Prompt or Git Bash. Use `npm.cmd` if PowerShell blocks `npm.ps1`. Limitcast uses Git Bash for its hook launcher and preserves Windows paths containing spaces. If Git Bash is installed in a custom location, set `CLAUDE_CODE_GIT_BASH_PATH` to its `bash.exe` before installing and starting Claude Code. Configure an existing status-line command to run in Git Bash (for a PowerShell script, invoke `powershell -NoProfile -File C:/path/script.ps1`). Desktop alerts use Windows PowerShell notifications; `limitcast notify test` checks whether Windows permits them.
 
 Want protection as well as visibility? Enable the optional guard:
 

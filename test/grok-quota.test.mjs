@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } fro
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   grokDoctor,
   grokQuotaDue,
@@ -16,7 +17,7 @@ import {
 } from '../src/grok.mjs';
 
 const tmp = (p) => realpathSync(mkdtempSync(join(tmpdir(), p)));
-const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
+const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
 
 // A gRPC-web GetGrokCreditsConfig reply: one data frame holding the config (percent, cycle start and end), one trailer frame.
 const varint = (n) => {

@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { runGuard } from '../src/guard.mjs';
 import { logSubagent, spawnNotice } from '../src/subagents.mjs';
 
@@ -57,7 +58,7 @@ test('CLI: the guard hook prints the notice as a systemMessage without a license
   const env = { ...process.env, LIMITCAST_STATE: state, XDG_CONFIG_HOME: tmp('lc-spawn-cli-xdg-') };
   delete env.LIMITCAST_LICENSE;
   delete env.LIMITCAST_ALLOW;
-  const bin = new URL('../bin/limitcast.mjs', import.meta.url).pathname;
+  const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
   const input = JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_input: { subagent_type: 'Explore' }, session_id: 's1' });
   const free = spawnSync('node', [bin, 'guard'], { env, input });
   assert.equal(free.status, 0);

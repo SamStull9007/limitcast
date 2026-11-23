@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { applyCapabilities, patchCodexCapabilities, restoreCapabilities, validateCodex } from '../src/capabilities.mjs';
@@ -276,11 +276,11 @@ test('Codex capability verification runs from the real project directory, rather
   const binaries = mkdtempSync(join(tmpdir(), 'lc-opt-native-bin-'));
   writeFileSync(
     join(binaries, 'codex'),
-    `#!${process.execPath}\nif(process.cwd()!==${JSON.stringify(r.root)})process.exit(2);\nif(process.argv.slice(2).join(' ')!=='features list')process.exit(3);\nconsole.log('multi_agent stable false\\ngoals stable false\\nview_image stable false');\n`,
+    `#!/usr/bin/env node\nif(process.cwd()!==${JSON.stringify(r.root)})process.exit(2);\nif(process.argv.slice(2).join(' ')!=='features list')process.exit(3);\nconsole.log('multi_agent stable false\\ngoals stable false\\nview_image stable false');\n`,
     { mode: 0o755 },
   );
   const previous = process.env.PATH;
-  process.env.PATH = `${binaries}:${previous}`;
+  process.env.PATH = `${binaries}${delimiter}${previous}`;
   try {
     validateCodex(r, ['collaboration', 'goals', 'image_media']);
   } finally {
