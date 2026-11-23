@@ -21,7 +21,7 @@ Keep changes focused on one problem. Explain the behavior before and after, incl
 
 ## Release preflight
 
-Commit the intended version and plugin pins, push that exact commit, and wait for all eight CI jobs to succeed. Keep the working tree clean. `npm publish` runs `scripts/release-check.mjs` through `prepublishOnly`; it requires authenticated GitHub CLI access and refuses missing, pending, failed or incomplete push CI for HEAD. Run `node scripts/release-check.mjs` to check without publishing. Do not bypass lifecycle scripts or lower coverage floors to publish.
+Commit the intended version and plugin pins, push that exact commit, and wait for all eleven CI jobs to succeed. Keep the working tree clean. `npm publish` runs `scripts/release-check.mjs` through `prepublishOnly`; it requires authenticated GitHub CLI access and refuses missing, pending, failed or incomplete push CI for HEAD. Run `node scripts/release-check.mjs` to check without publishing. Do not bypass lifecycle scripts or lower coverage floors to publish.
 
 Synthetic optimizer replay checks decision regressions, not savings. Use the [real-task measurement protocol](docs/optimizer-measurement.md) before making effectiveness claims.
 

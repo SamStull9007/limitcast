@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.20.8 — 2026-11-23
 
 - Add native Windows installation with Node.js 22+ and Git for Windows; WSL is optional. Hook launchers handle Windows paths and existing status lines, with Windows desktop notifications and dashboard opening.
 - Fix Windows lock contention and orphan recovery, transcript path detection, and model-worker timeout cleanup. The full test suite and packed npm installation now run on Windows, macOS and Linux with Node 22/24/26; publishing requires all eleven CI jobs.
