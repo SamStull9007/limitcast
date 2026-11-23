@@ -80,10 +80,13 @@ export function withStateLock(change, lockName = 'config.json.lock') {
         acquired = true;
         break;
       } catch (error) {
-        if (!['EEXIST', 'ENOTEMPTY'].includes(error.code)) throw error;
+        if (!['EEXIST', 'ENOTEMPTY'].includes(error.code) && !(process.platform === 'win32' && error.code === 'EPERM')) throw error;
       }
       try {
-        for (const other of readdirSync(lock)) {
+        const owners = readdirSync(lock);
+        // Windows cannot rename over even an empty directory; remove only an empty orphan, never a populated lock.
+        if (!owners.length) rmdirSync(lock);
+        for (const other of owners) {
           const pid = /^(\d+)-[a-f0-9-]+$/.exec(other)?.[1];
           if (!pid) continue;
           try {
@@ -94,7 +97,7 @@ export function withStateLock(change, lockName = 'config.json.lock') {
           }
         }
       } catch (error) {
-        if (error.code !== 'ENOENT') throw error;
+        if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error;
       }
       if (Date.now() - start > LOCK_WAIT_MS) {
         throw new Error(

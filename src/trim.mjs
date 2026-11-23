@@ -1,7 +1,7 @@
 // @ts-check
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { memoryDir } from './memory.mjs';
 import { fmt } from './report.mjs';
 
@@ -50,7 +50,7 @@ export function contributors({ home = homedir(), cwd = process.cwd() } = {}) {
   /** @type {{what:string, tokens:number, path:string}[]} */
   const files = [];
   const file = (/** @type {string} */ p, /** @type {string} */ what) => {
-    if (existsSync(p)) files.push({ what, tokens: Math.round(statSync(p).size / 4), path: p.replace(home, '~') });
+    if (existsSync(p)) files.push({ what, tokens: Math.round(statSync(p).size / 4), path: p.replace(home, '~').split(sep).join('/') });
   };
   file(join(claudeDir, 'CLAUDE.md'), 'Global CLAUDE.md');
   if (cwd !== home) file(join(cwd, 'CLAUDE.md'), 'Project CLAUDE.md');

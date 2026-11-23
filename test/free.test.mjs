@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const bin = fileURLToPath(new URL('../bin/limitcast.mjs', import.meta.url));
 
@@ -30,7 +30,7 @@ test('all features remain available with stale billing files, no network and no 
     GROK_HOME: join(root, 'grok'),
     LIMITCAST_LICENSE: 'LC1.bad.key',
   };
-  const run = (...args) => execFileSync(process.execPath, ['--import', preload, bin, ...args], { env }).toString();
+  const run = (...args) => execFileSync(process.execPath, ['--import', pathToFileURL(preload).href, bin, ...args], { env }).toString();
   for (const command of ['license', 'trial', 'activate', 'deactivate']) assert.match(run(command), /All features are available/);
   for (const args of [
     ['plan'],

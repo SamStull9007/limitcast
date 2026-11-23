@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { validateRelease } from '../scripts/release-check.mjs';
+import { hostCommand } from '../src/platform.mjs';
 
 test('publication requires successful complete CI on the exact release SHA', () => {
   const names = [
@@ -43,6 +44,14 @@ test('publication CLI checks a clean tree and current push CI without publishing
     { mode: 0o755 },
   );
   const script = fileURLToPath(new URL('../scripts/release-check.mjs', import.meta.url));
+  assert.equal(
+    execFileSync(...hostCommand('git', ['rev-parse', 'HEAD']), {
+      cwd: root,
+      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
+      encoding: 'utf8',
+    }).trim(),
+    'current',
+  );
   const run = (extra = {}) =>
     spawnSync(process.execPath, [script], {
       cwd: root,

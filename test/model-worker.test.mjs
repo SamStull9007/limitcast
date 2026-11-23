@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { callOptimizationModel, reserveModelJob, startModelWorker } from '../src/model-optimize.mjs';
 import { changeOptimization, normalizeEvent, processEvent, readOptimization, repository } from '../src/optimize.mjs';
 
-test('native model subprocess stays isolated, accepts structured output, and refuses malformed/tool output', () => {
+test('native model subprocess stays isolated, accepts structured output, and refuses malformed/tool output', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'lc-native-model-'));
   const executable = join(dir, 'codex'),
     receipt = join(dir, 'receipt.json');
@@ -33,7 +33,7 @@ test('native model subprocess stays isolated, accepts structured output, and ref
         JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 123, cached_input_tokens: 10, output_tokens: 8 } }),
       ].join('\n'),
     );
-    const result = callOptimizationModel(job);
+    const result = await callOptimizationModel(job);
     assert.equal(result.usage.input_tokens, 123);
     assert.deepEqual(result.verdict.commands, ['node --test']);
     const captured = JSON.parse(readFileSync(receipt, 'utf8'));
@@ -47,11 +47,11 @@ test('native model subprocess stays isolated, accepts structured output, and ref
     assert.equal(existsSync(captured.cwd), false);
     assert.match(captured.prompt, /node --test/);
     install('not JSON');
-    assert.throws(() => callOptimizationModel(job));
+    await assert.rejects(() => callOptimizationModel(job));
     install(JSON.stringify({ type: 'item.completed', item: { type: 'command_execution', command: 'forbidden' } }));
-    assert.throws(() => callOptimizationModel(job), /unexpected model tool use/);
+    await assert.rejects(() => callOptimizationModel(job), /unexpected model tool use/);
     install(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'not JSON' } }));
-    assert.throws(() => callOptimizationModel(job));
+    await assert.rejects(() => callOptimizationModel(job));
   } finally {
     process.env.PATH = originalPath;
   }
@@ -115,15 +115,26 @@ test('detached native worker persists a bounded result and does not apply a canc
   }
 });
 
-test('a hung native model is terminated at the production timeout', { timeout: 65000 }, () => {
+test('a hung native model is terminated at the production timeout', { timeout: 65000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'lc-model-timeout-'));
-  writeFileSync(join(dir, 'codex'), `#!/usr/bin/env node\nsetInterval(()=>{},1000);`, { mode: 0o755 });
+  const pidFile = join(dir, 'pid');
+  writeFileSync(
+    join(dir, 'codex'),
+    `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setInterval(()=>{},1000);`,
+    { mode: 0o755 },
+  );
   const old = process.env.PATH;
   process.env.PATH = `${dir}${delimiter}${old}`;
   try {
-    assert.throws(
+    await assert.rejects(
       () => callOptimizationModel({ kind: 'judge', evidence: { calls: 30 } }),
       (error) => error.code === 'ETIMEDOUT',
+    );
+    const pid = Number(readFileSync(pidFile, 'utf8'));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.throws(
+      () => process.kill(pid, 0),
+      (error) => error.code === 'ESRCH',
     );
   } finally {
     process.env.PATH = old;

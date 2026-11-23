@@ -68,7 +68,14 @@ test('scanMemory follows plain filename citations and excludes agent policy file
 test('CLI: memory prints the sweep, and doctor shows the memory line for this project', () => {
   const home = tmp('lc-home-');
   const cwd = tmp('lc-proj-');
-  const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: tmp('lc-xdg-'), LIMITCAST_STATE: tmp('lc-state-'), CLAUDE_CONFIG_DIR: tmp('lc-cc-') };
+  const env = {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home,
+    XDG_CONFIG_HOME: tmp('lc-xdg-'),
+    LIMITCAST_STATE: tmp('lc-state-'),
+    CLAUDE_CONFIG_DIR: tmp('lc-cc-'),
+  };
   delete env.LIMITCAST_LICENSE;
   const run = (...a) => spawnSync('node', [bin, ...a], { env, cwd, encoding: 'utf8' });
   assert.match(run('memory').stdout, /No auto-memory index/);

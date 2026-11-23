@@ -99,7 +99,7 @@ export async function readCalls(file) {
   if (first && prompt) first.prompt = prompt;
   if (first && startup.length) first.startup = startup;
   // A subagent's transcript has its type in a file next to it: agent-<id>.jsonl and agent-<id>.meta.json.
-  if (all.length && file.includes('/subagents/')) {
+  if (all.length && /[/\\]subagents[/\\]/.test(file)) {
     try {
       const type = JSON.parse(readFileSync(file.replace(/\.jsonl$/, '.meta.json'), 'utf8')).agentType;
       if (typeof type === 'string') all[0].agentType = type;
@@ -453,7 +453,7 @@ export function jobsReport(r, { since, now }) {
   return lines.join('\n');
 }
 
-const CACHE_VERSION = 4; // 4: U+2028 inside a record no longer tears it; 2: the first call carries the session's first words; 3: model per call, subagent type
+const CACHE_VERSION = 5; // 5: Windows subagent paths; 4: U+2028 records; 2: first prompt; 3: model per call and subagent type
 const CACHE_KEEP_MS = 35 * 86400_000;
 const cacheFile = () => join(stateDir(), 'where-cache.json');
 

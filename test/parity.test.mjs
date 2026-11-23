@@ -249,7 +249,9 @@ test('the home directory is never a project: apply points to trim instead of edi
   fresh();
   const home = tmp('lc-parity-home-');
   const prev = process.env.HOME;
+  const prevProfile = process.env.USERPROFILE;
   process.env.HOME = home;
+  process.env.USERPROFILE = home;
   try {
     execFileSync('git', ['init', '-q'], { cwd: home });
     const r = repository(home);
@@ -262,6 +264,8 @@ test('the home directory is never a project: apply points to trim instead of edi
     }
   } finally {
     process.env.HOME = prev;
+    if (prevProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevProfile;
   }
 });
 

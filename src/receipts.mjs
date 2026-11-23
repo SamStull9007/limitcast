@@ -20,7 +20,7 @@ import { codexUsage, grokRoot, grokUsage } from './usage.mjs';
  * @returns {'claude'|'codex'|'grok'}
  */
 export function stopHost(hook) {
-  const path = String(hook?.agent_transcript_path ?? hook?.transcriptPath ?? hook?.transcript_path ?? '');
+  const path = String(hook?.agent_transcript_path ?? hook?.transcriptPath ?? hook?.transcript_path ?? '').replace(/\\/g, '/');
   if (hook?.sessionId !== undefined || hook?.subagentType !== undefined || hook?.transcriptPath !== undefined) return 'grok';
   if (hook?.turn_id !== undefined || path.includes('/.codex/') || /\/rollout-[^/]*\.jsonl$/.test(path)) return 'codex';
   if (path.includes('/.grok/')) return 'grok';

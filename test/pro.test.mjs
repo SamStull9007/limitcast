@@ -10,7 +10,7 @@ import { forecast } from '../src/forecast.mjs';
 import { guardDecision, runGuard, spawnSource } from '../src/guard.mjs';
 import { doctor, install, installedFeatures, launcherTargets, uninstall, wrappedCommand, writeLauncher } from '../src/install.mjs';
 import { checkLicense, issueLicense } from '../src/license.mjs';
-import { shellPath, shellPathname } from '../src/platform.mjs';
+import { shellPath, shellPathname, shellQuote } from '../src/platform.mjs';
 import { burnReport } from '../src/report.mjs';
 import { startupBreakdown } from '../src/startup.mjs';
 import { baseline, contributors, measuredSavings, savings, skillListing, startupReport, trimReport } from '../src/trim.mjs';
@@ -447,7 +447,10 @@ test('install --guard --alerts installs all requested features without a key', (
   assert.match(out, /starting-context alert/);
   const cfg = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf8'));
   // Hooks go through the upgrade-proof launcher in the state dir.
-  assert.match(cfg.statusLine.command, /^\/bin\/sh \S+limitcast-hook\.sh statusline$/);
+  assert.equal(
+    cfg.statusLine.command,
+    `${shellQuote(shellPathname(shellPath()))} ${shellQuote(shellPathname(join(env.LIMITCAST_STATE, 'limitcast-hook.sh')))} statusline`,
+  );
   assert.match(JSON.stringify(cfg.hooks?.PreToolUse), /limitcast-hook\.sh guard/);
   assert.ok(cfg.hooks?.SessionStart?.length);
   assert.doesNotMatch(out, /Try Pro|checkout/);

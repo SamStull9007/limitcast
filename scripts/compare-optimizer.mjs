@@ -45,7 +45,7 @@ for (const fixture of cases.filter((f) => !process.argv[4] || f.name === process
     const start = Date.now();
     let result;
     try {
-      if (product === 'Limitcast') result = callOptimizationModel({ kind: 'judge', evidence: fixture.evidence });
+      if (product === 'Limitcast') result = await callOptimizationModel({ kind: 'judge', evidence: fixture.evidence });
       else {
         const prompt = JSON.parse(execFileSync('python3', ['-c', python, upstream], { input: JSON.stringify(fixture.evidence), encoding: 'utf8' }));
         const dir = mkdtempSync(join(tmpdir(), 'lc-compare-'));

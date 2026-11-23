@@ -211,6 +211,8 @@ test('Codex as seen live: spawn_agent arguments are encrypted, so a duplicate is
   assert.equal(stopHost(stop), 'codex');
   const { turn_id: _t, ...noTurn } = stop;
   assert.equal(stopHost(noTurn), 'codex', 'a rollout path alone says Codex');
+  assert.equal(stopHost({ transcript_path: 'C:\\Users\\user\\.codex\\sessions\\rollout-child.jsonl' }), 'codex');
+  assert.equal(stopHost({ transcript_path: 'C:\\Users\\user\\.grok\\sessions\\child.json' }), 'grok');
   assert.equal(
     stopHost({
       session_id: 's',

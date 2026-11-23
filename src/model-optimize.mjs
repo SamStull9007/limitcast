@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -104,7 +104,7 @@ export function applyModelResult(state, job, response, now = Date.now()) {
   return true;
 }
 
-export function callOptimizationModel(job) {
+export async function callOptimizationModel(job) {
   const dir = mkdtempSync(join(tmpdir(), 'limitcast-model-'));
   try {
     const path = join(dir, 'schema.json');
@@ -141,14 +141,38 @@ export function callOptimizationModel(job) {
       'gpt-5.6-luna',
       '-',
     ];
-    const output = execFileSync(...hostCommand('codex', args), {
-      cwd: dir,
-      input: prompt,
-      encoding: 'utf8',
-      timeout: 45000,
-      maxBuffer: 256000,
-      stdio: ['pipe', 'pipe', 'ignore'],
-      env: { ...process.env, LIMITCAST_MODEL_WORKER: '1', LIMITCAST_ALLOW: '1' },
+    const output = await new Promise((resolve, reject) => {
+      const child = execFile(
+        ...hostCommand('codex', args),
+        {
+          cwd: dir,
+          encoding: 'utf8',
+          maxBuffer: 256000,
+          windowsHide: true,
+          env: { ...process.env, LIMITCAST_MODEL_WORKER: '1', LIMITCAST_ALLOW: '1' },
+        },
+        (error, stdout) => {
+          clearTimeout(timer);
+          if (error) reject(error);
+          else resolve(stdout);
+        },
+      );
+      const timer = setTimeout(() => {
+        try {
+          // A Windows shell owns a separate native child; kill the tree before closing its inherited pipes.
+          if (process.platform === 'win32' && child.pid && child.exitCode === null)
+            execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 5000 });
+        } catch {
+          // Still close this invocation if the OS has already reaped its process.
+        } finally {
+          child.kill();
+          child.stdout.destroy();
+          child.stderr.destroy();
+          reject(Object.assign(new Error('model subprocess timed out'), { code: 'ETIMEDOUT' }));
+        }
+      }, 45000);
+      child.stdin.on('error', () => {});
+      child.stdin.end(prompt);
     });
     const events = output
       .trim()
@@ -185,7 +209,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (state.config.model && job?.id === process.argv[3] && Date.now() - job.at < 120000) {
       let response;
       try {
-        response = callOptimizationModel(job);
+        response = await callOptimizationModel(job);
       } catch {
         /* record the failed attempt without leaking native output */
       }
