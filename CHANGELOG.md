@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.20.9 — 2026-11-23
 
 - `limitcast report --jobs` now lists what the latest run of each heavy job loaded: every named startup group, the part of the starting prompt the transcript does not itemize, and MCP servers that were loaded and not called. The cold-start note says a stable prefix does not recover that cost, because each run is a new process. The launch line remains hooks off, which keeps claude.ai connectors.
 - `limitcast budget type <type> <count>` holds a new subagent of that type once the session already has that many running or finished, on Claude Code, Codex and Grok. It is off until set. A resume is not counted. The guard does not add a `model` field to a Grok spawn.
