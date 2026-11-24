@@ -151,6 +151,7 @@ export function resultsStats({ now, days, samples, blocks, pro }) {
   const budgets = mine.filter((b) => b.kind === 'budget').length;
   const todays = mine.filter((b) => b.kind === 'today').length;
   const duplicates = mine.filter((b) => b.kind === 'duplicate').length;
+  const typeCaps = mine.filter((b) => b.kind === 'type').length;
   const toolLimits = mine.filter((b) => b.kind === 'tool-limit').length;
   const toolCaps = mine.filter((b) => b.kind === 'tool-cap').length;
   return {
@@ -167,6 +168,7 @@ export function resultsStats({ now, days, samples, blocks, pro }) {
     todays,
     coldNotices,
     duplicates,
+    typeCaps,
     toolLimits,
     toolCaps,
   };
@@ -204,6 +206,7 @@ export function weeklyLine(st, savedPerSession, notResent = 0) {
   if (st.switches) parts.push(`moved ${st.switches} to Sonnet`);
   if (st.defaults) parts.push(`ran ${st.defaults} on their set model`);
   if (st.budgets) parts.push(`held ${st.budgets} over budget`);
+  if (st.typeCaps) parts.push(`held ${st.typeCaps} over a per-session type cap`);
   if (st.todays) parts.push(`held ${st.todays} once today's share was used`);
   if (st.colds) parts.push(`caught ${st.colds} cold-cache message${st.colds === 1 ? '' : 's'}`);
   if (savedPerSession && savedPerSession > 0) parts.push(`starting context ${fmtK(savedPerSession)} tokens smaller`);
@@ -308,6 +311,7 @@ export function resultsReport({ now, days, samples, blocks, pro, saved, value = 
   if (st.budgets) out.push(`Held ${st.budgets} subagent${st.budgets === 1 ? '' : 's'} once subagents had used their budget of the 5-hour window.`);
   if (st.duplicates)
     out.push(`Held ${st.duplicates} duplicate subagent${st.duplicates === 1 ? '' : 's'} that repeated a prompt already running in that session.`);
+  if (st.typeCaps) out.push(`Held ${st.typeCaps} subagent${st.typeCaps === 1 ? '' : 's'} once that type had reached its per-session cap.`);
   if (st.todays)
     out.push(
       `${pro ? 'Held' : 'Pro could have held'} ${st.todays} subagent${st.todays === 1 ? '' : 's'} once today's share of a weekly window was used up (limitcast budget today on).`,

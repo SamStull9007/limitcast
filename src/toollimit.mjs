@@ -9,7 +9,16 @@ import { toolKey } from './toolcheck.mjs';
 // alone: they have no limit argument, so a missing one is every call. Stats come from `report --why` / `--jobs`.
 
 export const FAT_AVG = 5_000;
+export const FAT_TOTAL = 200_000; // a tool under 5k a call still counts when its results add up
 export const MIN_CALLS = 3;
+
+/**
+ * @param {ToolStat|undefined} stat
+ */
+export function fatStat(stat) {
+  return !!stat && stat.calls >= MIN_CALLS && (stat.avg >= FAT_AVG || stat.avg * stat.calls >= FAT_TOTAL);
+}
+
 const READ_CAP = 400;
 const LIMIT_KEYS = new Set(['limit', 'max_results', 'maxresults', 'page_size', 'pagesize', 'top_k', 'topk', 'first']);
 
@@ -144,7 +153,9 @@ export function toolLimitDecision(toolName, input, stats, { host = 'claude', rew
   // MCP argument names do not establish pagination or read-only semantics. Their PostToolUse notices remain available.
   if (toolName.startsWith('mcp__') || key.startsWith('mcp:')) return null;
   const stat = stats?.[key];
-  if (!stat || stat.calls < MIN_CALLS || stat.avg < FAT_AVG) return null;
+  // A high total qualifies Read and Grep the same way a high average does. MCP stays untouched: an argument
+  // named limit can be a business field, so result history never authorizes a hold or a rewrite.
+  if (!fatStat(stat)) return null;
   const args = typeof input === 'string' ? tryJson(input) : input;
   const obj = args && typeof args === 'object' ? args : {};
   if (toolName === 'Grep' || key === 'Grep') {

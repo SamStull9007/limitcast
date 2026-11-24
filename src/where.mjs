@@ -130,7 +130,7 @@ export function attribute(sessions, since = 0) {
     tools: new Map(),
     /** @type {{tokens:number, tool:string, t:number, project:string}[]} */
     steps: [],
-    /** @type {{t:number, tokens:number, size:number, calls:number, prompt:string, project:string, entry:string, startup?:import('./startup.mjs').Piece[]}[]} headless session starts: when, new tokens, and the whole starting prompt (cached or not) */
+    /** @type {{t:number, tokens:number, size:number, calls:number, prompt:string, project:string, entry:string, tools:string[], startup?:import('./startup.mjs').Piece[]}[]} headless session starts: when, new tokens, the whole starting prompt (cached or not), and the tools the run called */
     starts: [],
     /** @type {Map<string, number>} every new token, by model */
     byModel: new Map(),
@@ -146,6 +146,8 @@ export function attribute(sessions, since = 0) {
     const main = calls.filter((c) => !c.side);
     const type = calls.find((c) => c.agentType)?.agentType ?? '(unknown)';
     const counted = new Set(); // one run per transcript for each type and model
+    /** @type {(typeof r.starts)[number]|null} */
+    let headlessStart = null;
     for (const c of calls.filter((x) => x.side && x.t >= since)) {
       const n = c.input + c.cacheWrite + c.output;
       r.total += n;
@@ -170,7 +172,7 @@ export function attribute(sessions, since = 0) {
         r[interactive ? 'startInteractive' : 'startHeadless'] += c.input + c.cacheWrite;
         r[interactive ? 'sessionsInteractive' : 'sessionsHeadless']++;
         if (!interactive) {
-          r.starts.push({
+          headlessStart = {
             t: c.t,
             tokens: c.input + c.cacheWrite,
             size: c.input + c.cacheWrite + c.cacheRead,
@@ -178,10 +180,15 @@ export function attribute(sessions, since = 0) {
             prompt: c.prompt ?? '',
             project: c.project,
             entry: c.entry,
+            tools: [...c.tools],
             ...(c.startup?.length ? { startup: c.startup } : {}),
-          });
+          };
+          r.starts.push(headlessStart);
         }
         return;
+      }
+      if (headlessStart) {
+        for (const tool of c.tools) if (!headlessStart.tools.includes(tool)) headlessStart.tools.push(tool);
       }
       const p = main[i - 1];
       r.output += p.output; // the previous call's output, written to the cache again as this call's input
@@ -346,7 +353,7 @@ function coldSection(runs, jobs) {
       lines.push(
         '',
         near.cold / near.runs > 0.5
-          ? "Even runs within 5 minutes of the same job's previous run mostly started cold, so running them closer together is unlikely to help: the cached prompt is not being reused between runs. Look for anything near the start of a run's prompt that changes every time, such as hook output with a date or counts."
+          ? "Even runs within 5 minutes of the same job's previous run mostly started cold, so running them closer together is unlikely to help: the cached prompt is not being reused between runs. Look for anything near the start of a run's prompt that changes every time, such as hook output with a date or counts. A stable prefix does not recover the start: each run is a new process, and the cost is the size of the prompt that process loads."
           : "Runs close behind the same job's previous run mostly started warm, so running a job's work in batches lets later runs reuse the first one's cached prompt.",
       );
     }
@@ -355,6 +362,62 @@ function coldSection(runs, jobs) {
 }
 
 const tok = (/** @type {number} */ chars) => Math.round(chars / 4);
+
+/**
+ * The latest run of each heavy job: every named startup group, the part of the prompt the transcript does not
+ * itemize, and the MCP servers that were loaded and never called. The launch line turns hooks off and keeps connectors.
+ * @param {[string, {starts:{t:number, size:number, tools?:string[], startup?:import('./startup.mjs').Piece[]}[]}][]} ranked
+ */
+function compositionSection(ranked) {
+  /** @type {string[]} */
+  const lines = [];
+  for (const [name, job] of ranked.slice(0, 3)) {
+    const latest = [...job.starts].sort((a, b) => a.t - b.t).at(-1);
+    if (!latest || latest.size <= 0) continue;
+    /** @type {Map<string, number>} */
+    const groups = new Map();
+    /** @type {Set<string>} */
+    const loaded = new Set();
+    for (const p of latest.startup ?? []) {
+      groups.set(p.group, (groups.get(p.group) ?? 0) + p.chars);
+      if (p.group === 'MCP server instructions' || (p.group === 'Tool names' && p.name !== '(built-in)')) loaded.add(p.name);
+    }
+    const measured = tok([...groups.values()].reduce((a, c) => a + c, 0));
+    const called = new Set((latest.tools ?? []).filter((t) => t.startsWith('mcp:')).map((t) => t.slice(4).toLowerCase()));
+    const unused = [...loaded].filter((n) => !called.has(n.toLowerCase())).sort();
+    if (!lines.length) {
+      lines.push(
+        '',
+        '## What the latest run loaded',
+        '',
+        'Token counts are characters divided by 4. "Not broken out" is the starting prompt minus those pieces: Claude Code\'s own prompt and built-in tools, which the transcript does not itemize.',
+        '',
+      );
+    }
+    lines.push(`### ${name.replace(/\|/g, '/').slice(0, 45)}`, '');
+    lines.push(`Starting prompt ${fmt(latest.size)}. Named pieces ${fmt(measured)}. Not broken out ${fmt(Math.max(0, latest.size - measured))}.`, '');
+    if (groups.size) {
+      lines.push('| piece | tokens |', '|---|---:|');
+      for (const [group, chars] of [...groups].sort((a, b) => b[1] - a[1])) lines.push(`| ${group} | ${fmt(tok(chars))} |`);
+      lines.push('');
+    }
+    if (called.size) lines.push(`Called: ${[...called].sort().join(', ')}.`);
+    if (unused.length) lines.push(`Loaded at start and not called in this run: ${unused.join(', ')}.`);
+    lines.push(
+      '',
+      'Launch this job with hooks off. That keeps its claude.ai connectors:',
+      '',
+      '`claude -p --settings \'{"disableAllHooks": true}\'`',
+      '',
+    );
+  }
+  if (lines.length) {
+    lines.push(
+      'A server in the loaded-but-not-called list is startup weight. `--strict-mcp-config` also drops claude.ai connectors, so a lean config has to keep every server this job called.',
+    );
+  }
+  return lines;
+}
 
 /**
  * Which startup piece changed between the earliest and latest recorded run of a job.
@@ -437,6 +500,7 @@ export function jobsReport(r, { since, now }) {
   }
   lines.push(...coldSection(r.starts.length, [...jobs.values()]));
   lines.push(...driftSection(ranked));
+  lines.push(...compositionSection(ranked));
   const [leanJob, lean] = [...jobs].sort((a, b) => a[1].size / a[1].runs - b[1].size / b[1].runs)[0];
   lines.push(
     '',
@@ -450,6 +514,78 @@ export function jobsReport(r, { since, now }) {
     '',
     '_Estimated from your local transcripts. A job is its first 45 characters of prompt, so runs of the same job group together._',
   );
+  return lines.join('\n');
+}
+
+/**
+ * Where new tokens went for Codex or Grok. Their ledgers are one row per token-count step (Codex) or per turn (Grok),
+ * not one row per model call, and they do not name the tool that added the tokens.
+ * @param {import('./usage.mjs').Usage[]} rows
+ * @param {{since:number, now:number, src:'codex'|'grok'}} o
+ */
+export function hostWhyReport(rows, { since, now, src }) {
+  const name = src === 'grok' ? 'Grok' : 'Codex';
+  const unit = src === 'grok' ? 'turn' : 'token-count step';
+  const day = (/** @type {number} */ t) => new Date(t).toLocaleDateString('sv-SE');
+  const lines = ['# limitcast: where your new tokens went', '', `${day(since)} to ${day(now)} · ${name}`, ''];
+  const fresh = (/** @type {import('./usage.mjs').Usage} */ u) => (u.input || 0) + (u.cacheWrite || 0) + (u.output || 0);
+  const inWindow = rows.filter((u) => u.src === src && u.t >= since);
+  const total = inWindow.reduce((a, u) => a + fresh(u), 0);
+  if (!total) return [...lines, `No ${name} usage in this period.`].join('\n');
+  const share = (/** @type {number} */ n) => `${Math.round((n / total) * 100)}%`;
+  const sum = (/** @type {typeof inWindow} */ xs, /** @type {(u: import('./usage.mjs').Usage) => number} */ f) => xs.reduce((a, u) => a + f(u), 0);
+  const side = inWindow.filter((u) => u.sidechain);
+  const main = inWindow.filter((u) => !u.sidechain);
+  const sideFresh = sum(side, fresh);
+  const mainInput = sum(main, (u) => (u.input || 0) + (u.cacheWrite || 0));
+  const mainOutput = sum(main, (u) => u.output || 0);
+  const cache = sum(inWindow, (u) => u.cacheRead || 0);
+  const prompt = sum(inWindow, (u) => (u.input || 0) + (u.cacheWrite || 0) + (u.cacheRead || 0));
+  lines.push(
+    `${fmt(total)} new tokens (input, cache writes and output; cached reads are left out).`,
+    '',
+    '| where | new tokens | share |',
+    '|---|---:|---:|',
+    `| Subagents | ${fmt(sideFresh)} | ${share(sideFresh)} |`,
+    `| Main thread, new input | ${fmt(mainInput)} | ${share(mainInput)} |`,
+    `| Main thread, model output | ${fmt(mainOutput)} | ${share(mainOutput)} |`,
+    '',
+    `Cached reads were ${fmt(cache)} (${prompt ? Math.round((cache / prompt) * 100) : 0}% of prompt tokens). They are not in the new-token total.`,
+    '',
+    `A ${name} record is a ${unit}, not one model call, and it does not name the tool that added the tokens. \`limitcast report --why\` without \`--src\` is the Claude Code tool-by-tool breakdown.`,
+  );
+  /** @type {Map<string, number>} */
+  const byModel = new Map();
+  for (const u of inWindow) {
+    const k = u.model || '(unknown)';
+    byModel.set(k, (byModel.get(k) ?? 0) + fresh(u));
+  }
+  if ([...byModel.keys()].some((k) => k !== '(unknown)')) {
+    lines.push('', '## New tokens by model', '', '| model | new tokens | share |', '|---|---:|---:|');
+    for (const [k, n] of [...byModel].sort((a, b) => b[1] - a[1]).slice(0, 6)) lines.push(`| ${k} | ${fmt(n)} | ${share(n)} |`);
+  }
+  /** @type {Map<string, {fresh:number, side:number, cache:number, turns:number, project:string}>} */
+  const bySession = new Map();
+  for (const u of inWindow) {
+    const k = u.session || '(unknown)';
+    const e = bySession.get(k) ?? { fresh: 0, side: 0, cache: 0, turns: 0, project: u.project || '' };
+    e.fresh += fresh(u);
+    if (u.sidechain) e.side += fresh(u);
+    e.cache += u.cacheRead || 0;
+    e.turns++;
+    bySession.set(k, e);
+  }
+  lines.push(
+    '',
+    '## Largest sessions',
+    '',
+    '| session | project | new tokens | of which subagents | cached reads | records |',
+    '|---|---|---:|---:|---:|---:|',
+  );
+  for (const [id, e] of [...bySession].sort((a, b) => b[1].fresh - a[1].fresh).slice(0, 5)) {
+    const project = (e.project || '').replace(homedir(), '~').replace(/\|/g, '/') || '(unknown)';
+    lines.push(`| ${id.slice(0, 12)} | ${project} | ${fmt(e.fresh)} | ${fmt(e.side)} | ${fmt(e.cache)} | ${e.turns} |`);
+  }
   return lines.join('\n');
 }
 

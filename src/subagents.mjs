@@ -155,6 +155,57 @@ export function setBudget(pct) {
   updateConfig((cfg) => ({ ...cfg, subagentBudget: pct }));
 }
 
+/** @returns {Record<string, number>} how many of each subagent type one session may start */
+export function getTypeCaps() {
+  try {
+    const m = JSON.parse(readFileSync(configFile(), 'utf8')).subagentTypeCaps;
+    if (!m || typeof m !== 'object' || Array.isArray(m)) return {};
+    return Object.fromEntries(Object.entries(m).filter(([, n]) => typeof n === 'number' && n >= 1 && n <= 100));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Cap how many subagents of one type a session may start, or null to remove the cap.
+ * @param {string} type
+ * @param {number|null} count
+ */
+export function setTypeCap(type, count) {
+  updateConfig((cfg) => {
+    const caps = { ...cfg.subagentTypeCaps };
+    if (count === null) delete caps[type];
+    else caps[type] = count;
+    return { ...cfg, subagentTypeCaps: caps };
+  });
+}
+
+/**
+ * @param {Record<string, number>} caps
+ * @param {string} type
+ */
+export function typeCapFor(caps, type) {
+  if (!type) return undefined;
+  if (typeof caps[type] === 'number') return caps[type];
+  const hit = Object.entries(caps).find(([k]) => k.toLowerCase() === type.toLowerCase());
+  return hit?.[1];
+}
+
+/**
+ * Deny reason once this session already has `already` subagents of `type` running or finished, or null to allow.
+ * @param {string} type
+ * @param {number|undefined} cap
+ * @param {number} already
+ */
+export function typeCapReason(type, cap, already) {
+  if (!(cap > 0) || already < cap) return null;
+  const noun = already === 1 ? 'subagent' : 'subagents';
+  return (
+    `limitcast: this session already has ${already} ${type} ${noun} running or finished, over your cap of ${cap}. ` +
+    `Finish with the agents already running, raise it with \`limitcast budget type ${type} <count>\`, or set LIMITCAST_ALLOW=1 to spawn anyway.`
+  );
+}
+
 /** Whether the guard holds new subagents once today's share of a weekly window is used up (`limitcast budget today on`). */
 export function getTodayHold() {
   try {

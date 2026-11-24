@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { attribute, jobsReport, readCalls, whyReport } from '../src/where.mjs';
+import { attribute, hostWhyReport, jobsReport, readCalls, whyReport } from '../src/where.mjs';
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
 process.env.LIMITCAST_STATE = tmp('lc-jobs-state-');
@@ -42,10 +42,12 @@ test('readCalls puts the first words of the first real user message on the first
 test('attribute collects headless starts only, with new tokens and the whole starting prompt', () => {
   const call = (o) => ({ t: T0, input: 1, cacheWrite: 0, cacheRead: 0, output: 0, tools: [], side: false, entry: 'sdk-cli', project: '/p', ...o });
   const r = attribute([
-    [call({ cacheWrite: 1000, cacheRead: 500, prompt: 'job A' }), call({ t: T0 + 1, cacheWrite: 10 })],
+    [call({ cacheWrite: 1000, cacheRead: 500, prompt: 'job A', tools: ['mcp:demo'] }), call({ t: T0 + 1, cacheWrite: 10, tools: ['Read'] })],
     [call({ cacheWrite: 7, entry: 'cli' })],
   ]);
-  assert.deepEqual(r.starts, [{ t: T0, tokens: 1001, size: 1501, calls: 2, prompt: 'job A', project: '/p', entry: 'sdk-cli' }]);
+  assert.deepEqual(r.starts, [
+    { t: T0, tokens: 1001, size: 1501, calls: 2, prompt: 'job A', project: '/p', entry: 'sdk-cli', tools: ['mcp:demo', 'Read'] },
+  ]);
   assert.equal(r.sessionsInteractive, 1);
 });
 
@@ -75,6 +77,66 @@ test('jobsReport groups runs by their first 45 characters, ranks by total start,
   assert.match(md, /--setting-sources "" --strict-mcp-config.*drops the claude\.ai connectors/);
   assert.ok(md.indexOf('disableAllHooks') < md.indexOf('--strict-mcp-config')); // the safe flag comes first
   assert.match(jobsReport(attribute([]), { since: T0, now: T0 }), /No headless runs in this period\./);
+});
+
+test('jobsReport names every startup group, the unitemized remainder, and MCP the run never called', () => {
+  const r = attribute([]);
+  r.total = 1_000_000;
+  r.startHeadless = 80_000;
+  r.starts = [
+    {
+      t: T0,
+      tokens: 60_000,
+      size: 98_000,
+      calls: 4,
+      prompt: 'Import the approved rows',
+      project: '/p',
+      entry: 'sdk-cli',
+      tools: ['mcp:claude_ai_HubSpot', 'Read'],
+      startup: [
+        { group: 'Skill listing', name: 'trim', chars: 28_000 },
+        { group: 'Tool names', name: 'demo51-mcp', chars: 8_000 },
+        { group: 'Tool names', name: 'claude_ai_HubSpot', chars: 4_000 },
+        { group: 'MCP server instructions', name: 'attention', chars: 4_000 },
+        { group: 'SessionStart hooks', name: 'session-start-hook.sh', chars: 4_000 },
+      ],
+    },
+  ];
+  const md = jobsReport(r, { since: T0 - 86400_000, now: T0 });
+  assert.match(md, /## What the latest run loaded/);
+  assert.match(md, /Starting prompt 98\.0k\. Named pieces 12\.0k\. Not broken out 86\.0k\./);
+  assert.match(md, /\| Skill listing \| 7\.0k \|/);
+  assert.match(md, /Called: claude_ai_hubspot\./);
+  assert.match(md, /Loaded at start and not called in this run: attention, demo51-mcp\./);
+});
+
+test('hostWhyReport splits Codex and Grok into subagents, new input and output', () => {
+  const row = (o) => ({
+    t: T0,
+    src: 'grok',
+    session: '01abcdef-1234',
+    project: '/Users/me/proj',
+    model: 'grok-4',
+    sidechain: false,
+    input: 1000,
+    cacheWrite: 0,
+    cacheRead: 9000,
+    output: 100,
+    ...o,
+  });
+  const md = hostWhyReport([row({}), row({ sidechain: true, input: 500, output: 50, session: '01abcdef-1234' }), row({ src: 'codex', input: 9 })], {
+    since: T0 - 1000,
+    now: T0 + 1000,
+    src: 'grok',
+  });
+  assert.match(md, /· Grok/);
+  assert.match(md, /1\.6k new tokens/); // 1000+100 + 500+50; the codex row is ignored
+  assert.match(md, /\| Subagents \| 550 \| 33% \|/);
+  assert.match(md, /\| Main thread, new input \| 1\.0k \| 61% \|/);
+  assert.match(md, /\| Main thread, model output \| 100 \| 6% \|/);
+  assert.match(md, /does not name the tool/);
+  assert.match(md, /\| 01abcdef-123 \|/);
+  assert.match(hostWhyReport([], { since: T0, now: T0, src: 'codex' }), /No Codex usage in this period/);
 });
 
 test('whyReport points to the jobs report when there are headless runs', () => {

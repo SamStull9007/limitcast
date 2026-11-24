@@ -73,6 +73,12 @@ test('fat tool calls: deny a missing limit, lower one that is too high, leave Ba
   assert.match(toolLimitDecision('Grep', { pattern: 'x' }, stats).deny, /path or a glob/);
   assert.equal(toolLimitDecision('Grep', { pattern: 'x', path: 'src' }, stats), null);
   assert.equal(toolLimitDecision('Bash', { command: 'ls' }, stats), null);
+  assert.match(toolLimitDecision('Read', { file_path: 'a.js' }, { Read: { avg: 2000, calls: 150 } }).deny, /offset and limit/);
+  assert.equal(toolLimitDecision('Read', { file_path: 'a.js' }, { Read: { avg: 2000, calls: 10 } }), null);
+  assert.equal(
+    toolLimitDecision('mcp__claude_ai_HubSpot__search', { properties: ['name'] }, { 'mcp:claude_ai_HubSpot': { avg: 3200, calls: 522 } }),
+    null,
+  );
   assert.equal(toolLimitDecision('mcp__claude_ai_HubSpot__search', {}, { 'mcp:hubspot': { avg: 7700, calls: 2 } }), null);
   assert.deepEqual(toolStats(new Map([['Read', { tokens: 9000, calls: 3 }]])), { Read: { avg: 3000, calls: 3 } });
 });
@@ -192,4 +198,28 @@ test('CLI: duplicate spawns are held, a short idle is announced, and a fat call 
   assert.match(readFileSync(join(state, 'guard.jsonl'), 'utf8'), /"kind":"duplicate"/);
   assert.match(readFileSync(join(state, 'guard.jsonl'), 'utf8'), /"kind":"cold-notice"/);
   assert.match(readFileSync(join(state, 'guard.jsonl'), 'utf8'), /"kind":"tool-limit"/);
+});
+
+test('CLI: a per-session type cap holds the next spawn of that type and lets a resume through', () => {
+  const state = tmp('lc-type-cap-');
+  const env = { ...process.env, LIMITCAST_STATE: state, XDG_CONFIG_HOME: tmp('lc-type-xdg-') };
+  delete env.LIMITCAST_LICENSE;
+  delete env.LIMITCAST_ALLOW;
+  const run = (args, input = '') => execFileSync('node', [bin, ...args], { env, input });
+  assert.match(run(['budget', 'type', 'general-purpose', '1']).toString(), /at most 1/);
+  const spawn = (id, type = 'general-purpose') =>
+    JSON.stringify({ tool_name: 'Agent', session_id: 's1', tool_use_id: id, tool_input: { subagent_type: type, prompt: id } });
+  assert.equal(run(['guard'], spawn('one')).toString(), '');
+  assert.equal(run(['guard'], spawn('look', 'Explore')).toString(), '');
+  const denied = JSON.parse(run(['guard'], spawn('two')).toString());
+  assert.equal(denied.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(denied.hookSpecificOutput.permissionDecisionReason, /cap of 1/);
+  assert.equal(denied.hookSpecificOutput.updatedInput, undefined);
+  const resume = JSON.stringify({
+    toolName: 'spawn_subagent',
+    sessionId: 's1',
+    toolInput: { subagentType: 'general-purpose', prompt: 'again', resume_from: 'old' },
+  });
+  assert.equal(run(['guard'], resume).toString(), '');
+  assert.match(readFileSync(join(state, 'guard.jsonl'), 'utf8'), /"kind":"type"/);
 });

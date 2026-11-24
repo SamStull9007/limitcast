@@ -129,8 +129,9 @@ Your findings depend on your local sessions. `trim` inspects first. Use `trim ke
 | I want to… | Run |
 | --- | --- |
 | See usage, burn rate, and reset times | `limitcast status` |
-| Find what's consuming tokens | `limitcast report --why` |
+| Find what's consuming tokens | `limitcast report --why` (add `--src codex` or `--src grok`) |
 | Limit subagent spend to 15% of a window | `limitcast budget subagents 15` |
+| Cap one subagent type per session | `limitcast budget type general-purpose 1` |
 | Pace the weekly allowance day by day | `limitcast budget today on` |
 | Get a desktop alert | `limitcast notify on` |
 | Review activity and protection decisions | `limitcast results` |

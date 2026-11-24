@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `limitcast report --jobs` now lists what the latest run of each heavy job loaded: every named startup group, the part of the starting prompt the transcript does not itemize, and MCP servers that were loaded and not called. The cold-start note says a stable prefix does not recover that cost, because each run is a new process. The launch line remains hooks off, which keeps claude.ai connectors.
+- `limitcast budget type <type> <count>` holds a new subagent of that type once the session already has that many running or finished, on Claude Code, Codex and Grok. It is off until set. A resume is not counted. The guard does not add a `model` field to a Grok spawn.
+- `limitcast report --why --src codex` and `--src grok` split new tokens into subagents, main-thread input and output, and the largest sessions. Those ledgers do not name tools, so they do not invent a tool breakdown.
+- The pre-call Read and Grep cap also applies when a tool's results add up to at least 200k new tokens over 3 or more calls, even if the average is under 5k. MCP arguments are still never rewritten or held.
+
 ## 0.20.8 — 2026-11-23
 
 - Add native Windows installation with Node.js 22+ and Git for Windows; WSL is optional. Hook launchers handle Windows paths and existing status lines, with Windows desktop notifications and dashboard opening.

@@ -53,7 +53,7 @@ import {
   touchGrokQuota,
   undoGrokTrim,
 } from '../src/grok.mjs';
-import { runGuard } from '../src/guard.mjs';
+import { runGuard, spawnSource } from '../src/guard.mjs';
 import { accountForecasts, bindingLine, compactHint, headroom, lastCall, lastCallTokens } from '../src/hints.mjs';
 import { htmlPage } from '../src/html.mjs';
 import {
@@ -97,13 +97,17 @@ import {
   getBudget,
   getSubagentModels,
   getTodayHold,
+  getTypeCaps,
   loadSubagents,
   logSubagent,
   receiptMessage,
   setBudget,
   setSubagentModel,
   setTodayHold,
+  setTypeCap,
   subagentUsage,
+  typeCapFor,
+  typeCapReason,
   validModel,
   windowStart,
 } from '../src/subagents.mjs';
@@ -113,7 +117,7 @@ import { loadLiveStats, loadToolStats, recordToolSize, saveToolStats, toolLimitD
 import { activityKnown, baseline, contributors, measuredSavings, shareSummary, startupReport, trimReport, UNKNOWN_ACTIVITY } from '../src/trim.mjs';
 import { claudeRoot, grokRoot, readUsage } from '../src/usage.mjs';
 import { dailyDue, foldEvents, loadValue, saveValue, scanSessions, valuePeriod, valueSection, valueTotals } from '../src/value.mjs';
-import { attribute, jobsReport, whyReport, whySessions } from '../src/where.mjs';
+import { attribute, hostWhyReport, jobsReport, whyReport, whySessions } from '../src/where.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok plans
@@ -158,6 +162,8 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
                                              cheap cache expires (idle over 5 min, LIMITCAST_CACHE_NOTICE_MINUTES)
                                              and hold the first one after 60 min (LIMITCAST_CACHE_MINUTES)
   limitcast budget subagents <percent>|off   hold new subagents once they used that much of the 5-hour window
+  limitcast budget type <type> <count>|off   hold a new subagent of that type once this session already
+                                             has that many running or finished (Claude, Codex and Grok)
   limitcast subagent-model <type> <model>|off  run new subagents of that type on sonnet, opus, haiku, grok-… or a model id
   limitcast plan [--days N]                  does your Claude plan fit your use? Hit-limit and headroom evidence, and the monthly price difference
   limitcast plan set <pro|max5|max20>|off    tell limitcast which Claude plan you are on
@@ -176,7 +182,10 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
                                              run a heavy job once the window has reset
   limitcast results --html [--out FILE]      results, current windows and the burn report as one page
   limitcast report [--days N] [--out FILE]   tokens by tool, day, project, model and session
-  limitcast report --why [--days N]          where the new tokens went: subagents, session starts, cache rebuilds, tool results
+  limitcast report --why [--days N] [--src claude|codex|grok]
+                                             where the new tokens went. Claude (the default) splits tool results;
+                                             Codex and Grok split subagents, new input and output, because their
+                                             ledgers do not name the tool
   limitcast report --jobs [--days N]         the scheduled (headless) jobs that spend the most tokens just starting,
                                              and which startup piece changed between two runs of the same job
   (status line: points to another account with room, and suggests /compact past ~150k tokens a call)
@@ -416,27 +425,63 @@ if (cmd === '_optimize-hook') {
         }),
       );
     } else {
-      const d = await runGuard(hook, now, Number(process.env.LIMITCAST_GUARD_MINUTES ?? 30), { preview: false });
-      if (typeof d === 'string') {
+      const tool = String(hook?.tool_name ?? hook?.toolName ?? hook?.tool ?? '');
+      const src = spawnSource(tool);
+      const input = hook?.tool_input ?? hook?.toolInput ?? {};
+      const resumed = Boolean(input?.resume_from || input?.resumeFrom);
+      const type = String(input?.subagent_type ?? input?.subagentType ?? input?.agent_type ?? (src === 'codex' ? 'default' : '')).trim();
+      const sid = String(hook?.session_id ?? hook?.sessionId ?? '').trim();
+      const cap = src && type && !resumed ? typeCapFor(getTypeCaps(), type) : undefined;
+      const already =
+        cap && sid
+          ? live.filter((e) => e.sid === sid && e.type.toLowerCase() === type.toLowerCase()).length +
+            loadSubagents(now - 35 * 86400_000).filter(
+              (e) => (e.src ?? 'claude') === src && e.sid === sid && String(e.type ?? '').toLowerCase() === type.toLowerCase(),
+            ).length
+          : 0;
+      const held = cap ? typeCapReason(type, cap, already) : null;
+      if (held && src) {
         saveInflight(live);
-        console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: d } }));
+        logBlock({
+          t: now,
+          kind: 'type',
+          src,
+          win: '5h',
+          pct: 0,
+          wall: now,
+          reset: now,
+          type,
+          sid,
+          ...(typeof hook?.tool_use_id === 'string' ? { operation: hook.tool_use_id } : {}),
+        });
+        console.log(
+          JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: held } }),
+        );
       } else {
-        if (id) saveInflight(rememberInflight(live, id, now));
-        if (d && 'notice' in d) {
-          // Allowed as is, with what this kind of subagent has cost so far (shown to the user, never the model).
-          console.log(JSON.stringify({ systemMessage: d.notice }));
-        } else if (d) {
-          // Model switch: allow the spawn with the same input and model "sonnet" (updatedInput replaces the whole input).
+        const d = await runGuard(hook, now, Number(process.env.LIMITCAST_GUARD_MINUTES ?? 30), { preview: false });
+        if (typeof d === 'string') {
+          saveInflight(live);
           console.log(
-            JSON.stringify({
-              hookSpecificOutput: {
-                hookEventName: 'PreToolUse',
-                permissionDecision: 'allow',
-                permissionDecisionReason: d.reason,
-                updatedInput: d.updatedInput,
-              },
-            }),
+            JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: d } }),
           );
+        } else {
+          if (id) saveInflight(rememberInflight(live, id, now));
+          if (d && 'notice' in d) {
+            // Allowed as is, with what this kind of subagent has cost so far (shown to the user, never the model).
+            console.log(JSON.stringify({ systemMessage: d.notice }));
+          } else if (d) {
+            // Model switch: allow the spawn with the same input and model "sonnet" (updatedInput replaces the whole input).
+            console.log(
+              JSON.stringify({
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse',
+                  permissionDecision: 'allow',
+                  permissionDecisionReason: d.reason,
+                  updatedInput: d.updatedInput,
+                },
+              }),
+            );
+          }
         }
       }
     }
@@ -722,6 +767,24 @@ if (cmd === '_optimize-hook') {
       console.log('The budget is enforced by the guard: limitcast install --guard (then restart Grok).');
     process.exit(0);
   }
+  if (args[0] === 'type') {
+    const type = args[1];
+    const value = args[2];
+    const count = Number(value);
+    if (!type || (value !== undefined && value !== 'off' && !(Number.isInteger(count) && count >= 1 && count <= 100))) {
+      console.log('Usage: limitcast budget type <subagent-type> <count per session, 1-100>|off');
+      process.exit(1);
+    }
+    if (value !== undefined) setTypeCap(type, value === 'off' ? null : count);
+    const cap = typeCapFor(getTypeCaps(), type);
+    console.log(
+      cap
+        ? `${type}: at most ${cap} new subagent${cap === 1 ? '' : 's'} of this type per session. The guard holds the next one on Claude Code, Codex and Grok. Raise it: limitcast budget type ${type} <count>`
+        : `No per-session cap for ${type}. Set one: limitcast budget type ${type} 1`,
+    );
+    if (cap && !installedFeatures().guard) console.log('The cap is enforced by the guard: limitcast install --guard');
+    process.exit(0);
+  }
   if (args[0] === 'today') {
     if (args[1] !== undefined && args[1] !== 'on' && args[1] !== 'off') {
       console.log('Usage: limitcast budget today on|off');
@@ -739,7 +802,7 @@ if (cmd === '_optimize-hook') {
   const value = args[1];
   if (args[0] !== 'subagents' || (value !== undefined && value !== 'off' && !(Number(value) > 0 && Number(value) <= 100))) {
     console.log(
-      'Usage: limitcast budget subagents <percent of the 5-hour window, 1-100>|off\n       limitcast budget grok <usd>|off\n       limitcast budget today on|off',
+      'Usage: limitcast budget subagents <percent of the 5-hour window, 1-100>|off\n       limitcast budget type <subagent-type> <count per session, 1-100>|off\n       limitcast budget grok <usd>|off\n       limitcast budget today on|off',
     );
     process.exit(1);
   }
@@ -1005,9 +1068,22 @@ if (cmd === '_optimize-hook') {
   }
   let text;
   if (why || jobs) {
-    const r = attribute(await whySessions(claudeRoot(), since), since);
-    saveToolStats(toolStats(r.tools));
-    text = jobs ? jobsReport(r, { since, now }) : whyReport(r, { since, now, calib: loadValue().calib });
+    const host = flag('--src');
+    if (host && host !== 'claude' && host !== 'codex' && host !== 'grok') {
+      console.error('Usage: limitcast report --why [--src claude|codex|grok] [--days N]');
+      process.exit(1);
+    }
+    if ((host === 'codex' || host === 'grok') && jobs) {
+      console.error('limitcast report --jobs reads Claude Code transcripts. For Codex or Grok: limitcast report --why --src codex|grok');
+      process.exit(1);
+    }
+    if (why && (host === 'codex' || host === 'grok')) {
+      text = hostWhyReport(await readUsage(since), { since, now, src: host });
+    } else {
+      const r = attribute(await whySessions(claudeRoot(), since), since);
+      saveToolStats(toolStats(r.tools));
+      text = jobs ? jobsReport(r, { since, now }) : whyReport(r, { since, now, calib: loadValue().calib });
+    }
   } else if (cmd === 'report') text = burnReport(usage, { since, now });
   else {
     // Prefer the measured starting context of the latest interactive session; older Claude Code logs fall back to estimates.

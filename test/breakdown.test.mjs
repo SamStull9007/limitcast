@@ -117,6 +117,7 @@ test('jobsReport: advice follows the data, and a job with no warm run claims no 
   const allCold = jobs(Array.from({ length: 7 }, (_, i) => start(T0 + i * MIN, 30_000, 40_000)));
   assert.match(allCold, /\| within 5 min \| 6 \| 100% \|/);
   assert.match(allCold, /closer together is unlikely to help/);
+  assert.match(allCold, /A stable prefix does not recover the start/);
   assert.doesNotMatch(allCold, /more new tokens\./);
   // 7 runs a minute apart, all warm after the first: batching works.
   const batched = jobs(Array.from({ length: 7 }, (_, i) => start(T0 + i * MIN, i ? 1_000 : 30_000, 40_000)));
