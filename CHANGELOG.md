@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.20.10 — 2026-11-25
 
 - Enforce per-session subagent caps across parallel starts and independently of usage receipts. Type names are case-insensitive when reading, setting, or removing a cap.
 - In the jobs report, qualify connector activity as main-thread evidence, require a hook-dependency check before trying a hooks-off run, and describe observed prompt-cache reuse without assigning a cause.
