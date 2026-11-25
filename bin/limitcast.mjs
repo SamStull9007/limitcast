@@ -53,19 +53,10 @@ import {
   touchGrokQuota,
   undoGrokTrim,
 } from '../src/grok.mjs';
-import { runGuard, spawnSource } from '../src/guard.mjs';
+import { runGuard } from '../src/guard.mjs';
 import { accountForecasts, bindingLine, compactHint, headroom, lastCall, lastCallTokens } from '../src/hints.mjs';
 import { htmlPage } from '../src/html.mjs';
-import {
-  duplicateReason,
-  findDuplicate,
-  forgetInflight,
-  loadInflight,
-  pruneInflight,
-  rememberInflight,
-  saveInflight,
-  spawnIdentity,
-} from '../src/inflight.mjs';
+import { admitSpawn, clearSpawn } from '../src/inflight.mjs';
 import { insightsReport, insightsShare, periodInsights } from '../src/insights.mjs';
 import { codexHooksPath, doctor, install, installedFeatures, readSettings, settingsPath, uninstall } from '../src/install.mjs';
 import { memoryCheck, memoryDir, memoryReport, scanMemory } from '../src/memory.mjs';
@@ -106,8 +97,6 @@ import {
   setTodayHold,
   setTypeCap,
   subagentUsage,
-  typeCapFor,
-  typeCapReason,
   validModel,
   windowStart,
 } from '../src/subagents.mjs';
@@ -162,8 +151,8 @@ const HELP = `limitcast ${VERSION}: stretch your Claude Code, Codex and Grok pla
                                              cheap cache expires (idle over 5 min, LIMITCAST_CACHE_NOTICE_MINUTES)
                                              and hold the first one after 60 min (LIMITCAST_CACHE_MINUTES)
   limitcast budget subagents <percent>|off   hold new subagents once they used that much of the 5-hour window
-  limitcast budget type <type> <count>|off   hold a new subagent of that type once this session already
-                                             has that many running or finished (Claude, Codex and Grok)
+  limitcast budget type <type> <count>|off   hold new subagents of that type after the guard admits
+                                             that many starts in the session (Claude, Codex and Grok)
   limitcast subagent-model <type> <model>|off  run new subagents of that type on sonnet, opus, haiku, grok-… or a model id
   limitcast plan [--days N]                  does your Claude plan fit your use? Hit-limit and headroom evidence, and the monthly price difference
   limitcast plan set <pro|max5|max20>|off    tell limitcast which Claude plan you are on
@@ -402,88 +391,22 @@ if (cmd === '_optimize-hook') {
   try {
     const hook = JSON.parse(readStdin());
     settleGrokReceipts();
-    const id = spawnIdentity(hook);
-    const live = pruneInflight(loadInflight(), now);
-    const dup = id ? findDuplicate(live, id) : null;
-    if (id && dup) {
-      saveInflight(live);
-      logBlock({
-        t: now,
-        kind: 'duplicate',
-        src: id.src,
-        win: '5h',
-        pct: 0,
-        wall: now,
-        reset: now,
-        type: id.type,
-        sid: id.sid,
-        ...(typeof hook?.tool_use_id === 'string' ? { operation: hook.tool_use_id } : {}),
-      });
+    const d = await runGuard(hook, now, Number(process.env.LIMITCAST_GUARD_MINUTES ?? 30), { admit: () => admitSpawn(hook) });
+    if (typeof d === 'string') {
+      console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: d } }));
+    } else if (d && 'notice' in d) {
+      console.log(JSON.stringify({ systemMessage: d.notice }));
+    } else if (d) {
       console.log(
         JSON.stringify({
-          hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: duplicateReason(id) },
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'allow',
+            permissionDecisionReason: d.reason,
+            updatedInput: d.updatedInput,
+          },
         }),
       );
-    } else {
-      const tool = String(hook?.tool_name ?? hook?.toolName ?? hook?.tool ?? '');
-      const src = spawnSource(tool);
-      const input = hook?.tool_input ?? hook?.toolInput ?? {};
-      const resumed = Boolean(input?.resume_from || input?.resumeFrom);
-      const type = String(input?.subagent_type ?? input?.subagentType ?? input?.agent_type ?? (src === 'codex' ? 'default' : '')).trim();
-      const sid = String(hook?.session_id ?? hook?.sessionId ?? '').trim();
-      const cap = src && type && !resumed ? typeCapFor(getTypeCaps(), type) : undefined;
-      const already =
-        cap && sid
-          ? live.filter((e) => e.sid === sid && e.type.toLowerCase() === type.toLowerCase()).length +
-            loadSubagents(now - 35 * 86400_000).filter(
-              (e) => (e.src ?? 'claude') === src && e.sid === sid && String(e.type ?? '').toLowerCase() === type.toLowerCase(),
-            ).length
-          : 0;
-      const held = cap ? typeCapReason(type, cap, already) : null;
-      if (held && src) {
-        saveInflight(live);
-        logBlock({
-          t: now,
-          kind: 'type',
-          src,
-          win: '5h',
-          pct: 0,
-          wall: now,
-          reset: now,
-          type,
-          sid,
-          ...(typeof hook?.tool_use_id === 'string' ? { operation: hook.tool_use_id } : {}),
-        });
-        console.log(
-          JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: held } }),
-        );
-      } else {
-        const d = await runGuard(hook, now, Number(process.env.LIMITCAST_GUARD_MINUTES ?? 30), { preview: false });
-        if (typeof d === 'string') {
-          saveInflight(live);
-          console.log(
-            JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: d } }),
-          );
-        } else {
-          if (id) saveInflight(rememberInflight(live, id, now));
-          if (d && 'notice' in d) {
-            // Allowed as is, with what this kind of subagent has cost so far (shown to the user, never the model).
-            console.log(JSON.stringify({ systemMessage: d.notice }));
-          } else if (d) {
-            // Model switch: allow the spawn with the same input and model "sonnet" (updatedInput replaces the whole input).
-            console.log(
-              JSON.stringify({
-                hookSpecificOutput: {
-                  hookEventName: 'PreToolUse',
-                  permissionDecision: 'allow',
-                  permissionDecisionReason: d.reason,
-                  updatedInput: d.updatedInput,
-                },
-              }),
-            );
-          }
-        }
-      }
     }
   } catch (e) {
     // Fail open: a broken governor must not stop the agent.
@@ -607,16 +530,9 @@ if (cmd === '_optimize-hook') {
     const hook = JSON.parse(readStdin());
     // Claude Code and Codex send snake_case; Grok sends `sessionId` and `subagentType`. Every host clears the duplicate hold
     // and gets a receipt: Claude's from its transcript, Codex's from the child rollout, Grok's from the child session ledger.
-    saveInflight(
-      forgetInflight(
-        loadInflight(),
-        String(hook?.session_id ?? hook?.sessionId ?? ''),
-        String(hook?.agent_type ?? hook?.subagentType ?? hook?.agentType ?? ''),
-        now,
-      ),
-    );
     const path = hook?.agent_transcript_path;
     const host = stopHost(hook);
+    clearSpawn(hook, host);
     if (host !== 'claude') {
       const type = String(hook?.agent_type ?? hook?.subagentType ?? hook?.agentType ?? '');
       if (host === 'grok') settleGrokReceipts();
@@ -768,7 +684,7 @@ if (cmd === '_optimize-hook') {
     process.exit(0);
   }
   if (args[0] === 'type') {
-    const type = args[1];
+    const type = args[1]?.trim();
     const value = args[2];
     const count = Number(value);
     if (!type || (value !== undefined && value !== 'off' && !(Number.isInteger(count) && count >= 1 && count <= 100))) {
@@ -776,7 +692,7 @@ if (cmd === '_optimize-hook') {
       process.exit(1);
     }
     if (value !== undefined) setTypeCap(type, value === 'off' ? null : count);
-    const cap = typeCapFor(getTypeCaps(), type);
+    const cap = getTypeCaps().get(type.toLowerCase());
     console.log(
       cap
         ? `${type}: at most ${cap} new subagent${cap === 1 ? '' : 's'} of this type per session. The guard holds the next one on Claude Code, Codex and Grok. Raise it: limitcast budget type ${type} <count>`

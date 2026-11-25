@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -222,4 +222,87 @@ test('CLI: a per-session type cap holds the next spawn of that type and lets a r
   });
   assert.equal(run(['guard'], resume).toString(), '');
   assert.match(readFileSync(join(state, 'guard.jsonl'), 'utf8'), /"kind":"type"/);
+});
+
+test('CLI: parallel admissions share a cap, independent of stop receipts and duplicate expiry on each host', async () => {
+  const state = tmp('lc-type-parallel-');
+  const env = {
+    ...process.env,
+    LIMITCAST_STATE: state,
+    XDG_CONFIG_HOME: state,
+    CLAUDE_CONFIG_DIR: join(state, 'claude'),
+    CODEX_HOME: join(state, 'codex'),
+    GROK_HOME: join(state, 'grok'),
+  };
+  delete env.LIMITCAST_ALLOW;
+  const run = (args, input = {}) => execFileSync(process.execPath, [bin, ...args], { env, input: JSON.stringify(input), encoding: 'utf8' }).trim();
+  const parallel = (payload) =>
+    new Promise((resolve, reject) => {
+      const hook = execFile(process.execPath, [bin, 'guard'], { env }, (error, output) => (error ? reject(error) : resolve(output.trim())));
+      hook.stdin.end(JSON.stringify(payload));
+    });
+  const decision = (output) => (output ? JSON.parse(output).hookSpecificOutput?.permissionDecision : undefined);
+  const sid = 'shared-session';
+  const type = 'Explore';
+  const path = join(state, 'missing.jsonl');
+  const hosts = [
+    {
+      spawn: (id) => ({ tool_name: 'Agent', session_id: sid, tool_use_id: id, tool_input: { subagent_type: type, prompt: id } }),
+      stop: { session_id: sid, agent_type: type, agent_id: 'claude-child', agent_transcript_path: path },
+    },
+    {
+      spawn: (id) => ({ tool_name: 'collaboration.spawn_agent', session_id: sid, tool_use_id: id, tool_input: { agent_type: type, message: id } }),
+      stop: { session_id: sid, turn_id: 'turn', agent_type: type, agent_id: 'codex-child', agent_transcript_path: path },
+    },
+    {
+      spawn: (id) => ({ toolName: 'spawn_subagent', sessionId: sid, toolUseId: id, toolInput: { subagentType: type, prompt: id } }),
+      stop: { sessionId: sid, subagentType: type, subagentId: 'grok-child', transcriptPath: path },
+    },
+  ];
+  run(['budget', 'type', 'explore', '1']);
+  for (const { spawn, stop } of hosts) {
+    const requests = Array.from({ length: 6 }, (_, i) => spawn(`start-${i}`));
+    const decisions = (await Promise.all(requests.map(parallel))).map(decision);
+    assert.equal(decisions.filter((result) => result === 'deny').length, 5);
+    const admitted = requests[decisions.indexOf(undefined)];
+    assert.match(run(['guard'], admitted), /this same prompt is already running/);
+    const inflight = join(state, 'inflight.json');
+    const original = readFileSync(inflight, 'utf8');
+    const entries = JSON.parse(original);
+    assert.equal(entries.length, 1);
+    entries[0].t -= 31 * M;
+    writeFileSync(inflight, JSON.stringify(entries));
+    assert.equal(decision(run(['guard'], spawn('older-than-duplicate-hold'))), 'deny');
+    writeFileSync(inflight, original);
+    run(['subagent-receipt'], stop);
+    assert.deepEqual(JSON.parse(readFileSync(inflight, 'utf8')), []);
+    assert.equal(decision(run(['guard'], admitted)), undefined, 'replaying a stopped operation keeps its slot');
+    const held = run(['guard'], spawn('after-missing-receipt'));
+    assert.equal(decision(held), 'deny');
+    assert.match(held, /already admitted 1 Explore subagent/);
+  }
+});
+
+test('CLI: legacy type caps are normalized without discarding prior starts', () => {
+  const state = tmp('lc-type-legacy-');
+  const env = { ...process.env, LIMITCAST_STATE: state, XDG_CONFIG_HOME: state, CLAUDE_CONFIG_DIR: join(state, 'claude') };
+  delete env.LIMITCAST_ALLOW;
+  const run = (args, input = {}) => execFileSync(process.execPath, [bin, ...args], { env, input: JSON.stringify(input), encoding: 'utf8' }).trim();
+  const config = join(state, 'config.json');
+  const ledger = join(state, 'subagents.jsonl');
+  const spawn = (name, sid = 'legacy-session') => ({ tool_name: 'Agent', session_id: sid, tool_input: { subagent_type: 'Explore', prompt: name } });
+  const receipt = { id: 'no-operation-id', sid: 'legacy-session', type: 'Explore', t: Date.now(), calls: 1, fresh: 10, read: 0 };
+  writeFileSync(config, JSON.stringify({ subagentTypeCaps: { Explore: 1, explore: 2, Plan: 3 }, notify: false }));
+  writeFileSync(ledger, JSON.stringify(receipt));
+  assert.match(run(['budget', 'type', 'explore']), /at most 1/);
+  assert.match(run(['guard'], spawn('one')), /cap of 1/);
+  writeFileSync(ledger, '');
+  assert.match(run(['guard'], spawn('still held')), /cap of 1/);
+  assert.match(run(['budget', 'type', 'explore', '2']), /at most 2/);
+  assert.match(run(['budget', 'type', 'Explore']), /at most 2/);
+  assert.match(run(['budget', 'type', 'EXPLORE', 'off']), /No per-session cap/);
+  assert.deepEqual(JSON.parse(readFileSync(config, 'utf8')), { subagentTypeCaps: { plan: 3 }, notify: false });
+  assert.equal(run(['guard'], spawn('before setting a cap', 'fresh-session')), '');
+  run(['budget', 'type', 'Explore', '1']);
+  assert.match(run(['guard'], spawn('after setting a cap', 'fresh-session')), /cap of 1/);
 });

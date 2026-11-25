@@ -155,14 +155,25 @@ export function setBudget(pct) {
   updateConfig((cfg) => ({ ...cfg, subagentBudget: pct }));
 }
 
-/** @returns {Record<string, number>} how many of each subagent type one session may start */
+/** @returns {Map<string, number>} how many of each subagent type one session may start */
+function normalizedTypeCaps(raw) {
+  const caps = new Map();
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return caps;
+  for (const [type, count] of Object.entries(raw)) {
+    const key = type.trim().toLowerCase();
+    if (key && typeof count === 'number' && count >= 1 && count <= 100) {
+      // Older versions could store conflicting aliases. Keep the stricter cap until it is explicitly changed.
+      caps.set(key, Math.min(caps.get(key) ?? count, count));
+    }
+  }
+  return caps;
+}
+
 export function getTypeCaps() {
   try {
-    const m = JSON.parse(readFileSync(configFile(), 'utf8')).subagentTypeCaps;
-    if (!m || typeof m !== 'object' || Array.isArray(m)) return {};
-    return Object.fromEntries(Object.entries(m).filter(([, n]) => typeof n === 'number' && n >= 1 && n <= 100));
+    return normalizedTypeCaps(JSON.parse(readFileSync(configFile(), 'utf8')).subagentTypeCaps);
   } catch {
-    return {};
+    return new Map();
   }
 }
 
@@ -173,35 +184,25 @@ export function getTypeCaps() {
  */
 export function setTypeCap(type, count) {
   updateConfig((cfg) => {
-    const caps = { ...cfg.subagentTypeCaps };
-    if (count === null) delete caps[type];
-    else caps[type] = count;
-    return { ...cfg, subagentTypeCaps: caps };
+    const caps = normalizedTypeCaps(cfg.subagentTypeCaps);
+    const key = type.trim().toLowerCase();
+    if (count === null) caps.delete(key);
+    else caps.set(key, count);
+    return { ...cfg, subagentTypeCaps: Object.fromEntries(caps) };
   });
 }
 
 /**
- * @param {Record<string, number>} caps
- * @param {string} type
- */
-export function typeCapFor(caps, type) {
-  if (!type) return undefined;
-  if (typeof caps[type] === 'number') return caps[type];
-  const hit = Object.entries(caps).find(([k]) => k.toLowerCase() === type.toLowerCase());
-  return hit?.[1];
-}
-
-/**
- * Deny reason once this session already has `already` subagents of `type` running or finished, or null to allow.
+ * Deny reason once the guard has admitted `already` starts of this type in a session, or null to allow.
  * @param {string} type
  * @param {number|undefined} cap
  * @param {number} already
  */
 export function typeCapReason(type, cap, already) {
-  if (!(cap > 0) || already < cap) return null;
+  if (cap === undefined || already < cap) return null;
   const noun = already === 1 ? 'subagent' : 'subagents';
   return (
-    `limitcast: this session already has ${already} ${type} ${noun} running or finished, over your cap of ${cap}. ` +
+    `limitcast: this session already admitted ${already} ${type} ${noun}, reaching your cap of ${cap}. ` +
     `Finish with the agents already running, raise it with \`limitcast budget type ${type} <count>\`, or set LIMITCAST_ALLOW=1 to spawn anyway.`
   );
 }

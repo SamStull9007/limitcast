@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Enforce per-session subagent caps across parallel starts and independently of usage receipts. Type names are case-insensitive when reading, setting, or removing a cap.
+- In the jobs report, qualify connector activity as main-thread evidence, require a hook-dependency check before trying a hooks-off run, and describe observed prompt-cache reuse without assigning a cause.
+- In Codex doctor, report disabled hooks separately from hooks that need approval.
+
 ## 0.20.9 — 2026-11-23
 
 - `limitcast report --jobs` now lists what the latest run of each heavy job loaded: every named startup group, the part of the starting prompt the transcript does not itemize, and MCP servers that were loaded and not called. The cold-start note says a stable prefix does not recover that cost, because each run is a new process. The launch line remains hooks off, which keeps claude.ai connectors.

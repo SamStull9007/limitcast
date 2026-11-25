@@ -74,13 +74,18 @@ export function trustLine(rows) {
   const mine = rows.filter((h) => /limitcast/i.test(h.command));
   if (!mine.length) return null;
   const waiting = mine.filter((h) => h.trustStatus !== 'trusted');
-  if (!waiting.length) return { ok: true, line: `Codex hooks: all ${mine.length} limitcast hooks are trusted` };
-  const what = waiting
-    .map((h) => h.key.replace(/^.*[\\/]/, '').replace(/^hooks\.json:/, ''))
-    .slice(0, 4)
-    .join(', ');
+  const disabled = mine.filter((h) => !h.enabled);
+  if (!waiting.length && !disabled.length) return { ok: true, line: `Codex hooks: all ${mine.length} limitcast hooks are enabled and trusted` };
+  const names = (/** @type {HookRow[]} */ hooks) =>
+    hooks
+      .map((h) => h.key.replace(/^.*[\\/]/, '').replace(/^hooks\.json:/, ''))
+      .slice(0, 4)
+      .join(', ');
+  const issues = [];
+  if (waiting.length) issues.push(`${waiting.length} of ${mine.length} limitcast hooks need approval (${names(waiting)})`);
+  if (disabled.length) issues.push(`${disabled.length} of ${mine.length} limitcast hooks are disabled (${names(disabled)})`);
   return {
     ok: false,
-    line: `Codex hooks: ${waiting.length} of ${mine.length} limitcast hooks are not trusted (${what}): start Codex, open /hooks and approve them. Codex skips an unreviewed hook`,
+    line: `Codex hooks: ${issues.join('. ')}. Open /hooks in Codex to review.`,
   };
 }

@@ -460,14 +460,17 @@ createInterface({ input: process.stdin }).on('line', (l) => {
   assert.equal(rows?.length, 4);
   const line = trustLine(rows ?? []);
   assert.equal(line?.ok, false);
-  assert.match(
-    line?.line ?? '',
-    /^Codex hooks: 2 of 3 limitcast hooks are not trusted \(subagent_stop:0:0, stop:0:0\): start Codex, open \/hooks and approve them/,
-  );
+  assert.match(line?.line ?? '', /^Codex hooks: 2 of 3 limitcast hooks need approval \(subagent_stop:0:0, stop:0:0\)/);
   assert.deepEqual(trustLine((rows ?? []).filter((h) => h.trustStatus === 'trusted')), {
     ok: true,
-    line: 'Codex hooks: all 1 limitcast hooks are trusted',
+    line: 'Codex hooks: all 1 limitcast hooks are enabled and trusted',
   });
+  const disabled = { ...rows[0], enabled: false };
+  assert.deepEqual(trustLine([disabled]), {
+    ok: false,
+    line: 'Codex hooks: 1 of 1 limitcast hooks are disabled (pre_tool_use:0:0). Open /hooks in Codex to review.',
+  });
+  assert.match(trustLine([disabled, rows[1]]).line, /1 of 2 limitcast hooks need approval .*1 of 2 limitcast hooks are disabled/);
   assert.equal(trustLine([rows?.[3]]), null, "another tool's hook says nothing");
   assert.equal(await codexHooks({ command: [join(dir, 'no-such-codex')], timeoutMs: 2000 }), null, 'no Codex: no answer, no failure');
 });

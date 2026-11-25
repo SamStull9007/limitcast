@@ -109,18 +109,17 @@ test('jobsReport: cold starts, their extra cost over warm runs of the same job, 
   assert.match(md, /\| within 5 min \| 2 \| 0% \|/);
   assert.match(md, /\| 5 to 60 min \| 1 \| 100% \|/);
   assert.match(md, /\| over 60 min \| 1 \| 100% \|/);
-  assert.doesNotMatch(md, /unlikely to help|in batches/); // fewer than 5 runs close behind another: no advice yet
+  assert.doesNotMatch(md, /In this sample/); // too few nearby runs to give a summary
 });
 
-test('jobsReport: advice follows the data, and a job with no warm run claims no extra cost', () => {
-  // 7 runs a minute apart, all cold: closer scheduling cannot help.
+test('jobsReport describes observed cache reuse and needs a warm run to estimate extra cost', () => {
   const allCold = jobs(Array.from({ length: 7 }, (_, i) => start(T0 + i * MIN, 30_000, 40_000)));
   assert.match(allCold, /\| within 5 min \| 6 \| 100% \|/);
-  assert.match(allCold, /closer together is unlikely to help/);
-  assert.match(allCold, /A stable prefix does not recover the start/);
+  assert.match(allCold, /within 5 minutes .* mostly started cold/);
+  assert.match(allCold, /show how much was cached without showing why/);
+  assert.doesNotMatch(allCold, /each run is a new process/);
   assert.doesNotMatch(allCold, /more new tokens\./);
-  // 7 runs a minute apart, all warm after the first: batching works.
   const batched = jobs(Array.from({ length: 7 }, (_, i) => start(T0 + i * MIN, i ? 1_000 : 30_000, 40_000)));
   assert.match(batched, /\| within 5 min \| 6 \| 0% \|/);
-  assert.match(batched, /in batches/);
+  assert.match(batched, /within 5 minutes .* mostly started warm/);
 });

@@ -69,9 +69,9 @@ function blockingForecast(tool, forecasts, now, minutes) {
  * @param {any} hook parsed hook input
  * @param {number} now epoch ms
  * @param {number} minutes
- * @param {{preview?:boolean}} [opts] preview: a free install; log what Pro would block, never block
+ * @param {{preview?:boolean, admit?:() => string|null}} [opts] admit reserves an allowed start before model changes are reported
  */
-export async function runGuard(hook, now, minutes, { preview = false } = {}) {
+export async function runGuard(hook, now, minutes, { preview = false, admit } = {}) {
   const tool = String(hook?.tool_name ?? hook?.toolName ?? hook?.tool ?? '');
   const src = spawnSource(tool);
   const operation = hook?.tool_use_id ?? hook?.toolUseId ?? hook?.call_id;
@@ -157,6 +157,8 @@ export async function runGuard(hook, now, minutes, { preview = false } = {}) {
       if (!preview) return budgetMessage(spent, budget);
     }
   }
+  const hold = preview ? null : admit?.();
+  if (hold) return hold;
   // Not blocked, but a window is tight: run a new Claude subagent on Sonnet instead of the main (usually Opus) model.
   const input = hook?.tool_input ?? hook?.toolInput;
   const tight = forecasts.find((x) => x.src === 'claude' && (x.verdict === 'AT_RISK' || x.verdict === 'NEAR'));

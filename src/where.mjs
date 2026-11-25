@@ -353,8 +353,8 @@ function coldSection(runs, jobs) {
       lines.push(
         '',
         near.cold / near.runs > 0.5
-          ? "Even runs within 5 minutes of the same job's previous run mostly started cold, so running them closer together is unlikely to help: the cached prompt is not being reused between runs. Look for anything near the start of a run's prompt that changes every time, such as hook output with a date or counts. A stable prefix does not recover the start: each run is a new process, and the cost is the size of the prompt that process loads."
-          : "Runs close behind the same job's previous run mostly started warm, so running a job's work in batches lets later runs reuse the first one's cached prompt.",
+          ? "In this sample, even runs within 5 minutes of the same job's previous run mostly started cold. The transcripts show how much was cached without showing why a prefix missed."
+          : "In this sample, runs within 5 minutes of the same job's previous run mostly started warm. Compare the cached share after batching to see whether that pattern holds.",
       );
     }
   }
@@ -364,8 +364,7 @@ function coldSection(runs, jobs) {
 const tok = (/** @type {number} */ chars) => Math.round(chars / 4);
 
 /**
- * The latest run of each heavy job: every named startup group, the part of the prompt the transcript does not
- * itemize, and the MCP servers that were loaded and never called. The launch line turns hooks off and keeps connectors.
+ * The latest run of each heavy job: named startup groups, the unitemized prompt, and main-thread MCP activity.
  * @param {[string, {starts:{t:number, size:number, tools?:string[], startup?:import('./startup.mjs').Piece[]}[]}][]} ranked
  */
 function compositionSection(ranked) {
@@ -401,20 +400,12 @@ function compositionSection(ranked) {
       for (const [group, chars] of [...groups].sort((a, b) => b[1] - a[1])) lines.push(`| ${group} | ${fmt(tok(chars))} |`);
       lines.push('');
     }
-    if (called.size) lines.push(`Called: ${[...called].sort().join(', ')}.`);
-    if (unused.length) lines.push(`Loaded at start and not called in this run: ${unused.join(', ')}.`);
-    lines.push(
-      '',
-      'Launch this job with hooks off. That keeps its claude.ai connectors:',
-      '',
-      '`claude -p --settings \'{"disableAllHooks": true}\'`',
-      '',
-    );
+    if (called.size) lines.push(`Called on the main thread: ${[...called].sort().join(', ')}.`);
+    if (unused.length) lines.push(`Loaded at start without a recorded main-thread call: ${unused.join(', ')}.`);
+    if (called.size || unused.length) lines.push('');
   }
   if (lines.length) {
-    lines.push(
-      'A server in the loaded-but-not-called list is startup weight. `--strict-mcp-config` also drops claude.ai connectors, so a lean config has to keep every server this job called.',
-    );
+    lines.push('The connector list covers the main thread. A child agent or hook may still use a server listed here.');
   }
   return lines;
 }
@@ -508,7 +499,7 @@ export function jobsReport(r, { since, now }) {
     '',
     `Every run loads your settings, plugins, hooks, MCP servers, skills and instruction files before it reads its prompt. "New tokens at start" is what counts against your limit; "starting prompt" is the whole context, cached or not. The smallest starting prompt among these jobs averages ${avg(lean.size, lean)} (${leanJob.replace(/\|/g, '/')}); the heaviest job's averages ${avg(ranked[0][1].size, ranked[0][1])}.`,
     '',
-    'A job that does not need your hooks can leave them out and keep its claude.ai connectors: launch it with `claude -p --settings \'{"disableAllHooks": true}\'`. In a test on one scheduled job that cut each start from about 16k new tokens to about 5k.',
+    'Before testing a job with `claude -p --settings \'{"disableAllHooks": true}\'`, verify it can run without its user and project hooks, including approval and validation hooks. This setting keeps the claude.ai connectors.',
     '',
     'To leave out everything else too, add `--setting-sources "" --strict-mcp-config` (and `--mcp-config` for the servers it uses). That also drops the claude.ai connectors, plugins and permission rules, so a job that reads from one (HubSpot, Slack) cannot use it. Pass `--model` and `--permission-mode`, and check the job still does what it should.',
     '',

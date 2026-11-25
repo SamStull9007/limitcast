@@ -71,15 +71,15 @@ test('jobsReport groups runs by their first 45 characters, ranks by total start,
   assert.match(md, /\| \/p \| 1 \| 0 \| 9\.0k \| 0 \| 0% \| 0% \|/); // no prompt: the project names it; a start served from the cache is warm
   assert.ok(md.indexOf(BASE) < md.indexOf('Slack /'));
   assert.match(md, /smallest starting prompt among these jobs averages 9\.0k \(\/p\); the heaviest job's averages 35\.0k/);
-  // The advice keeps connectors by default (hooks off) and warns that the harder flags drop them.
-  assert.match(md, /`claude -p --settings '\{"disableAllHooks": true\}'`/);
-  assert.match(md, /keep its claude\.ai connectors/);
+  assert.match(md, /verify it can run without its user and project hooks, including approval and validation hooks/);
+  assert.equal(md.match(/disableAllHooks/g)?.length, 1);
+  assert.doesNotMatch(md, /Launch this job with hooks off/);
   assert.match(md, /--setting-sources "" --strict-mcp-config.*drops the claude\.ai connectors/);
   assert.ok(md.indexOf('disableAllHooks') < md.indexOf('--strict-mcp-config')); // the safe flag comes first
   assert.match(jobsReport(attribute([]), { since: T0, now: T0 }), /No headless runs in this period\./);
 });
 
-test('jobsReport names every startup group, the unitemized remainder, and MCP the run never called', () => {
+test('jobsReport names startup groups, the unitemized remainder, and main-thread connector evidence', () => {
   const r = attribute([]);
   r.total = 1_000_000;
   r.startHeadless = 80_000;
@@ -106,8 +106,10 @@ test('jobsReport names every startup group, the unitemized remainder, and MCP th
   assert.match(md, /## What the latest run loaded/);
   assert.match(md, /Starting prompt 98\.0k\. Named pieces 12\.0k\. Not broken out 86\.0k\./);
   assert.match(md, /\| Skill listing \| 7\.0k \|/);
-  assert.match(md, /Called: claude_ai_hubspot\./);
-  assert.match(md, /Loaded at start and not called in this run: attention, demo51-mcp\./);
+  assert.match(md, /Called on the main thread: claude_ai_hubspot\./);
+  assert.match(md, /Loaded at start without a recorded main-thread call: attention, demo51-mcp\./);
+  assert.match(md, /A child agent or hook may still use a server listed here/);
+  assert.doesNotMatch(md, /not called in this run/);
 });
 
 test('hostWhyReport splits Codex and Grok into subagents, new input and output', () => {
