@@ -67,7 +67,10 @@ test('`limitcast trim keep` run from several terminals at once keeps every name'
     const mine = Array.from({ length: 4 }, (_, j) => `k${i}x${j}`);
     names.push(...mine);
     jobs.push(
-      worker(state, `for (const n of ${JSON.stringify(mine)}) execFileSync(process.execPath, [${bin}, 'trim', 'keep', n], { stdio: 'ignore' });`),
+      worker(
+        state,
+        `for (const n of ${JSON.stringify(mine)}) execFileSync(process.execPath, [${bin}, 'trim', 'keep', n], { stdio: ['ignore', 'ignore', 'inherit'] });`,
+      ),
     );
   }
   await Promise.all(jobs);

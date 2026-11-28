@@ -27,6 +27,28 @@ export function stateDir() {
   return process.env.LIMITCAST_STATE ?? join(process.env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'), 'limitcast');
 }
 
+/**
+ * Windows refuses to replace a file another process has open (a concurrent reader, antivirus) with EPERM, EACCES or
+ * EBUSY until it lets go, so retry briefly, as graceful-fs does. Other platforms and other errors throw at once.
+ */
+export function renameRetrying(
+  /** @type {string} */ from,
+  /** @type {string} */ to,
+  rename = renameSync,
+  platform = process.platform,
+  waitMs = 2_000,
+) {
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    try {
+      return rename(from, to);
+    } catch (error) {
+      if (platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || Date.now() > deadline) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5 + Math.floor(Math.random() * 15));
+    }
+  }
+}
+
 /** Write through a temp file and rename, so a hook reading at the same moment never sees a half-written file. */
 export function writeAtomic(/** @type {string} */ path, /** @type {string} */ text) {
   const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
@@ -37,7 +59,7 @@ export function writeAtomic(/** @type {string} */ path, /** @type {string} */ te
     writeFileSync(fd, text);
     closeSync(fd);
     closed = true;
-    renameSync(tmp, path);
+    renameRetrying(tmp, path);
   } finally {
     if (!closed) closeSync(fd);
     rmSync(tmp, { force: true });
