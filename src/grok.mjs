@@ -1,10 +1,10 @@
 // @ts-check
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { codexServers, setEnabled } from './codex.mjs';
 import { windowMs } from './forecast.mjs';
-import { KEEP_MS, stateDir, updateConfig, withStateLock } from './store.mjs';
+import { KEEP_MS, renameRetrying, stateDir, updateConfig, withStateLock } from './store.mjs';
 import { commitTransaction, editFiles, editText, readLedger, recoverTransaction } from './transaction.mjs';
 import { grokRoot } from './usage.mjs';
 
@@ -883,7 +883,7 @@ function writeText(path, text) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(tmp, text, { mode });
   chmodSync(tmp, mode);
-  renameSync(tmp, path);
+  renameRetrying(tmp, path);
 }
 
 /**
