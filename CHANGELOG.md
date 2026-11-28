@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.11 — 2026-11-27
+
+- Fix a Windows failure where two limitcast commands running at once could exit with `EPERM` when replacing a settings or state file another process had open. The rename now retries for up to two seconds on Windows and fails at once on other errors.
+
 ## 0.20.10 — 2026-11-25
 
 - Enforce per-session subagent caps across parallel starts and independently of usage receipts. Type names are case-insensitive when reading, setting, or removing a cap.
